@@ -289,21 +289,25 @@ log "INFO" "Bundling Python dependencies..."
 LIB_DIR="${PAYLOAD_STAGE}/lib"
 mkdir -p "${LIB_DIR}"
 
-# Check if we can get libraries from the pineapple_pager_bjorn project
+# Check for bundled libraries - first in Ragnar/pager_lib, then in pineapple_pager_bjorn
+RAGNAR_LIB_DIR="${RAGNAR_DIR}/pager_lib"
 BJORN_LIB_DIR="${RAGNAR_DIR}/../pineapple_pager_bjorn/payloads/user/reconnaissance/pager_bjorn/lib"
-if [ -d "$BJORN_LIB_DIR" ]; then
+
+if [ -d "$RAGNAR_LIB_DIR" ]; then
+    log "INFO" "Found bundled libraries in Ragnar/pager_lib, copying..."
+    cp -r "${RAGNAR_LIB_DIR}/"* "${LIB_DIR}/" 2>/dev/null || true
+    log "SUCCESS" "Copied bundled Python libraries"
+elif [ -d "$BJORN_LIB_DIR" ]; then
     log "INFO" "Found bundled libraries from pineapple_pager_bjorn, copying..."
     cp -r "${BJORN_LIB_DIR}/"* "${LIB_DIR}/" 2>/dev/null || true
     log "SUCCESS" "Copied bundled Python libraries"
 else
-    log "WARNING" "pineapple_pager_bjorn lib/ not found at: ${BJORN_LIB_DIR}"
+    log "WARNING" "MIPS Python libraries not found"
     echo ""
     echo "  The Pager requires bundled Python libraries (paramiko, nmap, pymysql, etc.)"
-    echo "  These should be MIPS-compiled versions from the pineapple_pager_bjorn project."
+    echo "  These should be MIPS-compiled versions."
     echo ""
-    echo "  Options:"
-    echo "    1. Clone pineapple_pager_bjorn next to Ragnar and re-run this script"
-    echo "    2. Manually copy MIPS Python libraries to: ${LIB_DIR}"
+    echo "  Ragnar may have limited functionality without them."
     echo ""
     read -p "  Continue without bundled libraries? (y/n): " choice
     if [[ ! "$choice" =~ ^[Yy]$ ]]; then
@@ -316,9 +320,16 @@ fi
 # Step 5: Copy binary dependencies (sfreerdp, etc.)
 # ============================================================
 
+RAGNAR_BIN_DIR="${RAGNAR_DIR}/pager_bin"
 BJORN_BIN_DIR="${RAGNAR_DIR}/../pineapple_pager_bjorn/payloads/user/reconnaissance/pager_bjorn/bin"
-if [ -d "$BJORN_BIN_DIR" ]; then
-    log "INFO" "Copying binary dependencies..."
+
+if [ -d "$RAGNAR_BIN_DIR" ]; then
+    log "INFO" "Copying binary dependencies from Ragnar/pager_bin..."
+    mkdir -p "${PAYLOAD_STAGE}/bin"
+    cp -r "${RAGNAR_BIN_DIR}/"* "${PAYLOAD_STAGE}/bin/" 2>/dev/null || true
+    log "SUCCESS" "Copied binary dependencies"
+elif [ -d "$BJORN_BIN_DIR" ]; then
+    log "INFO" "Copying binary dependencies from pineapple_pager_bjorn..."
     mkdir -p "${PAYLOAD_STAGE}/bin"
     cp -r "${BJORN_BIN_DIR}/"* "${PAYLOAD_STAGE}/bin/" 2>/dev/null || true
     log "SUCCESS" "Copied binary dependencies"
