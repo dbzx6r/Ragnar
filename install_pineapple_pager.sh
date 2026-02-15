@@ -56,7 +56,10 @@ echo -e "${NC}"
 
 log "INFO" "Checking connectivity to Pager at ${PAGER_IP}..."
 
-if ! ssh -o ConnectTimeout=5 -o BatchMode=yes "${PAGER_USER}@${PAGER_IP}" "echo ok" >/dev/null 2>&1; then
+# SSH options for Pager connection (bypass host key issues common with Pager)
+SSH_OPTS="-o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+
+if ! ssh $SSH_OPTS "${PAGER_USER}@${PAGER_IP}" "echo ok" >/dev/null 2>&1; then
     log "ERROR" "Cannot connect to Pager at ${PAGER_USER}@${PAGER_IP}"
     echo ""
     echo "  Make sure:"
@@ -69,6 +72,9 @@ if ! ssh -o ConnectTimeout=5 -o BatchMode=yes "${PAGER_USER}@${PAGER_IP}" "echo 
     echo ""
     echo "  Or specify a different IP:"
     echo "    $0 <pager-ip>"
+    echo ""
+    echo "  Debug: Try manually connecting:"
+    echo "    ssh -v ${PAGER_USER}@${PAGER_IP}"
     exit 1
 fi
 
@@ -80,7 +86,7 @@ log "SUCCESS" "Connected to Pager at ${PAGER_IP}"
 
 log "INFO" "Checking for PAGERCTL library on Pager..."
 
-PAGERCTL_FOUND=$(ssh "${PAGER_USER}@${PAGER_IP}" "
+PAGERCTL_FOUND=$(ssh $SSH_OPTS "${PAGER_USER}@${PAGER_IP}" "
     if [ -f /root/payloads/user/utilities/PAGERCTL/libpagerctl.so ]; then
         echo 'utilities'
     elif find /root/payloads -name 'libpagerctl.so' 2>/dev/null | head -1 | grep -q '.'; then
@@ -266,15 +272,15 @@ fi
 log "INFO" "Deploying Ragnar payload to Pager..."
 
 # Create payload directory on Pager
-ssh "${PAGER_USER}@${PAGER_IP}" "mkdir -p ${PAGER_PAYLOAD_DIR}"
+ssh $SSH_OPTS "${PAGER_USER}@${PAGER_IP}" "mkdir -p ${PAGER_PAYLOAD_DIR}"
 
 # Copy payload
-scp -r "${PAYLOAD_STAGE}/"* "${PAGER_USER}@${PAGER_IP}:${PAGER_PAYLOAD_DIR}/"
+scp $SSH_OPTS -r "${PAYLOAD_STAGE}/"* "${PAGER_USER}@${PAGER_IP}:${PAGER_PAYLOAD_DIR}/"
 
 log "SUCCESS" "Payload deployed to ${PAGER_PAYLOAD_DIR}"
 
 # Set permissions
-ssh "${PAGER_USER}@${PAGER_IP}" "chmod +x ${PAGER_PAYLOAD_DIR}/payload.sh && chmod -R 755 ${PAGER_PAYLOAD_DIR}"
+ssh $SSH_OPTS "${PAGER_USER}@${PAGER_IP}" "chmod +x ${PAGER_PAYLOAD_DIR}/payload.sh && chmod -R 755 ${PAGER_PAYLOAD_DIR}"
 
 log "SUCCESS" "Permissions set"
 
