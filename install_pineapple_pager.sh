@@ -443,9 +443,9 @@ ssh $SSH_OPTS "${PAGER_USER}@${PAGER_IP}" "
         echo 'Copied libpagerctl.so to /root/lib/'
     fi
     
-    # Also copy pagerctl.py to payload root if in lib subdir
-    if [ -f ${PAGER_PAYLOAD_DIR}/lib/pagerctl.py ] && [ ! -f ${PAGER_PAYLOAD_DIR}/pagerctl.py ]; then
-        cp ${PAGER_PAYLOAD_DIR}/lib/pagerctl.py ${PAGER_PAYLOAD_DIR}/
+    # Ensure pagerctl.py is in payload root (already copied in Step 3)
+    if [ ! -f ${PAGER_PAYLOAD_DIR}/pagerctl.py ]; then
+        echo 'WARNING: pagerctl.py missing from payload root'
     fi
 "
 

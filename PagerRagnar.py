@@ -44,7 +44,7 @@ def setup_pager_shared_data(shared_data):
 
     # Static image paths dict (icon_name -> file_path)
     shared_data.static_images = {}
-    static_names = ['ragnar1', 'bjorn1', 'port', 'frise', 'target', 'vuln', 'connected',
+    static_names = ['ragnar1', 'port', 'frise', 'target', 'vuln', 'connected',
                     'bluetooth', 'wifi', 'ethernet', 'usb', 'level', 'cred',
                     'attack', 'attacks', 'gold', 'networkkb', 'zombie', 'data', 'money']
     for name in static_names:
