@@ -179,25 +179,61 @@ STAGING_DIR=$(mktemp -d)
 PAYLOAD_STAGE="${STAGING_DIR}/pager_ragnar"
 mkdir -p "${PAYLOAD_STAGE}"
 
-# Core Ragnar files
+# Core Ragnar files - ALL Python modules needed
 CORE_FILES=(
+    # Pager-specific entry points
     "PagerRagnar.py"
     "pager_display.py"
     "pager_menu.py"
     "pager_payload.sh"
     "pagerctl.py"
+    
+    # Core shared modules
     "init_shared.py"
     "shared.py"
     "orchestrator.py"
     "comment.py"
     "logger.py"
+    "__init__.py"
+    
+    # Database and storage
     "db_manager.py"
     "network_storage.py"
+    
+    # Network handling
     "multi_interface.py"
+    "wifi_manager.py"
+    "wifi_interfaces.py"
+    
+    # Display helpers
     "epd_helper.py"
+    "display.py"
+    
+    # Loggers
     "nmap_logger.py"
     "attack_logger.py"
-    "__init__.py"
+    
+    # Intelligence and scanning
+    "network_intelligence.py"
+    "threat_intelligence.py"
+    "traffic_analyzer.py"
+    "advanced_vuln_scanner.py"
+    "lynis_parser.py"
+    
+    # Utilities
+    "utils.py"
+    "env_manager.py"
+    
+    # AI service (optional but good to have)
+    "ai_service.py"
+    
+    # Web interface
+    "webapp_modern.py"
+    "server_capabilities.py"
+    "routes.json"
+    
+    # Resource monitor
+    "resource_monitor.py"
 )
 
 for f in "${CORE_FILES[@]}"; do
@@ -389,6 +425,122 @@ log "SUCCESS" "Payload deployed to ${PAGER_PAYLOAD_DIR}"
 ssh $SSH_OPTS "${PAGER_USER}@${PAGER_IP}" "chmod +x ${PAGER_PAYLOAD_DIR}/payload.sh && chmod -R 755 ${PAGER_PAYLOAD_DIR}"
 
 log "SUCCESS" "Permissions set"
+
+# ============================================================
+# Step 7: Setup system-wide libpagerctl.so
+# ============================================================
+
+log "INFO" "Setting up system-wide libpagerctl.so..."
+
+ssh $SSH_OPTS "${PAGER_USER}@${PAGER_IP}" "
+    # Create /root/lib if it doesn't exist
+    mkdir -p /root/lib
+    
+    # Copy libpagerctl.so to system lib dir
+    if [ -f ${PAGER_PAYLOAD_DIR}/libpagerctl.so ]; then
+        cp ${PAGER_PAYLOAD_DIR}/libpagerctl.so /root/lib/
+        chmod 755 /root/lib/libpagerctl.so
+        echo 'Copied libpagerctl.so to /root/lib/'
+    fi
+    
+    # Also copy pagerctl.py to payload root if in lib subdir
+    if [ -f ${PAGER_PAYLOAD_DIR}/lib/pagerctl.py ] && [ ! -f ${PAGER_PAYLOAD_DIR}/pagerctl.py ]; then
+        cp ${PAGER_PAYLOAD_DIR}/lib/pagerctl.py ${PAGER_PAYLOAD_DIR}/
+    fi
+"
+
+log "SUCCESS" "libpagerctl.so installed to /root/lib/"
+
+# ============================================================
+# Step 8: Verify installation
+# ============================================================
+
+log "INFO" "Verifying installation..."
+
+VERIFY_RESULT=$(ssh $SSH_OPTS "${PAGER_USER}@${PAGER_IP}" "
+    errors=0
+    
+    # Check core files
+    for f in pager_menu.py pagerctl.py libpagerctl.so payload.sh; do
+        if [ ! -f ${PAGER_PAYLOAD_DIR}/\$f ]; then
+            echo \"MISSING: \$f\"
+            errors=\$((errors + 1))
+        fi
+    done
+    
+    # Check lib directory
+    if [ ! -d ${PAGER_PAYLOAD_DIR}/lib ]; then
+        echo 'MISSING: lib directory'
+        errors=\$((errors + 1))
+    fi
+    
+    # Check actions directory
+    if [ ! -d ${PAGER_PAYLOAD_DIR}/actions ]; then
+        echo 'MISSING: actions directory'
+        errors=\$((errors + 1))
+    fi
+    
+    # Check resources/fonts
+    if [ ! -d ${PAGER_PAYLOAD_DIR}/resources/fonts ]; then
+        echo 'MISSING: resources/fonts directory'
+        errors=\$((errors + 1))
+    fi
+    
+    # Check system libpagerctl
+    if [ ! -f /root/lib/libpagerctl.so ]; then
+        echo 'MISSING: /root/lib/libpagerctl.so'
+        errors=\$((errors + 1))
+    fi
+    
+    # Test Python import
+    cd ${PAGER_PAYLOAD_DIR}
+    export PYTHONPATH=\"${PAGER_PAYLOAD_DIR}/lib:${PAGER_PAYLOAD_DIR}:\$PYTHONPATH\"
+    export LD_LIBRARY_PATH=\"/root/lib:${PAGER_PAYLOAD_DIR}/lib:${PAGER_PAYLOAD_DIR}:\$LD_LIBRARY_PATH\"
+    
+    python3 -c 'from pagerctl import Pager; print(\"PAGERCTL_OK\")' 2>/dev/null || echo 'PAGERCTL_IMPORT_FAILED'
+    
+    if [ \$errors -eq 0 ]; then
+        echo 'ALL_OK'
+    else
+        echo \"ERRORS: \$errors\"
+    fi
+")
+
+if echo "$VERIFY_RESULT" | grep -q "ALL_OK"; then
+    log "SUCCESS" "Installation verified successfully"
+else
+    log "WARNING" "Verification issues detected:"
+    echo "$VERIFY_RESULT" | grep -v "ALL_OK" | while read line; do
+        [ -n "$line" ] && echo "  - $line"
+    done
+fi
+
+if echo "$VERIFY_RESULT" | grep -q "PAGERCTL_OK"; then
+    log "SUCCESS" "pagerctl library imports correctly"
+else
+    log "WARNING" "pagerctl import test failed - display may not work"
+fi
+
+# ============================================================
+# Step 9: Create convenience symlink at /root/Ragnar
+# ============================================================
+
+log "INFO" "Creating /root/Ragnar symlink for compatibility..."
+
+ssh $SSH_OPTS "${PAGER_USER}@${PAGER_IP}" "
+    # Remove old symlink if exists
+    [ -L /root/Ragnar ] && rm -f /root/Ragnar
+    
+    # Create symlink if /root/Ragnar doesn't exist as directory
+    if [ ! -d /root/Ragnar ]; then
+        ln -sf ${PAGER_PAYLOAD_DIR} /root/Ragnar
+        echo 'Symlink created: /root/Ragnar -> ${PAGER_PAYLOAD_DIR}'
+    else
+        echo '/root/Ragnar already exists as directory'
+    fi
+"
+
+log "SUCCESS" "Ragnar accessible at /root/Ragnar"
 
 # ============================================================
 # Cleanup and finish

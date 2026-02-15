@@ -22,11 +22,12 @@ PAGERCTL_FOUND=false
 PAGERCTL_SEARCH_PATHS=(
     "$PAYLOAD_DIR/lib"
     "$PAYLOAD_DIR"
+    "/root/lib"
     "/mmc/root/payloads/user/utilities/PAGERCTL"
 )
 
 for dir in "${PAGERCTL_SEARCH_PATHS[@]}"; do
-    if [ -f "$dir/libpagerctl.so" ] && [ -f "$dir/pagerctl.py" ]; then
+    if [ -f "$dir/libpagerctl.so" ]; then
         PAGERCTL_DIR="$dir"
         PAGERCTL_FOUND=true
         break
@@ -37,7 +38,7 @@ if [ "$PAGERCTL_FOUND" = false ]; then
     LOG ""
     LOG "red" "=== MISSING DEPENDENCY ==="
     LOG ""
-    LOG "red" "libpagerctl.so and pagerctl.py not found!"
+    LOG "red" "libpagerctl.so not found!"
     LOG ""
     LOG "Searched:"
     for dir in "${PAGERCTL_SEARCH_PATHS[@]}"; do
@@ -53,10 +54,10 @@ if [ "$PAGERCTL_FOUND" = false ]; then
 fi
 
 # If pagerctl files aren't in our lib dir, copy them there
-if [ "$PAGERCTL_DIR" != "$PAYLOAD_DIR/lib" ]; then
+if [ "$PAGERCTL_DIR" != "$PAYLOAD_DIR/lib" ] && [ "$PAGERCTL_DIR" != "$PAYLOAD_DIR" ]; then
     mkdir -p "$PAYLOAD_DIR/lib" 2>/dev/null
     cp "$PAGERCTL_DIR/libpagerctl.so" "$PAYLOAD_DIR/lib/" 2>/dev/null
-    cp "$PAGERCTL_DIR/pagerctl.py" "$PAYLOAD_DIR/lib/" 2>/dev/null
+    [ -f "$PAGERCTL_DIR/pagerctl.py" ] && cp "$PAGERCTL_DIR/pagerctl.py" "$PAYLOAD_DIR/lib/" 2>/dev/null
     LOG "green" "Copied pagerctl from $PAGERCTL_DIR"
 fi
 
@@ -65,8 +66,9 @@ fi
 #
 export PATH="/mmc/usr/bin:$PAYLOAD_DIR/bin:$PATH"
 export PYTHONPATH="$PAYLOAD_DIR/lib:$PAYLOAD_DIR:$PYTHONPATH"
-export LD_LIBRARY_PATH="/mmc/usr/lib:$PAYLOAD_DIR/lib:$LD_LIBRARY_PATH"
+export LD_LIBRARY_PATH="/root/lib:/mmc/usr/lib:$PAYLOAD_DIR/lib:$PAYLOAD_DIR:$LD_LIBRARY_PATH"
 export CRYPTOGRAPHY_OPENSSL_NO_LEGACY=1
+export RAGNAR_PAGER_MODE=1
 
 #
 # Check for Python3 and python3-ctypes
