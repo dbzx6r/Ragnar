@@ -531,6 +531,14 @@ def run_tests():
     print("[TEST 5] Testing pager_display.PagerDisplay instantiation...")
     try:
         from init_shared import shared_data
+        # PagerRagnar.setup_pager_shared_data patches shared_data with Pager-specific
+        # attributes (font_arial_path, font_viking_path, static_images, etc.)
+        # This MUST be called before PagerDisplay is created.
+        import importlib
+        PagerRagnar = importlib.import_module('PagerRagnar')
+        PagerRagnar.setup_pager_shared_data(shared_data)
+        print("  [OK] setup_pager_shared_data() completed")
+        
         display = pager_display.PagerDisplay(shared_data)
         print(f"[OK] PagerDisplay created - size: {display.width}x{display.height}")
         display.cleanup()
