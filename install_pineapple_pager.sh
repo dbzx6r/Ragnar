@@ -123,33 +123,50 @@ else
 fi
 
 # ============================================================
-# Step 2: Check for PAGERCTL on the device
+# Step 2: Check for libpagerctl.so availability
 # ============================================================
 
-log "INFO" "Checking for PAGERCTL library on Pager..."
+log "INFO" "Checking for libpagerctl.so..."
 
-PAGERCTL_FOUND=$(ssh $SSH_OPTS "${PAGER_USER}@${PAGER_IP}" "
-    if [ -f /root/payloads/user/utilities/PAGERCTL/libpagerctl.so ]; then
-        echo 'utilities'
-    elif find /root/payloads -name 'libpagerctl.so' 2>/dev/null | head -1 | grep -q '.'; then
-        echo 'found'
-    else
-        echo 'missing'
-    fi
-")
+# First check if we have it bundled in Ragnar itself
+RAGNAR_PAGERCTL="${RAGNAR_DIR}/libpagerctl.so"
+BJORN_PAGERCTL_CHECK="${RAGNAR_DIR}/../pineapple_pager_bjorn/payloads/user/reconnaissance/pager_bjorn/libpagerctl.so"
 
-if [ "$PAGERCTL_FOUND" = "missing" ]; then
-    log "WARNING" "PAGERCTL (libpagerctl.so) not found on the Pager!"
-    echo ""
-    echo "  The PAGERCTL payload provides the display/input library."
-    echo "  Install it from the Pager's payload manager first, then re-run this script."
-    echo ""
-    read -p "  Continue anyway? (y/n): " choice
-    if [[ ! "$choice" =~ ^[Yy]$ ]]; then
-        exit 1
-    fi
+if [ -f "$RAGNAR_PAGERCTL" ]; then
+    log "SUCCESS" "Found libpagerctl.so in Ragnar (will be bundled)"
+    PAGERCTL_SOURCE="ragnar"
+elif [ -f "$BJORN_PAGERCTL_CHECK" ]; then
+    log "SUCCESS" "Found libpagerctl.so in pineapple_pager_bjorn (will be bundled)"
+    PAGERCTL_SOURCE="bjorn"
 else
-    log "SUCCESS" "PAGERCTL library found on Pager"
+    # Check if it exists on the Pager already
+    PAGERCTL_FOUND=$(ssh $SSH_OPTS "${PAGER_USER}@${PAGER_IP}" "
+        if [ -f /root/payloads/user/utilities/PAGERCTL/libpagerctl.so ]; then
+            echo 'utilities'
+        elif find /root/payloads -name 'libpagerctl.so' 2>/dev/null | head -1 | grep -q '.'; then
+            echo 'found'
+        else
+            echo 'missing'
+        fi
+    ")
+
+    if [ "$PAGERCTL_FOUND" = "missing" ]; then
+        log "WARNING" "libpagerctl.so not found!"
+        echo ""
+        echo "  The libpagerctl.so library is needed for Pager display/input."
+        echo ""
+        echo "  Options:"
+        echo "    1. Continue without display support (headless mode, web UI only)"
+        echo ""
+        read -p "  Continue without display support? (y/n): " choice
+        if [[ ! "$choice" =~ ^[Yy]$ ]]; then
+            exit 1
+        fi
+        PAGERCTL_SOURCE="none"
+    else
+        log "SUCCESS" "Found libpagerctl.so on Pager (will copy to payload)"
+        PAGERCTL_SOURCE="pager"
+    fi
 fi
 
 # ============================================================
@@ -305,6 +322,33 @@ if [ -d "$BJORN_BIN_DIR" ]; then
     mkdir -p "${PAYLOAD_STAGE}/bin"
     cp -r "${BJORN_BIN_DIR}/"* "${PAYLOAD_STAGE}/bin/" 2>/dev/null || true
     log "SUCCESS" "Copied binary dependencies"
+fi
+
+# ============================================================
+# Step 5b: Copy libpagerctl.so for Pager display support
+# ============================================================
+
+RAGNAR_PAGERCTL="${RAGNAR_DIR}/libpagerctl.so"
+BJORN_PAGERCTL="${RAGNAR_DIR}/../pineapple_pager_bjorn/payloads/user/reconnaissance/pager_bjorn/libpagerctl.so"
+
+if [ -f "$RAGNAR_PAGERCTL" ]; then
+    log "INFO" "Copying libpagerctl.so from Ragnar..."
+    cp "${RAGNAR_PAGERCTL}" "${PAYLOAD_STAGE}/"
+    log "SUCCESS" "Copied libpagerctl.so (Pager display library)"
+elif [ -f "$BJORN_PAGERCTL" ]; then
+    log "INFO" "Copying libpagerctl.so from pineapple_pager_bjorn..."
+    cp "${BJORN_PAGERCTL}" "${PAYLOAD_STAGE}/"
+    log "SUCCESS" "Copied libpagerctl.so (Pager display library)"
+elif [ "$PAGERCTL_SOURCE" = "pager" ]; then
+    # Copy from an existing payload on the Pager
+    log "INFO" "Copying libpagerctl.so from existing Pager payload..."
+    PAGER_LIB_PATH=$(ssh $SSH_OPTS "${PAGER_USER}@${PAGER_IP}" "find /root/payloads -name 'libpagerctl.so' 2>/dev/null | head -1")
+    if [ -n "$PAGER_LIB_PATH" ]; then
+        scp $SSH_OPTS "${PAGER_USER}@${PAGER_IP}:${PAGER_LIB_PATH}" "${PAYLOAD_STAGE}/"
+        log "SUCCESS" "Copied libpagerctl.so from Pager"
+    fi
+else
+    log "WARNING" "No libpagerctl.so available - Ragnar will run in headless mode"
 fi
 
 # ============================================================
