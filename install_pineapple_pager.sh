@@ -56,29 +56,71 @@ echo -e "${NC}"
 
 log "INFO" "Checking connectivity to Pager at ${PAGER_IP}..."
 
-# SSH options for Pager connection (bypass host key issues common with Pager)
-SSH_OPTS="-o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-
-if ! ssh $SSH_OPTS "${PAGER_USER}@${PAGER_IP}" "echo ok" >/dev/null 2>&1; then
-    log "ERROR" "Cannot connect to Pager at ${PAGER_USER}@${PAGER_IP}"
-    echo ""
-    echo "  Make sure:"
-    echo "    1. Pager is powered on and connected via USB"
-    echo "    2. SSH is accessible at ${PAGER_IP}"
-    echo "    3. SSH key authentication is configured"
-    echo ""
-    echo "  To set up SSH key auth:"
-    echo "    ssh-copy-id ${PAGER_USER}@${PAGER_IP}"
-    echo ""
-    echo "  Or specify a different IP:"
-    echo "    $0 <pager-ip>"
-    echo ""
-    echo "  Debug: Try manually connecting:"
-    echo "    ssh -v ${PAGER_USER}@${PAGER_IP}"
-    exit 1
+# Determine the real user's home directory (for SSH keys when running with sudo)
+if [ -n "$SUDO_USER" ]; then
+    REAL_USER_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+    log "INFO" "Running as sudo, using SSH keys from $REAL_USER_HOME"
+else
+    REAL_USER_HOME="$HOME"
 fi
 
-log "SUCCESS" "Connected to Pager at ${PAGER_IP}"
+# Find the user's SSH identity file
+SSH_IDENTITY=""
+for key in "$REAL_USER_HOME/.ssh/id_ed25519" "$REAL_USER_HOME/.ssh/id_rsa" "$REAL_USER_HOME/.ssh/id_ecdsa"; do
+    if [ -f "$key" ]; then
+        SSH_IDENTITY="-i $key"
+        log "INFO" "Using SSH key: $key"
+        break
+    fi
+done
+
+# SSH options for Pager connection (bypass host key issues common with Pager)
+SSH_OPTS_BASE="-o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $SSH_IDENTITY"
+SSH_OPTS_BATCH="${SSH_OPTS_BASE} -o BatchMode=yes"
+SSH_OPTS="${SSH_OPTS_BATCH}"
+USE_INTERACTIVE=false
+
+# First try with key auth (BatchMode)
+if ssh $SSH_OPTS_BATCH "${PAGER_USER}@${PAGER_IP}" "echo ok" >/dev/null 2>&1; then
+    log "SUCCESS" "Connected to Pager at ${PAGER_IP} (key auth)"
+else
+    log "WARNING" "Key-based SSH auth failed. Trying interactive mode..."
+    echo ""
+    # Test if we can reach the host at all
+    if ssh $SSH_OPTS_BASE -o PasswordAuthentication=yes -o NumberOfPasswordPrompts=0 "${PAGER_USER}@${PAGER_IP}" "echo ok" >/dev/null 2>&1; then
+        log "SUCCESS" "Connected to Pager at ${PAGER_IP}"
+    else
+        echo -e "${YELLOW}SSH key auth is not working. You can continue with password auth.${NC}"
+        echo -e "${YELLOW}You'll be prompted for the root password multiple times during install.${NC}"
+        echo ""
+        read -p "Continue with password authentication? (y/n): " use_password
+        if [[ "$use_password" =~ ^[Yy]$ ]]; then
+            USE_INTERACTIVE=true
+            SSH_OPTS="${SSH_OPTS_BASE}"
+            # Verify we can actually connect with password
+            echo "Testing connection (enter root password):"
+            if ! ssh $SSH_OPTS "${PAGER_USER}@${PAGER_IP}" "echo ok"; then
+                log "ERROR" "Cannot connect to Pager at ${PAGER_USER}@${PAGER_IP}"
+                echo ""
+                echo "  Make sure:"
+                echo "    1. Pager is powered on and connected via USB"
+                echo "    2. SSH is accessible at ${PAGER_IP}"
+                echo "    3. You entered the correct password"
+                exit 1
+            fi
+            log "SUCCESS" "Connected to Pager at ${PAGER_IP} (password auth)"
+        else
+            log "ERROR" "Cannot connect to Pager at ${PAGER_USER}@${PAGER_IP}"
+            echo ""
+            echo "  To set up SSH key auth:"
+            echo "    ssh-copy-id ${PAGER_USER}@${PAGER_IP}"
+            echo ""
+            echo "  Debug: Try manually connecting:"
+            echo "    ssh -v ${PAGER_USER}@${PAGER_IP}"
+            exit 1
+        fi
+    fi
+fi
 
 # ============================================================
 # Step 2: Check for PAGERCTL on the device
