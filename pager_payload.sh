@@ -1,5 +1,5 @@
 #!/bin/bash
-# Title: PagerRagnar
+# Title: Ragnar
 # Description: Autonomous network reconnaissance and security scanning tool for WiFi Pineapple Pager - Network scanning, vulnerability assessment, brute force, and data exfiltration with Viking personality
 # Author: PierreGode / Ragnar Project
 # Version: 1.0
@@ -88,9 +88,9 @@ if [ "$NEED_PYTHON" = true ] || [ "$NEED_CTYPES" = true ]; then
     LOG "red" "=== MISSING REQUIREMENT ==="
     LOG ""
     if [ "$NEED_PYTHON" = true ]; then
-        LOG "Python3 is required to run PagerRagnar."
+        LOG "Python3 is required to run Ragnar."
     else
-        LOG "Python3-ctypes is required to run PagerRagnar."
+        LOG "Python3-ctypes is required to run Ragnar."
     fi
     LOG "All other dependencies are bundled."
     LOG ""
@@ -188,7 +188,7 @@ if [ "$HAS_NETWORK" = false ]; then
     LOG ""
     LOG "red" "=== NO NETWORK CONNECTED ==="
     LOG ""
-    LOG "PagerRagnar requires a network connection to scan."
+    LOG "Ragnar requires a network connection to scan."
     LOG "Please connect to a network first:"
     LOG "  - WiFi client mode (wlan0cli)"
     LOG "  - Ethernet/USB (br-lan)"
@@ -200,7 +200,7 @@ fi
 
 # Show splash screen
 LOG ""
-LOG "green" "Ragnar for WiFi Pineapple Pager"
+LOG "green" "Ragnar"
 LOG "cyan" "https://github.com/PierreGode/Ragnar"
 LOG ""
 LOG "yellow" "Features:"
@@ -232,7 +232,7 @@ done
 mkdir -p "$DATA_DIR" 2>/dev/null
 
 # Stop pager service and show spinner
-SPINNER_ID=$(START_SPINNER "Starting PagerRagnar...")
+SPINNER_ID=$(START_SPINNER "Starting Ragnar...")
 /etc/init.d/pineapplepager stop 2>/dev/null
 sleep 0.5
 STOP_SPINNER "$SPINNER_ID" 2>/dev/null

@@ -143,7 +143,7 @@ class RagnarMenu:
         self.gfx.clear(Pager.BLACK)
 
         # Title using Viking font
-        self.gfx.draw_ttf_centered(0, "Pager Ragnar", TITLE_COLOR, FONT_VIKING, 48.0)
+        self.gfx.draw_ttf_centered(0, "Ragnar", TITLE_COLOR, FONT_VIKING, 48.0)
 
         y = 68
         items = self._get_menu_items(iface_idx, web_ui)
