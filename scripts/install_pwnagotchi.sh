@@ -7,7 +7,7 @@ STATUS_FILE="$REPO_ROOT/data/pwnagotchi_status.json"
 LOG_DIR="/var/log/ragnar"
 LOG_FILE="$LOG_DIR/pwnagotchi_install_$(date +%Y%m%d_%H%M%S).log"
 PWN_DIR="/opt/pwnagotchi"
-PWN_REPO="https://github.com/PierreGode/pwnagotchi.git"
+PWN_REPO="https://github.com/PierreGode/pwnagotchiworking.git"
 SERVICE_FILE="/etc/systemd/system/pwnagotchi.service"
 CONFIG_DIR="/etc/pwnagotchi"
 CONFIG_FILE="$CONFIG_DIR/config.toml"
@@ -85,15 +85,27 @@ select_station_interface() {
 }
 
 set_or_update_config_value() {
-    local key="$1"
+    local dotted_key="$1"
     local value="$2"
-    local escaped_key
-    escaped_key=$(printf '%s\n' "$key" | sed 's/[][.[\*^$&/|]/\\&/g')
-    if [[ -f "$CONFIG_FILE" ]] && grep -Eq "^${escaped_key}[[:space:]]*=" "$CONFIG_FILE"; then
-        sed -i "s|^${escaped_key}[[:space:]]*=.*|$key = \"$value\"|" "$CONFIG_FILE"
-    else
-        echo "$key = \"$value\"" >> "$CONFIG_FILE"
-    fi
+    # Use Python + tomlkit to safely update TOML table-style configs
+    python3 -c "
+import tomlkit, sys
+key_path = '${dotted_key}'.split('.')
+val = '${value}'
+with open('${CONFIG_FILE}', 'r') as f:
+    doc = tomlkit.parse(f.read())
+d = doc
+for k in key_path[:-1]:
+    if k not in d:
+        d[k] = tomlkit.table()
+    d = d[k]
+d[key_path[-1]] = val
+with open('${CONFIG_FILE}', 'w') as f:
+    f.write(tomlkit.dumps(doc))
+" 2>/dev/null || {
+        # Fallback: append as flat dotted key if tomlkit unavailable
+        echo "$dotted_key = \"$value\"" >> "$CONFIG_FILE"
+    }
 }
 
 install_monitor_scripts() {
@@ -247,15 +259,6 @@ git clone --depth 1 "$PWN_REPO" "$PWN_DIR"
 write_status "installing" "Installing Pwnagotchi from source" "python"
 cd "$PWN_DIR"
 
-# Remove packages already handled by Ragnar installer
-echo "[INFO] Stripping packages already installed by Ragnar..."
-sed -i '/^waveshare-epd/d' requirements.txt 2>/dev/null || true
-sed -i '/^Pillow/d' requirements.txt 2>/dev/null || true
-sed -i '/^spidev/d' requirements.txt 2>/dev/null || true
-sed -i '/^pandas/d' requirements.txt 2>/dev/null || true
-sed -i '/^smbus2/d' requirements.txt 2>/dev/null || true
-sed -i '/^numpy/d' requirements.txt 2>/dev/null || true
-
 # -------------------------------------------------------------------
 # PIP + INSTALL
 # -------------------------------------------------------------------
@@ -263,26 +266,13 @@ write_status "installing" "Upgrading pip" "pip"
 echo "[INFO] Upgrading pip..."
 python3 -m pip install --upgrade --break-system-packages pip || echo "[WARN] pip upgrade skipped"
 
-write_status "installing" "Installing Python dependencies (this may take a few minutes)" "python_deps"
-echo "[INFO] Installing Pwnagotchi dependencies..."
-# Note: Removed --no-cache-dir and --ignore-installed for faster installs
-# --no-cache-dir prevented pip from caching wheels, slowing reinstalls
-# --ignore-installed forced reinstalling packages already present
-python3 -m pip install \
-    --break-system-packages \
-    -r requirements.txt
-
-write_status "installing" "Installing Pwnagotchi package" "python_install"
-echo "[INFO] Installing Pwnagotchi package (editable mode)..."
+write_status "installing" "Installing Pwnagotchi package and dependencies" "python_install"
+echo "[INFO] Installing Pwnagotchi package (editable mode via pyproject.toml)..."
+# pwnagotchiworking uses pyproject.toml — pip install -e . handles all deps
 python3 -m pip install \
     --break-system-packages \
     --use-pep517 \
     -e .
-
-write_status "installing" "Installing gymnasium dependency" "gymnasium"
-# Ensure gymnasium is available for reinforcement-learning plugins
-echo "[INFO] Installing gymnasium dependency..."
-sudo -H pip3 install --break-system-packages gymnasium
 
 # -------------------------------------------------------------------
 # VALIDATE + FIX /etc/pwnagotchi
@@ -331,19 +321,31 @@ chmod 644 "$CONFIG_DIR/id_rsa.pub"
 write_status "installing" "Creating configuration files" "config_files"
 if [[ ! -f "$CONFIG_FILE" ]]; then
     cat >"$CONFIG_FILE" <<EOF
-main.name = "RagnarPwn"
-main.confd = "/etc/pwnagotchi/conf.d"
-main.custom_plugins = "/etc/pwnagotchi/custom_plugins"
-main.iface = "${STATION_IFACE}"
-main.mon_iface = "${MONITOR_IFACE_NAME}"
-main.mon_start_cmd = "/usr/bin/monstart"
-main.mon_stop_cmd = "/usr/bin/monstop"
-ui.display.enabled = false
-ui.web.enabled = true
-ui.web.username = "ragnar"
-ui.web.password = "ragnar"
-ui.font.name = "DejaVuSansMono" # for japanese: fonts-japanese-gothic
-plugins.grid.enabled = false
+# Ragnar-managed Pwnagotchi user config (pwnagotchiworking / noai branch)
+# Overrides values from default.toml
+
+[main]
+name = "RagnarPwn"
+confd = "/etc/pwnagotchi/conf.d"
+custom_plugins = "/etc/pwnagotchi/custom_plugins"
+iface = "${STATION_IFACE}"
+mon_iface = "${MONITOR_IFACE_NAME}"
+mon_start_cmd = "/usr/bin/monstart"
+mon_stop_cmd = "/usr/bin/monstop"
+
+[ui.display]
+enabled = false
+
+[ui.web]
+enabled = true
+username = "ragnar"
+password = "ragnar"
+
+[ui.font]
+name = "DejaVuSansMono"
+
+[main.plugins.grid]
+enabled = false
 EOF
     echo "[INFO] Created default config at ${CONFIG_FILE}"
 else
@@ -414,7 +416,7 @@ After=multi-user.target network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/pwnagotchi --config ${CONFIG_FILE}
+ExecStart=/usr/local/bin/pwnagotchi
 WorkingDirectory=${PWN_DIR}
 Restart=on-failure
 RestartSec=5
