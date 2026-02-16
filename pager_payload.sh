@@ -230,23 +230,39 @@ done
 # Create data directory
 mkdir -p "$DATA_DIR" 2>/dev/null
 
-# Stop pager service and show spinner
-SPINNER_ID=$(START_SPINNER "Starting Ragnar...")
-/etc/init.d/pineapplepager stop 2>/dev/null
-sleep 0.5
+# Take exclusive LCD control from the Pineapple system.
+# Two processes share the LCD:
+#   pineapple  = main UI server (handles LCD, buttons, payloads)
+#   pineapd    = PineAP WiFi daemon
+#
+# CRITICAL: Kill pineapple FIRST. If we only kill pineapd (as init.d stop does),
+# the pineapple process detects the death and auto-restarts everything:
+#   "[CRITICAL] [PINEAP] PineAPd not available, restarting service"
+# This steals the LCD back from Ragnar within seconds.
 
-# Prevent procd auto-respawn: pineapd crashes on shutdown ("terminate called
-# without an active exception") which procd interprets as a crash and respawns
-# the service ~15s later, stealing the LCD back from Ragnar.
-# Deregister the service from procd so it stays stopped.
+LOG "Starting Ragnar..."
+
+# Protect ourselves: pineapple may signal its process group on death
+trap '' TERM HUP
+
+# 1. Kill the main pineapple UI server first (prevents restart cascade)
+killall -TERM pineapple 2>/dev/null
+sleep 0.3
+
+# 2. Kill the PineAP daemon
+killall -TERM pineapd 2>/dev/null
+sleep 0.3
+
+# 3. Deregister service from procd to prevent auto-respawn
 ubus call service delete '{"name":"pineapplepager"}' 2>/dev/null
 
-# Kill any processes that procd may have already respawned
-killall pineapple 2>/dev/null
-killall pineapd 2>/dev/null
+# 4. Ensure both processes are fully dead (SIGKILL as fallback)
+killall -KILL pineapple 2>/dev/null
+killall -KILL pineapd 2>/dev/null
 sleep 0.5
 
-STOP_SPINNER "$SPINNER_ID" 2>/dev/null
+# Restore signal handling (cleanup trap still fires on EXIT)
+trap cleanup EXIT
 
 # Payload loop with handoff support
 NEXT_PAYLOAD_FILE="$DATA_DIR/.next_payload"
