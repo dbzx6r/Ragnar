@@ -1236,7 +1236,7 @@ main() {
         echo -e "${BLUE}Installation profile:${NC}"
         echo "1. Install on Raspberry Pi with e-Paper"
         echo "2. Server install (headless, auto-detect packages, no e-Paper)"
-        echo "3. Install on WiFi Pineapple Pager"
+        echo "3. Install on WiFi Pineapple Pager - not working WIP"
         read -p "Choose an option (1/2/3): " profile_choice
 
         case $profile_choice in
