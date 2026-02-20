@@ -14,7 +14,10 @@
 </table>
 </p>
 
-Ragnar is a « Tamagotchi like » sophisticated, autonomous network scanning, vulnerability assessment, and offensive security tool designed to run on a Raspberry Pi equipped with a 2.13-inch e-Paper HAT, a headless/server install on Debian-based systems (AMD64/ARM/ARM64) with Ethernet-first connectivity, or on the **WiFi Pineapple Pager** with full-color LCD display. On servers with 8GB+ RAM, Ragnar unlocks advanced capabilities including real-time traffic analysis and enhanced vulnerability assessment. This document provides a detailed explanation of the project.
+Ragnar is a « Tamagotchi like » sophisticated, autonomous network scanning, vulnerability assessment, and offensive security tool designed to run on a Raspberry Pi equipped with a 2.13-inch e-Paper HAT, a headless/server install on Debian-based systems (AMD64/ARM/ARM64) with Ethernet-first connectivity, or on the **WiFi Pineapple Pager** with full-color LCD display.
+
+-
+On servers with 8GB+ RAM, Ragnar unlocks advanced capabilities including real-time traffic analysis and enhanced vulnerability assessment. This document provides a detailed explanation of the project.
 
 The fastest way to install Ragnar is using the automatic installation script :
 
