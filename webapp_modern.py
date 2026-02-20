@@ -11136,6 +11136,12 @@ def start_advanced_vuln_scan():
         scan_type = data.get('scan_type', 'nuclei')
         options = data.get('options', {})
 
+        # Pass scan strength to options (default: standard)
+        scan_strength = data.get('scan_strength') or options.get('scan_strength', 'standard')
+        if scan_strength not in ('standard', 'thorough', 'insane'):
+            scan_strength = 'standard'
+        options['scan_strength'] = scan_strength
+
         if not target:
             return jsonify({'success': False, 'error': 'Target is required'}), 400
 

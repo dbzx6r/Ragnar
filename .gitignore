@@ -207,3 +207,6 @@ resources/comments/comments.json
 *.bak
 *.orig
 web/screen.png
+
+# Claude Code
+.claude/

@@ -13081,6 +13081,27 @@ function toggleScanMode(mode) {
     }
 }
 
+function setScanStrength(strength) {
+    document.getElementById('zap-scan-strength').value = strength;
+    const descriptions = {
+        standard: 'Balanced speed and coverage. Suitable for most scans.',
+        thorough: 'Extended coverage with custom fuzzing. 2-3x longer scan time.',
+        insane: 'Maximum coverage with aggressive fuzzing. 5-10x longer. May cause target instability.'
+    };
+    document.getElementById('strength-description').textContent = descriptions[strength] || '';
+
+    ['standard', 'thorough', 'insane'].forEach(s => {
+        const btn = document.getElementById('strength-' + s);
+        if (s === strength) {
+            btn?.classList.add('bg-blue-600', 'text-white', 'font-medium');
+            btn?.classList.remove('text-gray-400');
+        } else {
+            btn?.classList.remove('bg-blue-600', 'text-white', 'font-medium');
+            btn?.classList.add('text-gray-400');
+        }
+    });
+}
+
 function toggleRequestBodyField() {
     const method = document.getElementById('api-http-method')?.value;
     const bodyContainer = document.getElementById('api-request-body-container');
@@ -13108,9 +13129,13 @@ async function startAdvancedScan() {
         return;
     }
 
+    // Collect scan strength
+    const strengthSelect = document.getElementById('zap-scan-strength');
+    const scanStrength = strengthSelect ? strengthSelect.value : 'standard';
+
     // Collect auth params directly to send with the scan request
     const authType = document.getElementById('zap-auth-type')?.value;
-    const options = {};
+    const options = { scan_strength: scanStrength };
 
     if (authType) {
         const authParams = getAuthParams(authType);
@@ -14034,6 +14059,7 @@ window.closeTrafficPortModal = closeTrafficPortModal;
 window.loadAdvancedVulnData = loadAdvancedVulnData;
 window.startAdvancedScan = startAdvancedScan;
 window.toggleScanMode = toggleScanMode;
+window.setScanStrength = setScanStrength;
 window.toggleRequestBodyField = toggleRequestBodyField;
 window.refreshAdvVulnData = refreshAdvVulnData;
 window.toggleAdvVulnScansExpanded = toggleAdvVulnScansExpanded;

@@ -2800,6 +2800,27 @@
                             </div>
                         </div>
 
+                        <!-- Scan Strength Profile -->
+                        <div id="scan-strength-row" class="mb-3">
+                            <label class="block text-xs sm:text-sm text-gray-400 mb-1">Scan Strength</label>
+                            <div class="flex gap-1 bg-slate-700 rounded-lg p-1 w-fit">
+                                <button id="strength-standard" onclick="setScanStrength('standard')"
+                                        class="px-3 py-1.5 text-xs sm:text-sm rounded-md bg-blue-600 text-white font-medium transition-colors">
+                                    Standard
+                                </button>
+                                <button id="strength-thorough" onclick="setScanStrength('thorough')"
+                                        class="px-3 py-1.5 text-xs sm:text-sm rounded-md text-gray-400 hover:text-white transition-colors">
+                                    Thorough
+                                </button>
+                                <button id="strength-insane" onclick="setScanStrength('insane')"
+                                        class="px-3 py-1.5 text-xs sm:text-sm rounded-md text-gray-400 hover:text-white transition-colors">
+                                    Insane
+                                </button>
+                            </div>
+                            <p id="strength-description" class="text-xs text-gray-500 mt-1">Balanced speed and coverage. Suitable for most scans.</p>
+                            <input type="hidden" id="zap-scan-strength" value="standard">
+                        </div>
+
                         <!-- API Scan Fields (hidden by default) -->
                         <div id="api-scan-fields" class="hidden mb-3 p-3 bg-slate-700 bg-opacity-50 rounded-lg space-y-3">
                             <!-- OpenAPI Import -->
