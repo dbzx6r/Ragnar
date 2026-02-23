@@ -3581,6 +3581,23 @@ function updatePwnButtons() {
     }
 }
 
+function formatPwnDiscoveryList(items) {
+    if (!Array.isArray(items) || !items.length) {
+        return '<p class="text-gray-400">No Pwnagotchi discoveries found yet.</p>';
+    }
+
+    return items.slice(0, 6).map(item => {
+        const name = escapeHtml(item && item.name ? item.name : 'Unnamed artifact');
+        const modified = item && item.modified ? formatTimestamp(item.modified) : 'Unknown time';
+        return `
+            <div class="bg-slate-800 bg-opacity-50 rounded-lg p-3 flex items-center justify-between gap-3">
+                <span class="truncate" title="${name}">${name}</span>
+                <span class="text-xs text-gray-400 whitespace-nowrap">${modified}</span>
+            </div>
+        `;
+    }).join('');
+}
+
 function updatePwnDiscoveredCard(status, visuals = null) {
     if (!status || typeof status !== 'object') {
         return;
@@ -3634,6 +3651,25 @@ function updatePwnDiscoveredCard(status, visuals = null) {
 
     updateElement('pwn-card-target', formatPwnModeLabel(status.target_mode));
     updateElement('pwn-card-last-switch', status.last_switch ? formatTimestamp(status.last_switch) : 'Never');
+
+    const discoveries = status.discoveries || {};
+    updateElement('pwn-card-handshake-count', String(discoveries.handshake_count || 0));
+    updateElement('pwn-card-discovery-count', String(discoveries.discovery_count || 0));
+    updateElement('pwn-card-last-discovery', discoveries.last_discovery ? formatTimestamp(discoveries.last_discovery) : 'None');
+
+    const discoveriesContainer = document.getElementById('pwn-card-recent-discoveries');
+    if (discoveriesContainer) {
+        const combined = [];
+        if (Array.isArray(discoveries.recent_handshakes)) {
+            combined.push(...discoveries.recent_handshakes);
+        }
+        if (Array.isArray(discoveries.recent_discoveries)) {
+            combined.push(...discoveries.recent_discoveries);
+        }
+        combined.sort((a, b) => new Date(b.modified || 0).getTime() - new Date(a.modified || 0).getTime());
+        discoveriesContainer.innerHTML = formatPwnDiscoveryList(combined);
+    }
+
     updateElement('pwn-card-updated', `Updated: ${status.timestamp ? formatTimestamp(status.timestamp) : new Date().toLocaleString()}`);
 }
 
