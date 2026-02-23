@@ -13,6 +13,7 @@ import os
 import sys
 import json
 import csv
+import glob
 import signal
 import logging
 import threading
@@ -412,6 +413,69 @@ def _systemctl_state_label(service_name: str) -> str:
     return 'unknown'
 
 
+def _collect_pwnagotchi_discovery_summary() -> dict:
+    """Best-effort summary of common Pwnagotchi discovery artifacts."""
+    handshake_globs = [
+        '/root/handshakes/*.pcap',
+        '/root/handshakes/*.pcapng',
+        '/root/handshakes/*.22000',
+        '/root/handshakes/*.hc22000',
+        '/home/pi/handshakes/*.pcap',
+        '/home/pi/handshakes/*.pcapng',
+        '/home/pi/handshakes/*.22000',
+        '/home/pi/handshakes/*.hc22000'
+    ]
+    discovery_globs = [
+        '/root/handshakes/*.gps.json',
+        '/root/handshakes/*.netjson',
+        '/root/handshakes/*.json',
+        '/home/pi/handshakes/*.gps.json',
+        '/home/pi/handshakes/*.netjson',
+        '/home/pi/handshakes/*.json'
+    ]
+
+    handshake_files = []
+    for pattern in handshake_globs:
+        handshake_files.extend(glob.glob(pattern))
+
+    discovery_files = []
+    for pattern in discovery_globs:
+        discovery_files.extend(glob.glob(pattern))
+
+    handshake_files = sorted(set(path for path in handshake_files if os.path.isfile(path)))
+    discovery_files = sorted(set(path for path in discovery_files if os.path.isfile(path)))
+
+    def _recent_items(paths: List[str], limit: int = 5) -> List[dict]:
+        recent = []
+        for file_path in sorted(paths, key=lambda p: os.path.getmtime(p), reverse=True)[:limit]:
+            try:
+                recent.append({
+                    'name': os.path.basename(file_path),
+                    'path': file_path,
+                    'modified': datetime.fromtimestamp(os.path.getmtime(file_path), tz=timezone.utc).isoformat()
+                })
+            except OSError:
+                continue
+        return recent
+
+    combined = handshake_files + discovery_files
+    last_discovery = None
+    if combined:
+        try:
+            newest_file = max(combined, key=os.path.getmtime)
+            last_discovery = datetime.fromtimestamp(os.path.getmtime(newest_file), tz=timezone.utc).isoformat()
+        except OSError:
+            last_discovery = None
+
+    return {
+        'handshake_count': len(handshake_files),
+        'discovery_count': len(discovery_files),
+        'last_discovery': last_discovery,
+        'recent_handshakes': _recent_items(handshake_files),
+        'recent_discoveries': _recent_items(discovery_files)
+    }
+
+
 def _build_pwnagotchi_status(persist: bool = True) -> dict:
     status = {
         'state': 'not_installed',
@@ -426,7 +490,14 @@ def _build_pwnagotchi_status(persist: bool = True) -> dict:
         'log_file': None,
         'config_file': None,
         'target_mode': shared_data.config.get('pwnagotchi_mode', 'ragnar'),
-        'timestamp': datetime.utcnow().isoformat() + 'Z'
+        'timestamp': datetime.utcnow().isoformat() + 'Z',
+        'discoveries': {
+            'handshake_count': 0,
+            'discovery_count': 0,
+            'last_discovery': None,
+            'recent_handshakes': [],
+            'recent_discoveries': []
+        }
     }
 
     file_data = _read_pwn_status_file()
@@ -561,6 +632,8 @@ def _build_pwnagotchi_status(persist: bool = True) -> dict:
 
     if persist and config_updates:
         _update_pwn_config(config_updates)
+
+    status['discoveries'] = _collect_pwnagotchi_discovery_summary()
 
     return status
 
