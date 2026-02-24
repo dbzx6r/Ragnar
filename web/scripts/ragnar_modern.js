@@ -3581,31 +3581,123 @@ function updatePwnButtons() {
     }
 }
 
-function formatPwnDiscoveryList(items) {
-    if (!Array.isArray(items) || !items.length) {
-        return '<p class="text-gray-400">No Pwnagotchi discoveries found yet.</p>';
+function displayPwnNetworksTable(networks) {
+    const container = document.getElementById('pwn-networks-table');
+    if (!container) return;
+
+    if (!Array.isArray(networks) || networks.length === 0) {
+        container.innerHTML = '<p class="text-gray-400">No Pwnagotchi captures found yet.</p>';
+        return;
     }
 
-    return items.slice(0, 6).map(item => {
-        const name = escapeHtml(item && item.name ? item.name : 'Unnamed artifact');
-        const modified = item && item.modified ? formatTimestamp(item.modified) : 'Unknown time';
+    const previewCount = 10;
+    const hasMore = networks.length > previewCount;
+    const previewItems = networks.slice(0, previewCount);
+    const hiddenItems = hasMore ? networks.slice(previewCount) : [];
+
+    function networkRowHTML(net) {
+        const ssid = escapeHtml(net.ssid || 'Unknown');
+        const bssid = escapeHtml(net.bssid || 'Unknown');
+        const lastSeen = net.last_seen ? formatTimestamp(net.last_seen) : 'Unknown';
+
+        let badges = '';
+        if (net.has_handshake) {
+            const types = (net.handshake_types || []).join(', ');
+            badges += `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-fuchsia-900 bg-opacity-50 text-fuchsia-300" title="Handshake: ${escapeHtml(types)}">Handshake</span> `;
+        }
+        if (net.has_gps) {
+            badges += '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-emerald-900 bg-opacity-50 text-emerald-300" title="GPS coordinates available">GPS</span> ';
+        }
+        if (net.has_netjson) {
+            badges += '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-900 bg-opacity-50 text-blue-300" title="Network metadata available">NetJSON</span> ';
+        }
+        if (!badges) {
+            badges = '<span class="text-gray-500 text-xs">-</span>';
+        }
+
+        let gpsDisplay = '<span class="text-gray-500">-</span>';
+        if (net.has_gps && net.gps) {
+            const lat = Number(net.gps.latitude).toFixed(5);
+            const lng = Number(net.gps.longitude).toFixed(5);
+            gpsDisplay = `<span class="font-mono text-emerald-300" title="Lat: ${lat}, Lng: ${lng}">${lat}, ${lng}</span>`;
+        }
+
         return `
-            <div class="bg-slate-800 bg-opacity-50 rounded-lg p-3 flex items-center justify-between gap-3">
-                <span class="truncate" title="${name}">${name}</span>
-                <span class="text-xs text-gray-400 whitespace-nowrap">${modified}</span>
-            </div>
+            <tr class="hover:bg-gray-700 transition-colors">
+                <td class="px-4 py-3 text-sm text-white font-semibold">${ssid}</td>
+                <td class="px-4 py-3 text-sm text-gray-300 font-mono">${bssid}</td>
+                <td class="px-4 py-3 text-sm">${badges}</td>
+                <td class="px-4 py-3 text-sm">${gpsDisplay}</td>
+                <td class="px-4 py-3 text-sm text-gray-400 whitespace-nowrap">${lastSeen}</td>
+            </tr>
         `;
-    }).join('');
+    }
+
+    let html = `
+        <div class="bg-gray-800 rounded-lg p-4">
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-700">
+                    <thead>
+                        <tr>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-300 uppercase">SSID</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-300 uppercase">BSSID</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-300 uppercase">Data</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-300 uppercase">GPS</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-300 uppercase">Last Seen</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-700">
+    `;
+
+    previewItems.forEach(net => { html += networkRowHTML(net); });
+    html += '</tbody></table></div>';
+
+    if (hasMore) {
+        html += `
+            <div class="mt-4">
+                <button onclick="togglePwnNetworksExpansion()"
+                        class="flex items-center justify-center w-full py-3 px-4 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors text-gray-300 hover:text-white">
+                    <span id="pwn-networks-expand-text">Show ${hiddenItems.length} more networks</span>
+                    <svg id="pwn-networks-expand-arrow" class="w-4 h-4 ml-2 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                    </svg>
+                </button>
+                <div id="pwn-networks-hidden" class="hidden mt-2">
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-700">
+                            <tbody class="divide-y divide-gray-700">
+        `;
+        hiddenItems.forEach(net => { html += networkRowHTML(net); });
+        html += '</tbody></table></div></div></div>';
+    }
+
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+function togglePwnNetworksExpansion() {
+    const hidden = document.getElementById('pwn-networks-hidden');
+    const text = document.getElementById('pwn-networks-expand-text');
+    const arrow = document.getElementById('pwn-networks-expand-arrow');
+    if (!hidden || !text || !arrow) return;
+
+    const isHidden = hidden.classList.contains('hidden');
+    if (isHidden) {
+        hidden.classList.remove('hidden');
+        text.textContent = 'Show less';
+        arrow.style.transform = 'rotate(180deg)';
+    } else {
+        hidden.classList.add('hidden');
+        const count = hidden.querySelectorAll('tr').length;
+        text.textContent = `Show ${count} more networks`;
+        arrow.style.transform = 'rotate(0deg)';
+    }
 }
 
 function updatePwnDiscoveredCard(status, visuals = null) {
-    if (!status || typeof status !== 'object') {
-        return;
-    }
+    if (!status || typeof status !== 'object') return;
     const container = document.getElementById('pwn-discovered-card');
-    if (!container) {
-        return;
-    }
+    if (!container) return;
 
     if (!arePwnFeaturesEnabled()) {
         container.classList.add('hidden');
@@ -3627,48 +3719,13 @@ function updatePwnDiscoveredCard(status, visuals = null) {
         badge.className = `text-xs font-semibold uppercase tracking-wide px-3 py-1 rounded-full ${resolvedVisuals.badgeClass}`;
     }
 
-    updateElement('pwn-card-message', status.message || 'Waiting for status...');
-
-    const modeElement = document.getElementById('pwn-card-mode');
-    if (modeElement) {
-        modeElement.textContent = formatPwnModeLabel(status.mode);
-        modeElement.className = `text-xl font-semibold ${status.mode === 'pwnagotchi' ? 'text-fuchsia-300' : 'text-green-400'}`;
-    }
-
-    updateElement('pwn-card-phase', formatPwnPhaseLabel(status.phase));
-
-    const serviceEl = document.getElementById('pwn-card-service');
-    if (serviceEl) {
-        serviceEl.textContent = status.service_active ? 'Running' : 'Stopped';
-        serviceEl.className = `text-xl font-semibold ${status.service_active ? 'text-green-400' : 'text-slate-200'}`;
-    }
-
-    const enabledEl = document.getElementById('pwn-card-enabled');
-    if (enabledEl) {
-        enabledEl.textContent = status.service_enabled ? 'Yes' : 'No';
-        enabledEl.className = status.service_enabled ? 'text-green-300 font-semibold' : 'text-slate-200 font-semibold';
-    }
-
-    updateElement('pwn-card-target', formatPwnModeLabel(status.target_mode));
-    updateElement('pwn-card-last-switch', status.last_switch ? formatTimestamp(status.last_switch) : 'Never');
-
     const discoveries = status.discoveries || {};
-    updateElement('pwn-card-handshake-count', String(discoveries.handshake_count || 0));
-    updateElement('pwn-card-discovery-count', String(discoveries.discovery_count || 0));
+    updateElement('pwn-card-network-count', String(discoveries.network_count || 0));
+    updateElement('pwn-card-handshake-count', String(discoveries.networks_with_handshake || 0));
+    updateElement('pwn-card-gps-count', String(discoveries.networks_with_gps || 0));
     updateElement('pwn-card-last-discovery', discoveries.last_discovery ? formatTimestamp(discoveries.last_discovery) : 'None');
 
-    const discoveriesContainer = document.getElementById('pwn-card-recent-discoveries');
-    if (discoveriesContainer) {
-        const combined = [];
-        if (Array.isArray(discoveries.recent_handshakes)) {
-            combined.push(...discoveries.recent_handshakes);
-        }
-        if (Array.isArray(discoveries.recent_discoveries)) {
-            combined.push(...discoveries.recent_discoveries);
-        }
-        combined.sort((a, b) => new Date(b.modified || 0).getTime() - new Date(a.modified || 0).getTime());
-        discoveriesContainer.innerHTML = formatPwnDiscoveryList(combined);
-    }
+    displayPwnNetworksTable(discoveries.networks || []);
 
     updateElement('pwn-card-updated', `Updated: ${status.timestamp ? formatTimestamp(status.timestamp) : new Date().toLocaleString()}`);
 }

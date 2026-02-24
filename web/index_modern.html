@@ -1432,62 +1432,37 @@
                 </div>
             </div>
 
-            <!-- Pwnagotchi Summary (hidden until installed) -->
+            <!-- Pwnagotchi Discovered Networks (hidden until installed) -->
             <div id="pwn-discovered-card" class="glass rounded-xl p-6 mb-6 hidden">
-                <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-4">
                     <div>
-                        <h2 class="text-2xl font-bold">Pwnagotchi Activity</h2>
-                        <p class="text-sm text-gray-400">Live status is mirrored from the Config tab so you can track swaps and installs while reviewing loot.</p>
+                        <h2 class="text-2xl font-bold">Pwnagotchi Captures</h2>
+                        <p class="text-sm text-gray-400">WiFi networks discovered by Pwnagotchi with captured handshakes and GPS data.</p>
                     </div>
-                    <span id="pwn-card-badge" class="text-xs font-semibold uppercase tracking-wide px-3 py-1 rounded-full bg-slate-700 text-slate-200">Status Pending</span>
-                </div>
-                <div class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div class="bg-slate-800 bg-opacity-50 rounded-lg p-4">
-                        <div class="text-sm text-gray-400 mb-1">Message</div>
-                        <div id="pwn-card-message" class="text-base text-white font-medium">Waiting for status...</div>
-                    </div>
-                    <div class="bg-slate-800 bg-opacity-50 rounded-lg p-4">
-                        <div class="text-sm text-gray-400 mb-1">Mode</div>
-                        <div id="pwn-card-mode" class="text-xl font-semibold text-green-400">Ragnar</div>
-                        <p class="text-xs text-gray-400 mt-2">Phase: <span id="pwn-card-phase">Idle</span></p>
-                    </div>
-                    <div class="bg-slate-800 bg-opacity-50 rounded-lg p-4">
-                        <div class="text-sm text-gray-400 mb-1">Service State</div>
-                        <div class="flex items-center gap-2">
-                            <span id="pwn-card-service" class="text-xl font-semibold text-slate-200">Stopped</span>
-                        </div>
-                        <p class="text-xs text-gray-400 mt-2">Enabled: <span id="pwn-card-enabled">No</span></p>
+                    <div class="flex items-center gap-3">
+                        <span id="pwn-card-badge" class="text-xs font-semibold uppercase tracking-wide px-3 py-1 rounded-full bg-slate-700 text-slate-200">Status Pending</span>
                     </div>
                 </div>
-                <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div class="bg-slate-900 bg-opacity-60 rounded-lg p-4">
-                        <div class="text-sm text-gray-400 mb-1">Target Mode</div>
-                        <div id="pwn-card-target" class="text-base font-semibold text-slate-100">Ragnar</div>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                    <div class="bg-slate-800 bg-opacity-50 rounded-lg p-4">
+                        <div class="text-sm text-gray-400 mb-1">Networks</div>
+                        <div id="pwn-card-network-count" class="text-2xl font-bold text-white">0</div>
                     </div>
-                    <div class="bg-slate-900 bg-opacity-60 rounded-lg p-4">
-                        <div class="text-sm text-gray-400 mb-1">Last Switch</div>
-                        <div id="pwn-card-last-switch" class="text-base font-semibold text-slate-100">Never</div>
+                    <div class="bg-fuchsia-900 bg-opacity-30 rounded-lg p-4">
+                        <div class="text-sm text-gray-400 mb-1">With Handshake</div>
+                        <div id="pwn-card-handshake-count" class="text-2xl font-bold text-fuchsia-400">0</div>
                     </div>
-                </div>
-                <div class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div class="bg-slate-900 bg-opacity-60 rounded-lg p-4">
-                        <div class="text-sm text-gray-400 mb-1">Handshakes</div>
-                        <div id="pwn-card-handshake-count" class="text-xl font-semibold text-slate-100">0</div>
+                    <div class="bg-emerald-900 bg-opacity-30 rounded-lg p-4">
+                        <div class="text-sm text-gray-400 mb-1">With GPS</div>
+                        <div id="pwn-card-gps-count" class="text-2xl font-bold text-emerald-400">0</div>
                     </div>
-                    <div class="bg-slate-900 bg-opacity-60 rounded-lg p-4">
-                        <div class="text-sm text-gray-400 mb-1">Discovery Files</div>
-                        <div id="pwn-card-discovery-count" class="text-xl font-semibold text-slate-100">0</div>
-                    </div>
-                    <div class="bg-slate-900 bg-opacity-60 rounded-lg p-4">
+                    <div class="bg-blue-900 bg-opacity-30 rounded-lg p-4">
                         <div class="text-sm text-gray-400 mb-1">Last Discovery</div>
-                        <div id="pwn-card-last-discovery" class="text-base font-semibold text-slate-100">None</div>
+                        <div id="pwn-card-last-discovery" class="text-base font-semibold text-blue-400">None</div>
                     </div>
                 </div>
-                <div class="mt-4">
-                    <div class="text-sm text-gray-400 mb-2">Recent Pwnagotchi Discoveries</div>
-                    <div id="pwn-card-recent-discoveries" class="space-y-2 text-sm text-slate-200">
-                        <p class="text-gray-400">No Pwnagotchi discoveries found yet.</p>
-                    </div>
+                <div id="pwn-networks-table" class="overflow-x-auto">
+                    <p class="text-gray-400">No Pwnagotchi captures found yet.</p>
                 </div>
                 <div class="mt-4 text-xs text-gray-400" id="pwn-card-updated">Updated: pending</div>
             </div>
