@@ -385,6 +385,18 @@ class SharedData:
                 context.get('ssid') == self.active_network_ssid):
             return
 
+        # Mark every alive host in the OUTGOING database as degraded so
+        # that hosts from the old network never linger as "alive" inside
+        # the new network's store (race-condition safety net) and so
+        # that stale hosts are immediately visible as offline if the
+        # user switches back later.
+        try:
+            if get_db is not None and not self._pager_mode:
+                outgoing_db = get_db(currentdir=self.currentdir)
+                outgoing_db.mark_all_hosts_degraded()
+        except Exception as exc:
+            logger.warning(f"Failed to mark outgoing hosts as degraded: {exc}")
+
         self._apply_network_context(context, configure_db=False)
         self._refresh_network_components()
         logger.info(

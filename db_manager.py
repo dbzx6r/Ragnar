@@ -1008,6 +1008,36 @@ class DatabaseManager:
             logger.error(f"Failed to update ping status for {mac}: {e}")
             return False
     
+    def mark_all_hosts_degraded(self):
+        """
+        Mark every alive host in the current database as degraded.
+
+        Called when the active network changes so that hosts from the
+        outgoing network do not linger as 'alive' if they were
+        accidentally written here before the database switch completed.
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                now = datetime.now().isoformat()
+                cursor.execute("""
+                    UPDATE hosts
+                    SET status = 'degraded',
+                        failed_ping_count = MAX(failed_ping_count, 30),
+                        updated_at = ?
+                    WHERE status = 'alive'
+                """, (now,))
+                affected = cursor.rowcount
+                conn.commit()
+                if affected:
+                    logger.info(
+                        f"Network switch: marked {affected} hosts as degraded in {self.db_path}"
+                    )
+                return affected
+        except Exception as e:
+            logger.error(f"Failed to mark all hosts degraded: {e}")
+            return 0
+
     def cleanup_duplicate_hosts(self):
         """
         Remove duplicate host entries where the same IP exists with both:

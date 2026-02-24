@@ -681,6 +681,9 @@ class WiFiManager:
                 elif not was_connected and self.wifi_connected:
                     self.logger.info("Endless Loop: Wi-Fi connection established!")
                     current_ssid = self.get_current_ssid()
+                    # Immediately propagate the SSID so the per-network
+                    # database switches before the next scan cycle.
+                    self._set_current_ssid(current_ssid)
                     self._save_connection_state(current_ssid, True)
                     self.last_wifi_validation = current_time
                     self.wifi_validation_failures = 0
@@ -1687,6 +1690,13 @@ class WiFiManager:
                 
                 if connected:
                     self.logger.info(f"Successfully connected to {ssid}")
+                    # Immediately propagate the network change so the
+                    # per-network database is switched before any scan
+                    # cycle can write hosts into the wrong store.
+                    self.wifi_connected = True
+                    self.shared_data.wifi_connected = True
+                    self._set_current_ssid(ssid)
+                    self._trigger_initial_ping_sweep(ssid)
                 else:
                     self.logger.warning(f"Connection command succeeded but verification failed for {ssid}")
                 return connected
