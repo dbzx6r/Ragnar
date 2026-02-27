@@ -198,16 +198,14 @@ class PagerRagnar:
             self.shared_data.ragnarstatustext2 = ""
 
     def is_wifi_connected(self):
-        """Check Wi-Fi connectivity (Pager compatible)."""
+        """Check Wi-Fi connectivity (Pager + Pi compatible)."""
         try:
-            result = subprocess.run(['ip', 'link', 'show', 'wlan0cli'],
-                                    capture_output=True, text=True, timeout=5)
-            connected = 'state UP' in result.stdout
-            if not connected:
-                result = subprocess.run(['ip', 'link', 'show', 'br-lan'],
+            for iface in ['wlan0cli', 'br-lan', 'wlan0', 'eth0']:
+                result = subprocess.run(['ip', 'link', 'show', iface],
                                         capture_output=True, text=True, timeout=5)
-                connected = 'state UP' in result.stdout
-            return connected
+                if 'state UP' in result.stdout:
+                    return True
+            return False
         except Exception as e:
             logger.debug(f"WiFi check error: {e}")
             return False

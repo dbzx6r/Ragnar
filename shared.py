@@ -119,9 +119,13 @@ class SharedData:
 
         # Initialize SQLite database manager
         # If auth is configured and DB is encrypted, db may be None until login
-        if not self._pager_mode and get_db is not None:
-            self.db = get_db(currentdir=self.currentdir)
-            self._configure_database()
+        if get_db is not None:
+            try:
+                self.db = get_db(currentdir=self.currentdir)
+                self._configure_database()
+            except Exception as e:
+                logger.warning(f"Database initialization failed: {e}")
+                self.db = None
         else:
             self.db = None
 
@@ -625,8 +629,13 @@ class SharedData:
         self.create_directories()  # Create all necessary directories first
         self.save_config()
         if self._pager_mode:
-            # On Pager: action modules need pandas/rich which aren't available,
-            # so load existing actions.json instead of regenerating it.
+            # On Pager: try to regenerate actions.json (works if deps are available),
+            # fall back to loading existing file if generation fails.
+            if not os.path.exists(self.actions_file):
+                try:
+                    self.generate_actions_json()
+                except Exception as e:
+                    logger.warning(f"Could not generate actions.json: {e}")
             self._load_status_list_from_actions_json()
         else:
             self.generate_actions_json()
@@ -1343,6 +1352,8 @@ class SharedData:
         data = []
         
         try:
+            if self.db is None:
+                return []
             # Read from SQLite database (PRIMARY AND ONLY DATA SOURCE)
             hosts = self.db.get_all_hosts()
             
@@ -1401,6 +1412,8 @@ class SharedData:
                 try:
                     # Run cleanup every hour
                     time.sleep(3600)
+                    if self.db is None:
+                        continue
                     removed = self.db.cleanup_old_hosts(hours=24)
                     if removed > 0:
                         logger.info(f"🧹 Cleanup: Removed {removed} hosts not seen in 24 hours")
@@ -1427,7 +1440,10 @@ class SharedData:
         with self._stats_lock:
             # Get current statistics from SQLite database
             try:
-                db_stats = self.db.get_stats()
+                if self.db is None:
+                    db_stats = {}
+                else:
+                    db_stats = self.db.get_stats()
                 # NOTE: Do NOT update vulnnbr here - it's managed by sync_vulnerability_count()
                 # which uses network intelligence (114 vulns) instead of just database hosts_with_vulns (3)
                 

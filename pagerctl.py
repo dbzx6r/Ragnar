@@ -56,11 +56,27 @@ _lib_paths = [
 _lib = None
 for path in _lib_paths:
     if os.path.exists(path):
-        _lib = CDLL(path)
-        break
+        try:
+            _lib = CDLL(path)
+            break
+        except OSError:
+            # File exists but wrong architecture (e.g. MIPS .so on Windows)
+            continue
 
 if _lib is None:
-    raise OSError("Could not find libpagerctl.so - build with: make remote-build")
+    # No hardware library found - try pygame mock for desktop testing
+    _using_mock = True
+    try:
+        from pagerctl_mock import Pager as _MockPager
+        print("[pagerctl] libpagerctl.so not found - using pygame mock emulator")
+    except ImportError:
+        raise OSError(
+            "Could not find libpagerctl.so and pagerctl_mock.py is not available.\n"
+            "On Pager hardware: ensure libpagerctl.so is in the payload directory.\n"
+            "On desktop: install pygame (pip install pygame) and copy pagerctl_mock.py here."
+        )
+else:
+    _using_mock = False
 
 
 class Pager:
@@ -640,6 +656,11 @@ class Pager:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.cleanup()
         return False
+
+
+# If running on desktop without libpagerctl.so, replace the real Pager with the mock
+if _using_mock:
+    Pager = _MockPager
 
 
 # Quick demo if run directly

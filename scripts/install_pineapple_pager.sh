@@ -28,7 +28,7 @@ NC='\033[0m'
 PAGER_IP="${1:-172.16.42.1}"
 PAGER_USER="root"
 PAGER_PAYLOAD_DIR="/root/payloads/user/reconnaissance/pager_ragnar"
-RAGNAR_DIR="$(cd "$(dirname "$0")" && pwd)"
+RAGNAR_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 log() {
     local level=$1; shift
@@ -141,7 +141,9 @@ elif [ -f "$BJORN_PAGERCTL_CHECK" ]; then
 else
     # Check if it exists on the Pager already
     PAGERCTL_FOUND=$(ssh $SSH_OPTS "${PAGER_USER}@${PAGER_IP}" "
-        if [ -f /root/payloads/user/utilities/PAGERCTL/libpagerctl.so ]; then
+        if [ -f /root/lib/pagerctl_mock.py ]; then
+            echo 'mock'
+        elif [ -f /root/payloads/user/utilities/PAGERCTL/libpagerctl.so ]; then
             echo 'utilities'
         elif find /root/payloads -name 'libpagerctl.so' 2>/dev/null | head -1 | grep -q '.'; then
             echo 'found'
@@ -150,7 +152,10 @@ else
         fi
     ")
 
-    if [ "$PAGERCTL_FOUND" = "missing" ]; then
+    if [ "$PAGERCTL_FOUND" = "mock" ]; then
+        log "SUCCESS" "Mock pager detected - web display will be used"
+        PAGERCTL_SOURCE="mock"
+    elif [ "$PAGERCTL_FOUND" = "missing" ]; then
         log "WARNING" "libpagerctl.so not found!"
         echo ""
         echo "  The libpagerctl.so library is needed for Pager display/input."
@@ -187,6 +192,7 @@ CORE_FILES=(
     "pager_menu.py"
     "pager_payload.sh"
     "pagerctl.py"
+    "pagerctl_mock.py"
     
     # Core shared modules
     "init_shared.py"
@@ -244,9 +250,11 @@ for f in "${CORE_FILES[@]}"; do
 done
 
 # Rename payload.sh for Pager launcher
+# Bjorn uses payload.sh; official Hak5 docs say just "payload" — create both
 if [ -f "${PAYLOAD_STAGE}/pager_payload.sh" ]; then
     mv "${PAYLOAD_STAGE}/pager_payload.sh" "${PAYLOAD_STAGE}/payload.sh"
-    chmod +x "${PAYLOAD_STAGE}/payload.sh"
+    cp "${PAYLOAD_STAGE}/payload.sh" "${PAYLOAD_STAGE}/payload"
+    chmod +x "${PAYLOAD_STAGE}/payload.sh" "${PAYLOAD_STAGE}/payload"
 fi
 
 # Copy actions directory
@@ -337,17 +345,21 @@ elif [ -d "$BJORN_LIB_DIR" ]; then
     cp -r "${BJORN_LIB_DIR}/"* "${LIB_DIR}/" 2>/dev/null || true
     log "SUCCESS" "Copied bundled Python libraries"
 else
-    log "WARNING" "MIPS Python libraries not found"
-    echo ""
-    echo "  The Pager requires bundled Python libraries (paramiko, nmap, pymysql, etc.)"
-    echo "  These should be MIPS-compiled versions."
-    echo ""
-    echo "  Ragnar may have limited functionality without them."
-    echo ""
-    read -p "  Continue without bundled libraries? (y/n): " choice
-    if [[ ! "$choice" =~ ^[Yy]$ ]]; then
-        rm -rf "${STAGING_DIR}"
-        exit 1
+    if [ "$PAGERCTL_SOURCE" = "mock" ]; then
+        log "INFO" "Mock pager - skipping MIPS libraries (Pi uses native packages)"
+    else
+        log "WARNING" "MIPS Python libraries not found"
+        echo ""
+        echo "  The Pager requires bundled Python libraries (paramiko, nmap, pymysql, etc.)"
+        echo "  These should be MIPS-compiled versions."
+        echo ""
+        echo "  Ragnar may have limited functionality without them."
+        echo ""
+        read -p "  Continue without bundled libraries? (y/n): " choice
+        if [[ ! "$choice" =~ ^[Yy]$ ]]; then
+            rm -rf "${STAGING_DIR}"
+            exit 1
+        fi
     fi
 fi
 
@@ -473,13 +485,19 @@ log "INFO" "Verifying installation..."
 VERIFY_RESULT=$(ssh $SSH_OPTS "${PAGER_USER}@${PAGER_IP}" "
     errors=0
     
-    # Check core files
-    for f in pager_menu.py pagerctl.py libpagerctl.so payload.sh; do
+    # Check core files (libpagerctl.so not required on mock pager)
+    for f in pager_menu.py pagerctl.py payload.sh; do
         if [ ! -f ${PAGER_PAYLOAD_DIR}/\$f ]; then
             echo \"MISSING: \$f\"
             errors=\$((errors + 1))
         fi
     done
+
+    # Check display library: either libpagerctl.so (real) or pagerctl_mock.py (mock)
+    if [ ! -f ${PAGER_PAYLOAD_DIR}/libpagerctl.so ] && [ ! -f ${PAGER_PAYLOAD_DIR}/pagerctl_mock.py ]; then
+        echo 'MISSING: libpagerctl.so or pagerctl_mock.py'
+        errors=\$((errors + 1))
+    fi
     
     # Check lib directory
     if [ ! -d ${PAGER_PAYLOAD_DIR}/lib ]; then
@@ -533,6 +551,47 @@ if echo "$VERIFY_RESULT" | grep -q "PAGERCTL_OK"; then
 else
     log "WARNING" "pagerctl import test failed - display may not work"
 fi
+
+# ============================================================
+# Step 8b: Generate actions.json if missing
+# ============================================================
+
+log "INFO" "Ensuring actions.json is up to date..."
+
+ssh $SSH_OPTS "${PAGER_USER}@${PAGER_IP}" "
+    cd ${PAGER_PAYLOAD_DIR}
+    export PYTHONPATH=\"${PAGER_PAYLOAD_DIR}/lib:${PAGER_PAYLOAD_DIR}:\$PYTHONPATH\"
+    export LD_LIBRARY_PATH=\"/root/lib:${PAGER_PAYLOAD_DIR}/lib:${PAGER_PAYLOAD_DIR}:\$LD_LIBRARY_PATH\"
+
+    python3 -c '
+import sys, os, json, importlib
+sys.path.insert(0, \".\")
+actions_dir = \"actions\"
+actions_config = []
+for filename in os.listdir(actions_dir):
+    if filename.endswith(\".py\") and filename != \"__init__.py\":
+        module_name = filename[:-3]
+        try:
+            module = importlib.import_module(f\"actions.{module_name}\")
+            if getattr(module, \"BYPASS_ACTION_MODULE\", False):
+                continue
+            b_class = getattr(module, \"b_class\", None)
+            b_status = getattr(module, \"b_status\", None)
+            if not b_class or not b_status:
+                continue
+            b_port = getattr(module, \"b_port\", None)
+            b_parent = getattr(module, \"b_parent\", None)
+            actions_config.append({\"b_module\": module_name, \"b_class\": b_class, \"b_port\": b_port, \"b_status\": b_status, \"b_parent\": b_parent})
+        except Exception:
+            pass
+os.makedirs(\"config\", exist_ok=True)
+with open(\"config/actions.json\", \"w\") as f:
+    json.dump(actions_config, f, indent=4)
+print(f\"Generated actions.json with {len(actions_config)} actions\")
+' 2>&1 || echo 'actions.json generation failed (will be created on first run)'
+"
+
+log "SUCCESS" "actions.json configured"
 
 # ============================================================
 # Step 9: Create convenience symlink at /root/Ragnar

@@ -233,37 +233,29 @@ else:
 # ============================================================
 
 take_over_display() {
-    # Protect ourselves from parent process group signals during the kill.
-    # The pineapple process is our grandparent; killing it sends TERM to our
-    # process group unless we ignore it first.
-    trap '' TERM HUP
-
     _log "Taking over display from pineapple service..."
 
-    # 1. Kill the pineapple UI server FIRST.
-    #    If we only stop pineapd (via init.d), pineapple detects it and
-    #    triggers a full restart cascade that steals the LCD back.
-    killall pineapple 2>/dev/null
-    sleep 0.3
+    # Stop the pager service cleanly via init.d (same approach as Bjorn)
+    /etc/init.d/pineapplepager stop 2>/dev/null
+    sleep 0.5
 
-    # 2. Kill the PineAP daemon
-    killall pineapd 2>/dev/null
-    sleep 0.2
-
-    # 3. Deregister the service from procd so it won't auto-restart
-    ubus call service delete '{"name":"pineapplepager"}' 2>/dev/null
-
-    # 4. Restore our EXIT trap (cleanup) now that the kill is done
-    trap cleanup EXIT
-    trap - TERM HUP
+    # If it's still running, force kill (fallback)
+    if pgrep -x pineapple >/dev/null 2>&1; then
+        _log "Service still running, force killing..."
+        killall -9 pineapple 2>/dev/null
+        killall -9 pineapd 2>/dev/null
+        sleep 0.3
+    fi
 
     _log green "Display takeover complete"
 }
 
 cleanup() {
     _log "Cleanup: restarting pineapplepager service..."
-    # Re-register and start the pager service so the normal Pager UI comes back
-    /etc/init.d/pineapplepager start 2>/dev/null
+    # Restart pager service so the normal Pager UI comes back
+    if ! pgrep -x pineapple >/dev/null 2>&1; then
+        /etc/init.d/pineapplepager start 2>/dev/null
+    fi
 }
 
 # Ensure pager service restarts on exit

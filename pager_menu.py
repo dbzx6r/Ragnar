@@ -69,27 +69,54 @@ SUBMENU_COLOR = Pager.YELLOW
 def detect_interfaces():
     """Detect network interfaces with IP addresses."""
     interfaces = []
+
     try:
-        result = subprocess.run(['ip', 'addr'], capture_output=True, text=True, timeout=5)
-        current_iface = None
-        for line in result.stdout.split('\n'):
-            if line and not line[0].isspace() and ':' in line:
-                parts = line.split(':')
-                if len(parts) >= 2:
-                    current_iface = parts[1].strip()
-            elif 'inet ' in line and current_iface:
-                parts = line.strip().split()
-                for i, p in enumerate(parts):
-                    if p == 'inet' and i + 1 < len(parts):
-                        cidr = parts[i + 1]
-                        ip = cidr.split('/')[0]
-                        if ip != '127.0.0.1':
+        if sys.platform == 'win32':
+            # Windows: use ipconfig parsing
+            result = subprocess.run(['ipconfig'], capture_output=True, text=True, timeout=5)
+            current_iface = None
+            for line in result.stdout.split('\n'):
+                line = line.rstrip()
+                if line and not line[0].isspace() and ':' in line:
+                    current_iface = line.split(':')[0].strip()
+                    # Clean up adapter name
+                    for prefix in ['Ethernet adapter ', 'Wireless LAN adapter ',
+                                   'Ethernet-kort ', 'Tr\xe5dl\xf6st n\xe4tverkskort ']:
+                        if current_iface.startswith(prefix):
+                            current_iface = current_iface[len(prefix):]
+                elif current_iface and ('IPv4' in line or 'IPv4' in line.replace('v', 'v')):
+                    parts = line.split(':')
+                    if len(parts) >= 2:
+                        ip = parts[-1].strip()
+                        if ip and ip != '127.0.0.1' and not ip.startswith('169.254'):
                             interfaces.append({
                                 'name': current_iface,
                                 'ip': ip,
-                                'subnet': cidr,
+                                'subnet': ip + '/24',
                             })
-                        break
+                            current_iface = None
+        else:
+            # Linux: use ip addr
+            result = subprocess.run(['ip', 'addr'], capture_output=True, text=True, timeout=5)
+            current_iface = None
+            for line in result.stdout.split('\n'):
+                if line and not line[0].isspace() and ':' in line:
+                    parts = line.split(':')
+                    if len(parts) >= 2:
+                        current_iface = parts[1].strip()
+                elif 'inet ' in line and current_iface:
+                    parts = line.strip().split()
+                    for i, p in enumerate(parts):
+                        if p == 'inet' and i + 1 < len(parts):
+                            cidr = parts[i + 1]
+                            ip = cidr.split('/')[0]
+                            if ip != '127.0.0.1':
+                                interfaces.append({
+                                    'name': current_iface,
+                                    'ip': ip,
+                                    'subnet': cidr,
+                                })
+                            break
     except Exception:
         pass
     return interfaces
