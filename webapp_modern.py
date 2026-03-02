@@ -11312,6 +11312,7 @@ def get_traffic_analyzer():
         try:
             from traffic_analyzer import TrafficAnalyzer
             _traffic_analyzer_instance = TrafficAnalyzer(shared_data)
+            shared_data._traffic_analyzer = _traffic_analyzer_instance
         except ImportError:
             return None
     return _traffic_analyzer_instance
@@ -11557,6 +11558,7 @@ def get_advanced_vuln_scanner():
         try:
             from advanced_vuln_scanner import AdvancedVulnScanner
             _advanced_vuln_scanner_instance = AdvancedVulnScanner(shared_data)
+            shared_data._advanced_vuln_scanner = _advanced_vuln_scanner_instance
         except ImportError:
             return None
     return _advanced_vuln_scanner_instance
