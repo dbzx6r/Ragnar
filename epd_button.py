@@ -1,6 +1,11 @@
 # epd_button.py - Hardware button support for 2.7" e-Paper HAT
 # GPIO pins: KEY1=5, KEY2=6, KEY3=13, KEY4=19
 # Uses gpiozero (same library as the Waveshare EPD driver) to avoid conflicts
+#
+# KEY1: Home - go back to main page
+# KEY2: Flip screen upside down (toggle)
+# KEY3: Next page - rotate through all pages
+# KEY4: Restart Ragnar service
 
 import logging
 import threading
@@ -16,10 +21,13 @@ KEY3_PIN = 13
 KEY4_PIN = 19
 
 # Display pages
-PAGE_MAIN = 0        # Default Ragnar display
-PAGE_NETWORK = 1     # Network scanner stats
-PAGE_VULN = 2        # Vulnerability scanner stats
-PAGE_COUNT = 3       # Total number of pages (KEY4 is restart, not a page)
+PAGE_MAIN = 0         # Default Ragnar display
+PAGE_NETWORK = 1      # Network scanner stats
+PAGE_VULN = 2         # Vulnerability scanner stats
+PAGE_DISCOVERED = 3   # Discovered hosts
+PAGE_ADVANCED = 4     # Advanced scan results
+PAGE_TRAFFIC = 5      # Traffic analysis
+PAGE_COUNT = 6        # Total number of pages
 
 
 class EPDButtonListener:
@@ -28,6 +36,7 @@ class EPDButtonListener:
     def __init__(self, shared_data):
         self.shared_data = shared_data
         self.current_page = PAGE_MAIN
+        self.flip_screen = False
         self.available = False
         self._buttons = []
 
@@ -65,19 +74,24 @@ class EPDButtonListener:
         self._buttons = []
 
     def _on_key1(self):
-        """KEY1: Switch to Page 1 - Main display."""
+        """KEY1: Home - go back to main page."""
         self.current_page = PAGE_MAIN
-        logger.info("Button KEY1: Main display")
+        logger.info("Button KEY1: Home (main page)")
 
     def _on_key2(self):
-        """KEY2: Switch to Page 2 - Network scanner stats."""
-        self.current_page = PAGE_NETWORK
-        logger.info("Button KEY2: Network scanner stats")
+        """KEY2: Flip screen upside down (toggle)."""
+        self.flip_screen = not self.flip_screen
+        # Also toggle the shared_data screen_reversed so it takes effect immediately
+        self.shared_data.screen_reversed = not self.shared_data.screen_reversed
+        self.shared_data.web_screen_reversed = self.shared_data.screen_reversed
+        logger.info(f"Button KEY2: Flip screen {'ON' if self.flip_screen else 'OFF'}")
 
     def _on_key3(self):
-        """KEY3: Switch to Page 3 - Vulnerability scanner stats."""
-        self.current_page = PAGE_VULN
-        logger.info("Button KEY3: Vuln scanner stats")
+        """KEY3: Next page - rotate through all pages."""
+        self.current_page = (self.current_page + 1) % PAGE_COUNT
+        page_names = ["Main", "Network", "Vuln", "Discovered", "Advanced", "Traffic"]
+        name = page_names[self.current_page] if self.current_page < len(page_names) else str(self.current_page)
+        logger.info(f"Button KEY3: Next page -> {name} ({self.current_page})")
 
     def _on_key4(self):
         """KEY4: Restart Ragnar service."""

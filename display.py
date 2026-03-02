@@ -32,10 +32,10 @@ logger = Logger(name="display.py", level=logging.DEBUG)
 
 # Import button listener (only functional on Pi with GPIO)
 try:
-    from epd_button import EPDButtonListener, PAGE_MAIN, PAGE_NETWORK, PAGE_VULN
+    from epd_button import EPDButtonListener, PAGE_MAIN, PAGE_NETWORK, PAGE_VULN, PAGE_DISCOVERED, PAGE_ADVANCED, PAGE_TRAFFIC
 except ImportError:
     EPDButtonListener = None
-    PAGE_MAIN, PAGE_NETWORK, PAGE_VULN = 0, 1, 2
+    PAGE_MAIN, PAGE_NETWORK, PAGE_VULN, PAGE_DISCOVERED, PAGE_ADVANCED, PAGE_TRAFFIC = 0, 1, 2, 3, 4, 5
 
 class Display:
     def __init__(self, shared_data):
@@ -743,7 +743,7 @@ class Display:
 
         # Footer
         draw.line((1, h - 18, w - 1, h - 18), fill=0)
-        draw.text((4, h - 16), "KEY1:Main KEY3:Vuln KEY4:Restart", font=font, fill=0)
+        draw.text((4, h - 16), "K1:Home K2:Flip K3:Next K4:Rst", font=font, fill=0)
 
     def _render_vuln_page(self, image, draw):
         """Render Page 3: Vulnerability Scanner stats."""
@@ -781,7 +781,109 @@ class Display:
 
         # Footer
         draw.line((1, h - 18, w - 1, h - 18), fill=0)
-        draw.text((4, h - 16), "KEY1:Main KEY2:Network KEY4:Rst", font=font, fill=0)
+        draw.text((4, h - 16), "K1:Home K2:Flip K3:Next K4:Rst", font=font, fill=0)
+
+    def _render_discovered_page(self, image, draw):
+        """Render Page 4: Discovered hosts."""
+        w = self.shared_data.width
+        h = self.shared_data.height
+        font = self.shared_data.font_arial9
+        font_title = self.shared_data.font_viking
+
+        draw.rectangle((1, 1, w - 1, h - 1), outline=0)
+        draw.text((4, 4), "DISCOVERED", font=font_title, fill=0)
+        draw.line((1, 22, w - 1, 22), fill=0)
+
+        y = 28
+        line_h = 14
+        sd = self.shared_data
+
+        stats = [
+            ("Hosts alive", str(getattr(sd, 'targetnbr', 0))),
+            ("Open ports", str(getattr(sd, 'portnbr', 0))),
+            ("Credentials", str(getattr(sd, 'crednbr', 0))),
+            ("Zombies", str(getattr(sd, 'zombiesnbr', 0))),
+            ("Data files", str(getattr(sd, 'datanbr', 0))),
+            ("BLE devices", str(getattr(sd, 'bluetooth_scan_active', 'N/A'))),
+            ("WiFi", getattr(sd, 'ragnarstatustext2', '')),
+        ]
+
+        for label, value in stats:
+            draw.text((6, y), label, font=font, fill=0)
+            val_str = str(value)[:20]
+            draw.text((w - 6 - font.getlength(val_str), y), val_str, font=font, fill=0)
+            y += line_h
+
+        draw.line((1, h - 18, w - 1, h - 18), fill=0)
+        draw.text((4, h - 16), "K1:Home K2:Flip K3:Next K4:Rst", font=font, fill=0)
+
+    def _render_advanced_page(self, image, draw):
+        """Render Page 5: Advanced scan results."""
+        w = self.shared_data.width
+        h = self.shared_data.height
+        font = self.shared_data.font_arial9
+        font_title = self.shared_data.font_viking
+
+        draw.rectangle((1, 1, w - 1, h - 1), outline=0)
+        draw.text((4, 4), "ADV SCAN", font=font_title, fill=0)
+        draw.line((1, 22, w - 1, 22), fill=0)
+
+        y = 28
+        line_h = 14
+        sd = self.shared_data
+
+        stats = [
+            ("Vulns found", str(getattr(sd, 'vulnnbr', 0))),
+            ("Attacks avail", str(getattr(sd, 'attacksnbr', 0))),
+            ("Hosts scanned", str(getattr(sd, 'targetnbr', 0))),
+            ("Ports found", str(getattr(sd, 'portnbr', 0))),
+            ("Status", str(getattr(sd, 'ragnarstatustext', 'IDLE'))),
+            ("Action", str(getattr(sd, 'ragnarstatustext2', ''))),
+            ("Network KB", str(getattr(sd, 'networkkbnbr', 0))),
+        ]
+
+        for label, value in stats:
+            draw.text((6, y), label, font=font, fill=0)
+            val_str = str(value)[:20]
+            draw.text((w - 6 - font.getlength(val_str), y), val_str, font=font, fill=0)
+            y += line_h
+
+        draw.line((1, h - 18, w - 1, h - 18), fill=0)
+        draw.text((4, h - 16), "K1:Home K2:Flip K3:Next K4:Rst", font=font, fill=0)
+
+    def _render_traffic_page(self, image, draw):
+        """Render Page 6: Traffic analysis."""
+        w = self.shared_data.width
+        h = self.shared_data.height
+        font = self.shared_data.font_arial9
+        font_title = self.shared_data.font_viking
+
+        draw.rectangle((1, 1, w - 1, h - 1), outline=0)
+        draw.text((4, 4), "TRAFFIC", font=font_title, fill=0)
+        draw.line((1, 22, w - 1, 22), fill=0)
+
+        y = 28
+        line_h = 14
+        sd = self.shared_data
+
+        stats = [
+            ("WiFi", "Connected" if sd.wifi_connected else "Disconnected"),
+            ("USB", "Active" if getattr(sd, 'usb_active', False) else "Inactive"),
+            ("PAN", "Connected" if getattr(sd, 'pan_connected', False) else "No"),
+            ("BT active", "Yes" if getattr(sd, 'bluetooth_active', False) else "No"),
+            ("Level", str(getattr(sd, 'levelnbr', 0))),
+            ("Coins", str(getattr(sd, 'coinnbr', 0))),
+            ("Mode", str(getattr(sd, 'ragnarorch_status', 'IDLE'))),
+        ]
+
+        for label, value in stats:
+            draw.text((6, y), label, font=font, fill=0)
+            val_str = str(value)[:20]
+            draw.text((w - 6 - font.getlength(val_str), y), val_str, font=font, fill=0)
+            y += line_h
+
+        draw.line((1, h - 18, w - 1, h - 18), fill=0)
+        draw.text((4, h - 16), "K1:Home K2:Flip K3:Next K4:Rst", font=font, fill=0)
 
     def run(self):
         """Main loop for updating the EPD display with shared data."""
@@ -806,7 +908,12 @@ class Display:
                     self._render_network_page(image, draw)
                 elif current_page == PAGE_VULN:
                     self._render_vuln_page(image, draw)
-                    # Skip the main rendering below
+                elif current_page == PAGE_DISCOVERED:
+                    self._render_discovered_page(image, draw)
+                elif current_page == PAGE_ADVANCED:
+                    self._render_advanced_page(image, draw)
+                elif current_page == PAGE_TRAFFIC:
+                    self._render_traffic_page(image, draw)
                 else:
                     pass  # Fall through to main page rendering below
 
