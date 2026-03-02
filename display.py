@@ -803,14 +803,17 @@ class Display:
                     if self.screen_reversed:
                         image = image.transpose(Image.Transpose.ROTATE_180)
                     self.epd_helper.display_partial(image)
-                    self.epd_helper.display_partial(image)
                     if self.web_screen_reversed:
                         image = image.transpose(Image.Transpose.ROTATE_180)
                     with open(os.path.join(self.shared_data.webdir, "screen.png"), 'wb') as img_file:
                         image.save(img_file)
                         img_file.flush()
                         os.fsync(img_file.fileno())
-                    time.sleep(self.shared_data.screen_delay)
+                    # Break-early sleep: check for page change every 0.2s
+                    for _ in range(int(self.shared_data.screen_delay / 0.2)):
+                        if self.button_listener and self.button_listener.current_page != current_page:
+                            break
+                        time.sleep(0.2)
                     continue
 
                 # === PAGE_MAIN: Default Ragnar display ===
@@ -913,7 +916,6 @@ class Display:
                     image = image.transpose(Image.Transpose.ROTATE_180)
 
                 self.epd_helper.display_partial(image)
-                self.epd_helper.display_partial(image)
 
                 if self.web_screen_reversed:
                     image = image.transpose(Image.Transpose.ROTATE_180)
@@ -921,8 +923,12 @@ class Display:
                     image.save(img_file)
                     img_file.flush()
                     os.fsync(img_file.fileno())
-                
-                time.sleep(self.shared_data.screen_delay)
+
+                # Break-early sleep: check for page change every 0.2s
+                for _ in range(int(self.shared_data.screen_delay / 0.2)):
+                    if self.button_listener and self.button_listener.current_page != PAGE_MAIN:
+                        break
+                    time.sleep(0.2)
             except Exception as e:
                 logger.error(f"An error occurred: {e}")
 
