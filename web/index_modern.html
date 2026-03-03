@@ -3505,6 +3505,23 @@
                                 Disabled for headless installations. Pwnagotchi requires an e-paper display.
                             </div>
                         </div>
+
+                        <!-- wpa-sec Toggle Card -->
+                        <div class="glass rounded-lg p-4">
+                            <div class="flex items-center justify-between mb-3">
+                                <h4 class="font-medium">wpa-sec Integration</h4>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="wpasec-enabled" class="sr-only peer" onchange="toggleWpaSecVisibility()">
+                                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-cyan-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-600"></div>
+                                </label>
+                            </div>
+                            <div class="text-sm text-gray-400 mb-3">
+                                Automatically import cracked WiFi passwords from wpa-sec.stanev.org into Ragnar's known networks.
+                            </div>
+                            <div class="text-xs text-gray-500">
+                                Toggle to show/hide wpa-sec configuration options below
+                            </div>
+                        </div>
                         
                     </div>
                 </div>
@@ -3638,6 +3655,92 @@
                     </div>
                 </div>
                 
+                <!-- wpa-sec Section -->
+                <div id="wpasec-section" class="mb-8" style="display: none;">
+                    <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between mb-4">
+                        <div>
+                            <h3 class="text-xl font-semibold text-Ragnar-400">wpa-sec Integration</h3>
+                            <p class="text-sm text-gray-400 mt-1">Automatically import cracked WiFi passwords from <a href="https://wpa-sec.stanev.org" target="_blank" class="text-cyan-400 hover:underline">wpa-sec.stanev.org</a> into Ragnar's known networks list.</p>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <span id="wpasec-status-badge" class="text-xs font-semibold uppercase tracking-wide px-3 py-1 rounded-full bg-slate-700 text-slate-200">Disabled</span>
+                            <button onclick="pollWpaSecNow()" class="bg-cyan-700 hover:bg-cyan-600 text-white px-4 py-2 rounded-lg transition-colors text-sm">
+                                Poll Now
+                            </button>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        <!-- Config card -->
+                        <div class="glass rounded-lg p-4">
+                            <h4 class="font-medium text-lg mb-4">Configuration</h4>
+                            <div class="space-y-4">
+                                <div>
+                                    <label class="flex items-center space-x-3 cursor-pointer mb-1">
+                                        <input type="checkbox" id="wpasec-auto-connect" class="w-5 h-5 rounded border-gray-600 text-cyan-600 focus:ring-cyan-500 focus:ring-offset-gray-900">
+                                        <span class="text-sm font-medium">Enable (active polling)</span>
+                                    </label>
+                                    <p class="text-xs text-gray-500 ml-8">Start the background poller — polls wpa-sec on the interval below</p>
+                                </div>
+                                <div>
+                                    <label class="block text-sm text-gray-400 mb-1">API Key</label>
+                                    <input type="password" id="wpasec-api-key" placeholder="Your wpa-sec API key"
+                                           class="w-full px-4 py-2 rounded-lg bg-slate-700 border border-slate-600 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 text-sm font-mono">
+                                    <p class="text-xs text-gray-500 mt-1">Get your key from <a href="https://wpa-sec.stanev.org" target="_blank" class="text-cyan-400 hover:underline">wpa-sec.stanev.org</a> → account → API Key</p>
+                                </div>
+                                <div>
+                                    <label class="block text-sm text-gray-400 mb-1">Poll Interval (seconds)</label>
+                                    <input type="number" id="wpasec-poll-interval" min="300" max="86400" value="3600"
+                                           class="w-full px-4 py-2 rounded-lg bg-slate-700 border border-slate-600 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 text-sm">
+                                    <p class="text-xs text-gray-500 mt-1">Default: 3600 (1 hour). Minimum: 300 (5 min)</p>
+                                </div>
+                                <div>
+                                    <label class="block text-sm text-gray-400 mb-1">Network Priority</label>
+                                    <input type="number" id="wpasec-priority" min="1" max="10" value="5"
+                                           class="w-full px-4 py-2 rounded-lg bg-slate-700 border border-slate-600 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 text-sm">
+                                    <p class="text-xs text-gray-500 mt-1">Priority assigned to auto-added networks (1–10)</p>
+                                </div>
+                                <div>
+                                    <label class="flex items-center space-x-3 cursor-pointer">
+                                        <input type="checkbox" id="wpasec-auto-connect-toggle" class="w-5 h-5 rounded border-gray-600 text-cyan-600 focus:ring-cyan-500 focus:ring-offset-gray-900" checked>
+                                        <span class="text-sm font-medium">Auto-add to Known Networks</span>
+                                    </label>
+                                    <p class="text-xs text-gray-500 ml-8 mt-1">When a password is found, automatically add it so Ragnar can connect</p>
+                                </div>
+                                <button onclick="saveWpaSecConfig()" class="w-full bg-cyan-700 hover:bg-cyan-600 text-white py-2 px-4 rounded-lg transition-colors font-medium">
+                                    Save wpa-sec Settings
+                                </button>
+                            </div>
+                        </div>
+                        <!-- Status / last poll card -->
+                        <div class="glass rounded-lg p-4">
+                            <h4 class="font-medium text-lg mb-4">Status</h4>
+                            <div class="space-y-3 text-sm text-gray-300">
+                                <div class="flex justify-between">
+                                    <span class="text-gray-400">Poller Active</span>
+                                    <span id="wpasec-status-active" class="font-semibold text-slate-200">—</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-400">Last Poll Result</span>
+                                    <span id="wpasec-last-result" class="font-semibold text-slate-200">Never polled</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-400">Networks Added</span>
+                                    <span id="wpasec-networks-added" class="font-semibold text-cyan-400">—</span>
+                                </div>
+                            </div>
+                            <div class="mt-4 p-3 bg-slate-900/60 rounded-lg border border-slate-700 text-xs text-gray-400">
+                                <p class="font-medium text-gray-300 mb-1">How it works</p>
+                                <ol class="list-decimal list-inside space-y-1">
+                                    <li>Pwnagotchi (or manual upload) captures WPA handshakes and uploads them to wpa-sec</li>
+                                    <li>wpa-sec cracks the password</li>
+                                    <li>Ragnar polls the wpa-sec API and imports the cracked password</li>
+                                    <li>Next time Ragnar sees that network, it connects automatically</li>
+                                </ol>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- AI Configuration Section -->
                 <div class="mb-8">
                     <h3 class="text-xl font-semibold mb-4 text-Ragnar-400">AI Integration</h3>

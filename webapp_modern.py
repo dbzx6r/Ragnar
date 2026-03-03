@@ -3000,6 +3000,16 @@ def update_config():
                 os.system('systemctl restart ragnar.service')
             threading.Thread(target=_delayed_restart, daemon=True).start()
 
+        # Start or stop wpa-sec poller when wpasec_enabled changes
+        if 'wpasec_enabled' in data:
+            ragnar_inst = getattr(shared_data, 'ragnar_instance', None)
+            wpa_sec = getattr(ragnar_inst, 'wpa_sec', None) if ragnar_inst else None
+            if wpa_sec:
+                if data['wpasec_enabled']:
+                    wpa_sec.start()
+                else:
+                    wpa_sec.stop()
+
         return jsonify(response)
     except Exception as e:
         logger.error(f"Error updating config: {e}")
@@ -3246,6 +3256,21 @@ def detect_hardware():
             'detection_method': 'fallback',
             'error': str(e)
         }), 200
+
+@app.route('/api/wpasec/poll', methods=['POST'])
+def wpasec_poll_now():
+    """Trigger an immediate wpa-sec poll outside the background schedule."""
+    try:
+        ragnar_inst = getattr(shared_data, 'ragnar_instance', None)
+        wpa_sec = getattr(ragnar_inst, 'wpa_sec', None) if ragnar_inst else None
+        if not wpa_sec:
+            return jsonify({'error': 'wpa_sec_unavailable'}), 503
+        result = wpa_sec.poll_now()
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"wpa-sec manual poll failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
 
 @app.route('/api/config/apply-profile', methods=['POST'])
 def apply_hardware_profile():
