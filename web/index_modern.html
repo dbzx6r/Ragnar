@@ -3743,8 +3743,71 @@
         </div>
     </div>
 
+    <!-- Host Detail Panel -->
+    <div id="host-detail-overlay" class="fixed inset-0 bg-black bg-opacity-50 hidden z-40" onclick="closeHostPanel()"></div>
+    <div id="host-detail-panel" class="fixed top-0 right-0 h-full w-full sm:w-2/3 lg:w-1/2 xl:w-2/5 bg-slate-900 border-l border-slate-700 shadow-2xl z-50 transform translate-x-full transition-transform duration-300 overflow-y-auto">
+        <div class="p-6">
+            <!-- Header -->
+            <div class="flex items-center justify-between mb-6">
+                <div>
+                    <h2 id="hdp-ip" class="text-2xl font-bold font-mono"></h2>
+                    <p id="hdp-hostname" class="text-gray-400 text-sm mt-1"></p>
+                </div>
+                <button onclick="closeHostPanel()" class="p-2 hover:bg-slate-700 rounded-lg transition-colors">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Status / Meta -->
+            <div class="grid grid-cols-2 gap-3 mb-6">
+                <div class="bg-slate-800 rounded-lg p-3">
+                    <div class="text-xs text-gray-400 mb-1">Status</div>
+                    <div id="hdp-status" class="font-semibold"></div>
+                </div>
+                <div class="bg-slate-800 rounded-lg p-3">
+                    <div class="text-xs text-gray-400 mb-1">MAC</div>
+                    <div id="hdp-mac" class="font-mono text-sm"></div>
+                </div>
+                <div class="bg-slate-800 rounded-lg p-3">
+                    <div class="text-xs text-gray-400 mb-1">Last Seen</div>
+                    <div id="hdp-lastseen" class="text-sm"></div>
+                </div>
+                <div class="bg-slate-800 rounded-lg p-3">
+                    <div class="text-xs text-gray-400 mb-1">Open Ports</div>
+                    <div id="hdp-portcount" class="font-semibold"></div>
+                </div>
+            </div>
+
+            <!-- Open Ports -->
+            <div class="mb-6">
+                <h3 class="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-2">Open Ports</h3>
+                <div id="hdp-ports" class="flex flex-wrap gap-2"></div>
+            </div>
+
+            <!-- Credentials -->
+            <div class="mb-6">
+                <h3 class="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-2">Credentials Found</h3>
+                <div id="hdp-creds" class="space-y-2"></div>
+            </div>
+
+            <!-- Attack History -->
+            <div class="mb-6">
+                <h3 class="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-2">Attack History</h3>
+                <div id="hdp-attacks" class="space-y-2 max-h-64 overflow-y-auto"></div>
+            </div>
+
+            <!-- Vulnerability Summary -->
+            <div id="hdp-vuln-section" class="mb-6 hidden">
+                <h3 class="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-2">Vulnerability Notes</h3>
+                <pre id="hdp-vuln" class="bg-slate-800 rounded-lg p-3 text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap max-h-48 overflow-y-auto"></pre>
+            </div>
+        </div>
+    </div>
+
     <!-- JavaScript -->
     <script src="/web/scripts/ragnar_modern.js?v=20251127"></script>
-    
+
 </body>
 </html>

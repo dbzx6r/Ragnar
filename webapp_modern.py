@@ -3612,6 +3612,89 @@ def get_network():
             return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/host/<path:ip>')
+def get_host_detail(ip):
+    """Get all aggregated data for a single host"""
+    try:
+        # Get host base data from DB
+        host_data = None
+        hosts = shared_data.db.get_all_hosts()
+        for h in hosts:
+            if h.get('ip') == ip:
+                host_data = h
+                break
+
+        if not host_data:
+            return jsonify({'error': 'Host not found'}), 404
+
+        ports_str = host_data.get('ports', '')
+        ports = [p.strip() for p in ports_str.split(',') if p.strip()] if ports_str else []
+
+        # Get credentials for this IP across all services
+        all_creds = web_utils.get_all_credentials()
+        host_creds = []
+        for svc, entries in all_creds.items():
+            for e in entries:
+                if e.get('ip') == ip:
+                    host_creds.append({**e, 'service': svc})
+
+        # Get attack logs for this IP (last 30)
+        attack_log_dir = os.path.join(shared_data.logsdir, 'attacks')
+        host_attacks = []
+        if os.path.exists(attack_log_dir):
+            from datetime import datetime, timedelta
+            cutoff = datetime.now() - timedelta(days=30)
+            for lf in sorted(os.listdir(attack_log_dir), reverse=True)[:30]:
+                if not lf.startswith('attacks_') or not lf.endswith('.json'):
+                    continue
+                try:
+                    file_date = datetime.strptime(lf.replace('attacks_','').replace('.json',''), '%Y-%m-%d')
+                    if file_date < cutoff:
+                        continue
+                    with open(os.path.join(attack_log_dir, lf), 'r', encoding='utf-8') as f:
+                        for entry in json.load(f):
+                            if entry.get('target_ip') == ip:
+                                host_attacks.append(entry)
+                except Exception:
+                    continue
+        host_attacks.sort(key=lambda x: x.get('timestamp',''), reverse=True)
+        host_attacks = host_attacks[:30]
+
+        # Get vulnerability file for this IP if it exists
+        vuln_summary = ''
+        vuln_file = os.path.join(shared_data.vulnerabilities_dir, f'vuln_{ip}.txt')
+        if os.path.exists(vuln_file):
+            try:
+                with open(vuln_file, 'r', encoding='utf-8', errors='ignore') as f:
+                    vuln_summary = f.read(4000)  # cap at 4KB
+            except Exception:
+                pass
+
+        return jsonify({
+            'ip': ip,
+            'hostname': host_data.get('hostname', ''),
+            'mac': host_data.get('mac', ''),
+            'status': host_data.get('status', 'unknown'),
+            'ports': ports,
+            'last_seen': host_data.get('last_seen', ''),
+            'notes': host_data.get('notes', ''),
+            'services': {
+                'ssh': host_data.get('ssh_connector', ''),
+                'ftp': host_data.get('ftp_connector', ''),
+                'smb': host_data.get('smb_connector', ''),
+                'telnet': host_data.get('telnet_connector', ''),
+                'rdp': host_data.get('rdp_connector', ''),
+                'sql': host_data.get('sql_connector', ''),
+            },
+            'credentials': host_creds,
+            'attack_logs': host_attacks,
+            'vuln_summary': vuln_summary,
+        })
+    except Exception as e:
+        logger.error(f"Error getting host detail for {ip}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/credentials')
 def get_credentials():
     """Get discovered credentials"""
