@@ -173,5 +173,26 @@
         "b_port": 161,
         "b_status": "snmp_scan",
         "b_parent": null
+    },
+    {
+        "b_module": "tshark_capture",
+        "b_class": "TsharkCapture",
+        "b_port": null,
+        "b_status": "tshark_capture",
+        "b_parent": null
+    },
+    {
+        "b_module": "ngrep_scanner",
+        "b_class": "NgrepScanner",
+        "b_port": null,
+        "b_status": "ngrep_scan",
+        "b_parent": null
+    },
+    {
+        "b_module": "nuclei_scanner",
+        "b_class": "NucleiScanner",
+        "b_port": null,
+        "b_status": "nuclei_scan",
+        "b_parent": null
     }
 ]

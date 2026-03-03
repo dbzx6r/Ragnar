@@ -523,6 +523,9 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeRouterScannerToggle();
     initializeMQTTScannerToggle();
     initializeSNMPScannerToggle();
+    initializeTsharkToggle();
+    initializeNgrepToggle();
+    initializeNucleiToggle();
     initializeAggressiveMode();
     handleHeadlessMode();
 
@@ -4646,6 +4649,69 @@ function initializeSNMPScannerToggle() {
         if (!data) return;
         const checkbox = document.getElementById('snmp-scanner-enabled');
         if (checkbox) checkbox.checked = data.snmp_scanner_enabled !== false;
+    }).catch(() => {});
+}
+
+// ── tshark Capture ────────────────────────────────────────────────────────────
+
+function toggleTsharkEnabled() {
+    const checkbox = document.getElementById('tshark-enabled');
+    if (!checkbox) return;
+    postAPI('/api/config', { tshark_enabled: checkbox.checked }).then(() => {
+        showNotification(
+            checkbox.checked ? 'tshark Capture enabled' : 'tshark Capture disabled',
+            checkbox.checked ? 'success' : 'info'
+        );
+    }).catch(() => showNotification('Failed to update tshark setting', 'error'));
+}
+
+function initializeTsharkToggle() {
+    fetchAPI('/api/config').then(data => {
+        if (!data) return;
+        const checkbox = document.getElementById('tshark-enabled');
+        if (checkbox) checkbox.checked = data.tshark_enabled === true;
+    }).catch(() => {});
+}
+
+// ── ngrep Traffic Search ──────────────────────────────────────────────────────
+
+function toggleNgrepEnabled() {
+    const checkbox = document.getElementById('ngrep-enabled');
+    if (!checkbox) return;
+    postAPI('/api/config', { ngrep_enabled: checkbox.checked }).then(() => {
+        showNotification(
+            checkbox.checked ? 'ngrep Traffic Search enabled' : 'ngrep Traffic Search disabled',
+            checkbox.checked ? 'success' : 'info'
+        );
+    }).catch(() => showNotification('Failed to update ngrep setting', 'error'));
+}
+
+function initializeNgrepToggle() {
+    fetchAPI('/api/config').then(data => {
+        if (!data) return;
+        const checkbox = document.getElementById('ngrep-enabled');
+        if (checkbox) checkbox.checked = data.ngrep_enabled === true;
+    }).catch(() => {});
+}
+
+// ── Nuclei Scanner ────────────────────────────────────────────────────────────
+
+function toggleNucleiEnabled() {
+    const checkbox = document.getElementById('nuclei-enabled');
+    if (!checkbox) return;
+    postAPI('/api/config', { nuclei_enabled: checkbox.checked }).then(() => {
+        showNotification(
+            checkbox.checked ? 'Nuclei Scanner enabled' : 'Nuclei Scanner disabled',
+            checkbox.checked ? 'success' : 'info'
+        );
+    }).catch(() => showNotification('Failed to update Nuclei setting', 'error'));
+}
+
+function initializeNucleiToggle() {
+    fetchAPI('/api/config').then(data => {
+        if (!data) return;
+        const checkbox = document.getElementById('nuclei-enabled');
+        if (checkbox) checkbox.checked = data.nuclei_enabled === true;
     }).catch(() => {});
 }
 

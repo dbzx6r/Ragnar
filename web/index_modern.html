@@ -3620,6 +3620,62 @@
                                 Uses snmpwalk (pre-installed) · Saves full MIB dump to Data Stolen
                             </div>
                         </div>
+
+                        <!-- Advanced Tools Section -->
+                        <div class="col-span-full mt-2 mb-1">
+                            <div style="border-top:1px solid rgba(255,255,255,0.08);padding-top:1rem;">
+                                <h4 class="font-semibold text-sm text-cyan-400 mb-1">Advanced Traffic &amp; Vulnerability Tools</h4>
+                                <p class="text-xs text-yellow-400" style="margin-bottom:0.75rem;">⚠️ Recommended for Pi 5 / 8 GB+ hardware. Can be enabled on lower-powered devices — monitor for instability.</p>
+                            </div>
+                        </div>
+
+                        <div class="glass rounded-lg p-4">
+                            <div class="flex items-center justify-between mb-3">
+                                <h4 class="font-medium">tshark Capture</h4>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="tshark-enabled" class="sr-only peer" onchange="toggleTsharkEnabled()">
+                                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-cyan-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-600"></div>
+                                </label>
+                            </div>
+                            <div class="text-sm text-gray-400 mb-3">
+                                Run a short tshark packet capture on each network and save a pcap to Data Stolen for offline analysis.
+                            </div>
+                            <div class="text-xs text-gray-500">
+                                Requires tshark (Wireshark CLI) · Captures 30s · Pi 5 / 8 GB+ recommended
+                            </div>
+                        </div>
+
+                        <div class="glass rounded-lg p-4">
+                            <div class="flex items-center justify-between mb-3">
+                                <h4 class="font-medium">ngrep Traffic Search</h4>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="ngrep-enabled" class="sr-only peer" onchange="toggleNgrepEnabled()">
+                                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-cyan-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-600"></div>
+                                </label>
+                            </div>
+                            <div class="text-sm text-gray-400 mb-3">
+                                Passively search live traffic for plaintext credentials, tokens, and sensitive strings using pattern matching.
+                            </div>
+                            <div class="text-xs text-gray-500">
+                                Requires ngrep · Scans HTTP, FTP, Telnet, POP3 · Pi 5 / 8 GB+ recommended
+                            </div>
+                        </div>
+
+                        <div class="glass rounded-lg p-4">
+                            <div class="flex items-center justify-between mb-3">
+                                <h4 class="font-medium">Nuclei Scanner</h4>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="nuclei-enabled" class="sr-only peer" onchange="toggleNucleiEnabled()">
+                                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-cyan-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-600"></div>
+                                </label>
+                            </div>
+                            <div class="text-sm text-gray-400 mb-3">
+                                Run Nuclei vulnerability templates against discovered hosts. Detects CVEs, misconfigs, exposed panels, and default credentials.
+                            </div>
+                            <div class="text-xs text-gray-500">
+                                Requires nuclei · Community templates · Pi 5 / 8 GB+ recommended
+                            </div>
+                        </div>
                         
                     </div>
                 </div>
