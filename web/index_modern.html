@@ -215,6 +215,8 @@
                 width: 100%;
             }
         }
+        /* Toggle switch: show green when ON, regardless of Tailwind purge state */
+        label > input[type="checkbox"]:checked + div { background-color: #16a34a !important; }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 </head>
@@ -3624,7 +3626,7 @@
                         <!-- Advanced Tools Section -->
                         <div class="col-span-full mt-2 mb-1">
                             <div style="border-top:1px solid rgba(255,255,255,0.08);padding-top:1rem;">
-                                <h4 class="font-semibold text-sm text-cyan-400 mb-1">Advanced Traffic &amp; Vulnerability Tools</h4>
+                                <h3 class="text-xl font-semibold mb-4 text-Ragnar-400">Advanced Traffic &amp; Vulnerability Tools</h3>
                                 <p class="text-xs text-yellow-400" style="margin-bottom:0.75rem;">⚠️ Recommended for Pi 5 / 8 GB+ hardware. Can be enabled on lower-powered devices — monitor for instability.</p>
                             </div>
                         </div>
