@@ -616,6 +616,22 @@ class SharedData:
             if hasattr(self, attr):
                 delattr(self, attr)
 
+    def _migrate_config(self):
+        """Apply one-time config migrations for existing installs after a git pull."""
+        changed = False
+
+        # Multi-scan should default to enabled so scanning starts automatically
+        if self.config.get('wifi_multi_scan_mode') == 'single' and \
+                not self.config.get('wifi_multi_network_scans_enabled', False) and \
+                not self.config.get('wifi_scan_interface_overrides'):
+            self.config['wifi_multi_scan_mode'] = 'multi'
+            self.config['wifi_multi_network_scans_enabled'] = True
+            logger.info("Config migration: enabled multi-scan mode as new default")
+            changed = True
+
+        if changed:
+            self.save_config()
+
     def update_mac_blacklist(self):
         """Update the MAC blacklist without immediate save."""
         mac_address = self.get_raspberry_mac()
@@ -1174,6 +1190,7 @@ class SharedData:
                     for key, value in self.config.items():
                         setattr(self, key, value)
                     self._remove_legacy_attributes()
+                    self._migrate_config()
             else:
                 logger.warning("Configuration file not found, creating new one with default values...")
                 self.save_config()
