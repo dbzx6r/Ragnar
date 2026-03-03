@@ -29,7 +29,7 @@ except ImportError:
 
 from logger import Logger
 
-WPA_SEC_URL = "https://wpa-sec.stanev.org/?api&get=netlist"
+WPA_SEC_URL = "https://wpa-sec.stanev.org/?api&dl=1"
 CACHE_FILENAME = "wpa_sec_imported.json"
 
 
@@ -173,8 +173,8 @@ class WpaSecIntegration:
     @staticmethod
     def _parse_netlist(text: str) -> list:
         """
-        Parse wpa-sec netlist TSV response.
-        Each line: <BSSID>\t<SSID>\t<Password>
+        Parse wpa-sec download response (?api&dl=1).
+        Each line: <BSSID>,<StationMAC>,<SSID>,<Password>
         Returns list of dicts with keys: bssid, ssid, password
         """
         entries = []
@@ -182,12 +182,15 @@ class WpaSecIntegration:
             line = line.strip()
             if not line or line.startswith('#'):
                 continue
-            parts = line.split('\t')
-            if len(parts) < 3:
+            # Format: bssid,station_mac,ssid,password
+            # Split on comma with maxsplit=3 to preserve commas in password
+            parts = line.split(',', 3)
+            if len(parts) < 4:
                 continue
             bssid = parts[0].strip().lower()
-            ssid = parts[1].strip()
-            password = parts[2].strip()
+            # parts[1] is station_mac — skip it
+            ssid = parts[2].strip()
+            password = parts[3].strip()
             if not bssid or not ssid or not password:
                 continue
             entries.append({'bssid': bssid, 'ssid': ssid, 'password': password})
