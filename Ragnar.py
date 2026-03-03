@@ -33,6 +33,7 @@ from comment import Commentaireia
 from orchestrator import Orchestrator
 from logger import Logger
 from wifi_manager import WiFiManager
+from wpa_sec_integration import WpaSecIntegration
 from env_manager import load_env
 
 try:
@@ -51,6 +52,7 @@ class Ragnar:
         self.orchestrator = None
         self.wifi_manager = WiFiManager(shared_data)
         self.wpa_sec = WpaSecIntegration(shared_data) if WpaSecIntegration else None
+=======
 
         # Set reference to this instance in shared_data for other modules
         self.shared_data.ragnar_instance = self
@@ -97,6 +99,7 @@ class Ragnar:
         # Start wpa-sec integration (polls for cracked WiFi passwords)
         if self.wpa_sec:
             self.wpa_sec.start()
+=======
         
         # Main loop to keep Ragnar running
         logger.info("Entering main Ragnar loop...")
@@ -188,6 +191,7 @@ class Ragnar:
 
         # Stop wpa-sec poller
         if hasattr(self, 'wpa_sec') and self.wpa_sec:
+=======
             self.wpa_sec.stop()
         
         # Set exit flags
