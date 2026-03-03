@@ -223,8 +223,8 @@ class NetworkScanner:
         
         port_list = ','.join(map(str, ordered_ports))
         
-
-        nmap_args = f"-Pn -sS -p{port_list} --open --min-rate 1000 --max-retries 1 --host-timeout 10s -v"
+        timing = getattr(self.shared_data, 'nmap_scan_aggressivity', '-T4')
+        nmap_args = f"-Pn -sS -p{port_list} --open {timing} --min-rate 1000 --max-retries 1 --host-timeout 10s -v"
         
         nmap_command = f"nmap {nmap_args} {network_cidr}"
         self.logger.info(f"🔍 Executing: {nmap_command}")
@@ -856,7 +856,8 @@ class NetworkScanner:
                 
                 # Nmap arguments: -Pn (skip ping), -sT (TCP connect), --host-timeout (per-host timeout)
                 # Removed --open flag to see all port states (open, closed, filtered)
-                nmap_args = f"-Pn -sT -p{port_list} --host-timeout 30s"
+                timing = getattr(self.outer_instance.shared_data, 'nmap_scan_aggressivity', '-T4')
+                nmap_args = f"-Pn -sT {timing} -p{port_list} --host-timeout 30s"
                 
                 self.logger.debug(f"🔍 Executing nmap command for {self.target}: nmap {nmap_args} {self.target}")
                 

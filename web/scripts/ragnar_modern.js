@@ -519,6 +519,8 @@ document.addEventListener('DOMContentLoaded', function() {
     initializePwnUI();
     initializePwnagotchiVisibility();
     initializeWpaSecVisibility();
+    initializeIpCamToggle();
+    initializeAggressiveMode();
     handleHeadlessMode();
 
 });
@@ -4512,6 +4514,50 @@ function togglePwnagotchiVisibility() {
     applyPwnVisibilityPreference(isEnabled);
 }
 
+// ── IP Camera Scanner ─────────────────────────────────────────────────────────
+
+function toggleIpCamEnabled() {
+    const checkbox = document.getElementById('ipcam-enabled');
+    if (!checkbox) return;
+    postAPI('/api/config', { ipcam_enabled: checkbox.checked }).then(() => {
+        showNotification(
+            checkbox.checked ? 'IP Camera Scanner enabled' : 'IP Camera Scanner disabled',
+            checkbox.checked ? 'success' : 'info'
+        );
+    }).catch(() => showNotification('Failed to update IP Camera Scanner setting', 'error'));
+}
+
+function initializeIpCamToggle() {
+    fetchAPI('/api/config').then(data => {
+        if (!data) return;
+        const checkbox = document.getElementById('ipcam-enabled');
+        if (checkbox) checkbox.checked = data.ipcam_enabled !== false;
+    }).catch(() => {});
+}
+
+// ── Aggressive Mode ───────────────────────────────────────────────────────────
+
+function toggleAggressiveMode() {
+    const checkbox = document.getElementById('aggressive-mode-enabled');
+    if (!checkbox) return;
+    const enabled = checkbox.checked;
+    postAPI('/api/config', { aggressive_mode_enabled: enabled }).then(() => {
+        if (enabled) {
+            showNotification('Aggressive Mode ON — fast scan preset applied', 'warning');
+        } else {
+            showNotification('Aggressive Mode OFF — conservative defaults restored', 'info');
+        }
+    }).catch(() => showNotification('Failed to update Aggressive Mode setting', 'error'));
+}
+
+function initializeAggressiveMode() {
+    fetchAPI('/api/config').then(data => {
+        if (!data) return;
+        const checkbox = document.getElementById('aggressive-mode-enabled');
+        if (checkbox) checkbox.checked = Boolean(data.aggressive_mode_enabled);
+    }).catch(() => {});
+}
+
 // ── wpa-sec integration ───────────────────────────────────────────────────────
 
 function toggleWpaSecVisibility() {
@@ -4630,15 +4676,18 @@ async function loadWpaSecImported() {
         const rows = entries.map(e => {
             const date = e.imported_at ? new Date(e.imported_at).toLocaleDateString() : '—';
             const ssid = escapeHtml(e.ssid || 'Unknown');
-            const bssid = escapeHtml(e.bssid || '—');
+            const apCount = e.ap_count || 1;
+            const apBadge = apCount > 1
+                ? `<span class="text-xs text-slate-400 flex-shrink-0 ml-1">${apCount} APs</span>`
+                : '';
             return `<div class="flex items-center justify-between px-4 py-2.5 border-b border-slate-800/60 hover:bg-slate-800/40 transition-colors">
                 <div class="flex items-center gap-3 min-w-0">
                     <svg class="w-4 h-4 text-cyan-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"></path>
                     </svg>
-                    <div class="min-w-0">
+                    <div class="min-w-0 flex items-center gap-2">
                         <p class="text-sm font-medium text-white truncate">${ssid}</p>
-                        <p class="text-xs text-gray-500 font-mono">${bssid}</p>
+                        ${apBadge}
                     </div>
                 </div>
                 <span class="text-xs text-gray-500 flex-shrink-0 ml-2">${date}</span>

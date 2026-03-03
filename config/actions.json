@@ -84,6 +84,13 @@
         "b_parent": "TelnetBruteforce"
     },
     {
+        "b_module": "ipcam_scanner",
+        "b_class": "IpCameraScanner",
+        "b_port": 554,
+        "b_status": "ipcam_scan",
+        "b_parent": null
+    },
+    {
         "b_module": "telnet_connector",
         "b_class": "TelnetBruteforce",
         "b_port": 23,

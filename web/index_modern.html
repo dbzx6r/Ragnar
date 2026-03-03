@@ -3522,6 +3522,39 @@
                                 Toggle to show/hide wpa-sec configuration options below
                             </div>
                         </div>
+
+                        <!-- Aggressive Mode Toggle Card -->
+                        <div class="glass rounded-lg p-4 border border-red-900/40">
+                            <div class="flex items-center justify-between mb-3">
+                                <h4 class="font-medium text-red-300">Aggressive Mode</h4>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="aggressive-mode-enabled" class="sr-only peer" onchange="toggleAggressiveMode()">
+                                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-red-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600"></div>
+                                </label>
+                            </div>
+                            <div class="text-sm text-gray-400 mb-3">
+                                Faster scans, shorter retry delays, and immediate network entry. Applies a performance preset to all timing settings.
+                            </div>
+                            <div class="text-xs text-gray-500">
+                                Scan interval 60s · Vuln scan 180s · Retry delays 60/120s · Attacks new networks immediately
+                            </div>
+                        </div>
+
+                        <div class="glass rounded-lg p-4">
+                            <div class="flex items-center justify-between mb-3">
+                                <h4 class="font-medium">IP Camera Scanner</h4>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="ipcam-enabled" class="sr-only peer" onchange="toggleIpCamEnabled()">
+                                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-cyan-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-600"></div>
+                                </label>
+                            </div>
+                            <div class="text-sm text-gray-400 mb-3">
+                                Auto-discover IP cameras (port 554/RTSP), test default credentials, and save a snapshot to Data Stolen.
+                            </div>
+                            <div class="text-xs text-gray-500">
+                                Supports Hikvision, Dahua, Axis, Foscam, Amcrest, Reolink, and generic cameras
+                            </div>
+                        </div>
                         
                     </div>
                 </div>

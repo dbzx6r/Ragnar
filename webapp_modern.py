@@ -3000,6 +3000,33 @@ def update_config():
                 os.system('systemctl restart ragnar.service')
             threading.Thread(target=_delayed_restart, daemon=True).start()
 
+        # Apply or revert aggressive mode preset when aggressive_mode_enabled changes
+        if 'aggressive_mode_enabled' in data:
+            if data['aggressive_mode_enabled']:
+                aggressive_preset = {
+                    'scan_interval': 60,
+                    'scan_vuln_interval': 180,
+                    'failed_retry_delay': 60,
+                    'success_retry_delay': 120,
+                    'nmap_scan_aggressivity': '-T4',
+                    'network_confirmation_scans': 1,
+                    'network_change_grace': 60,
+                }
+                shared_data.update_config(aggressive_preset)
+                logger.info("Aggressive mode enabled — applied fast-scan preset")
+            else:
+                conservative_preset = {
+                    'scan_interval': 180,
+                    'scan_vuln_interval': 300,
+                    'failed_retry_delay': 180,
+                    'success_retry_delay': 300,
+                    'nmap_scan_aggressivity': '-T4',
+                    'network_confirmation_scans': 3,
+                    'network_change_grace': 300,
+                }
+                shared_data.update_config(conservative_preset)
+                logger.info("Aggressive mode disabled — restored conservative preset")
+
         # Start or stop wpa-sec poller when wpasec_enabled changes
         if 'wpasec_enabled' in data:
             ragnar_inst = getattr(shared_data, 'ragnar_instance', None)
@@ -3274,7 +3301,7 @@ def wpasec_poll_now():
 
 @app.route('/api/wpasec/imported', methods=['GET'])
 def wpasec_imported_networks():
-    """Return the list of networks imported from wpa-sec."""
+    """Return the list of networks imported from wpa-sec, deduplicated by SSID."""
     try:
         import json as _json
         cache_path = os.path.join(shared_data.datadir, 'wpa_sec_imported.json')
@@ -3282,7 +3309,22 @@ def wpasec_imported_networks():
             return jsonify({'imported': []})
         with open(cache_path, 'r', encoding='utf-8') as fh:
             data = _json.load(fh)
-        return jsonify(data)
+
+        # Collapse entries by SSID — keep earliest imported_at, count distinct BSSIDs
+        seen: dict = {}
+        for entry in data.get('imported', []):
+            ssid = entry.get('ssid', '')
+            if not ssid:
+                continue
+            if ssid not in seen:
+                seen[ssid] = {'ssid': ssid, 'bssid': entry.get('bssid', ''), 'imported_at': entry.get('imported_at', ''), 'ap_count': 1}
+            else:
+                seen[ssid]['ap_count'] += 1
+                # Keep earliest imported_at
+                if entry.get('imported_at', '') < seen[ssid]['imported_at']:
+                    seen[ssid]['imported_at'] = entry['imported_at']
+
+        return jsonify({'imported': list(seen.values())})
     except Exception as e:
         logger.error(f"Failed to read wpa-sec imported list: {e}")
         return jsonify({'error': str(e)}), 500

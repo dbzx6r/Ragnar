@@ -46,7 +46,10 @@ class WpaSecIntegration:
         self._cache_path = os.path.join(data_dir, CACHE_FILENAME)
 
         # Cache: set of BSSIDs already imported, to avoid duplicates across restarts
-        self._imported_bssids: set = self._load_cache()
+        self._imported_bssids: set
+        # Cache: set of "ssid|password" already imported, to skip same-network multi-AP entries
+        self._imported_ssid_keys: set
+        self._imported_bssids, self._imported_ssid_keys = self._load_cache()
 
     # ------------------------------------------------------------------
     # Public API
@@ -135,7 +138,11 @@ class WpaSecIntegration:
         entries = self._parse_netlist(resp.text)
         result['total_cracked'] = len(entries)
 
-        new_entries = [e for e in entries if e['bssid'] not in self._imported_bssids]
+        new_entries = []
+        for e in entries:
+            ssid_key = f"{e['ssid']}|{e['password']}"
+            if e['bssid'] not in self._imported_bssids and ssid_key not in self._imported_ssid_keys:
+                new_entries.append(e)
 
         if not new_entries:
             self.logger.debug(f"wpa-sec poll: {len(entries)} cracked total, 0 new")
@@ -161,6 +168,7 @@ class WpaSecIntegration:
                 result['added'] += 1
 
             self._imported_bssids.add(bssid)
+            self._imported_ssid_keys.add(f"{ssid}|{password}")
 
         self._save_cache(new_entries)
         self.logger.info(f"wpa-sec poll complete: {result['added']} new network(s) added ({len(entries)} total cracked)")
@@ -201,15 +209,19 @@ class WpaSecIntegration:
     # Cache helpers
     # ------------------------------------------------------------------
 
-    def _load_cache(self) -> set:
+    def _load_cache(self) -> tuple:
+        """Returns (imported_bssids: set, imported_ssid_keys: set)."""
         try:
             if os.path.exists(self._cache_path):
                 with open(self._cache_path, 'r', encoding='utf-8') as fh:
                     data = json.load(fh)
-                    return {entry['bssid'] for entry in data.get('imported', [])}
+                    imported = data.get('imported', [])
+                    bssids = {entry['bssid'] for entry in imported}
+                    ssid_keys = {f"{entry['ssid']}|{entry.get('password', '')}" for entry in imported if entry.get('password')}
+                    return bssids, ssid_keys
         except (OSError, json.JSONDecodeError, KeyError) as exc:
             self.logger.warning(f"Could not load wpa-sec cache: {exc}")
-        return set()
+        return set(), set()
 
     def _save_cache(self, new_entries: list):
         try:
@@ -225,6 +237,7 @@ class WpaSecIntegration:
             existing.append({
                 'bssid': entry['bssid'],
                 'ssid': entry['ssid'],
+                'password': entry['password'],
                 'imported_at': now,
             })
 
