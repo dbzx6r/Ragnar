@@ -13842,6 +13842,25 @@ function downloadScanReport(scanId) {
     window.open(`/api/vuln-advanced/scan/${scanId}/report?format=html`, '_blank');
 }
 
+async function exportScanReport() {
+    const btn = document.getElementById('export-report-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Generating...'; }
+    try {
+        const url = resolveNetworkAwareEndpoint('/api/report/export');
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = '';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        addConsoleMessage('Report download started', 'success');
+    } catch(err) {
+        addConsoleMessage('Report export failed: ' + err.message, 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-4-4m4 4l4-4m6 4H6"></path></svg>Export Report'; }
+    }
+}
+
 async function cancelAdvScan(scanId) {
     try {
         const response = await fetch(`/api/vuln-advanced/scan/${scanId}/cancel`, {

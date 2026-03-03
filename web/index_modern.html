@@ -342,6 +342,20 @@
         
         <!-- Dashboard Tab -->
         <div id="dashboard-tab" class="tab-content">
+            <!-- Report Export Bar -->
+            <div class="glass rounded-xl p-4 mb-6 flex items-center justify-between">
+                <div>
+                    <span class="font-semibold">Scan Report</span>
+                    <span class="text-gray-400 text-sm ml-2">Export a full HTML report of all findings</span>
+                </div>
+                <button onclick="exportScanReport()" id="export-report-btn"
+                    class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-colors text-sm flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-4-4m4 4l4-4m6 4H6"></path>
+                    </svg>
+                    Export Report
+                </button>
+            </div>
             <!-- Stats Grid -->
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-8">
                 <!-- Targets Card -->
