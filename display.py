@@ -59,6 +59,9 @@ class Display:
 
         try:
             self.epd_helper = self.shared_data.epd_helper
+            # Full refresh on startup to clear any ghost pixels from power cycle
+            self.epd_helper.init_full_update()
+            self.epd_helper.clear()
             self.epd_helper.init_partial_update()
             logger.info("Display initialization complete.")
         except Exception as e:
