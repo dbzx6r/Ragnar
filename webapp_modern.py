@@ -3042,406 +3042,51 @@ def update_config():
                 os.system('systemctl restart ragnar.service')
             threading.Thread(target=_delayed_restart, daemon=True).start()
 
-        return jsonify(response)
+@app.route('/api/wpasec/poll', methods=['POST'])
+def wpasec_poll_now():
+    """Trigger an immediate wpa-sec poll outside the background schedule."""
+    try:
+        ragnar_inst = getattr(shared_data, 'ragnar_instance', None)
+        wpa_sec = getattr(ragnar_inst, 'wpa_sec', None) if ragnar_inst else None
+        if not wpa_sec:
+            return jsonify({'error': 'wpa_sec_unavailable'}), 503
+        result = wpa_sec.poll_now()
+        return jsonify(result)
     except Exception as e:
-        logger.error(f"Error updating config: {e}")
+        logger.error(f"wpa-sec manual poll failed: {e}")
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/config/scan-subnets', methods=['GET', 'POST', 'DELETE'])
-def manage_scan_subnets():
-    """Manage the list of extra subnets to scan.
-
-    GET:    Return current list + auto-detected primary subnet.
-    POST:   Add a new CIDR (body: {"cidr": "10.0.0.0/24"}).
-    DELETE: Remove a CIDR  (body: {"cidr": "10.0.0.0/24"}).
-    """
-    import ipaddress as _ip
+@app.route('/api/wpasec/imported', methods=['GET'])
+def wpasec_imported_networks():
+    """Return the list of networks imported from wpa-sec, deduplicated by SSID."""
     try:
-        subnets = list(shared_data.config.get('scan_subnets', []))
+        import json as _json
+        cache_path = os.path.join(shared_data.datadir, 'wpa_sec_imported.json')
+        if not os.path.exists(cache_path):
+            return jsonify({'imported': []})
+        with open(cache_path, 'r', encoding='utf-8') as fh:
+            data = _json.load(fh)
 
-        # Detect primary subnet for reference
-        primary = None
-        try:
-            import netifaces
-            gws = netifaces.gateways()
-            gw_tuple = gws.get('default', {}).get(netifaces.AF_INET)
-            if gw_tuple:
-                iface_addrs = netifaces.ifaddresses(gw_tuple[1]).get(netifaces.AF_INET)
-                if iface_addrs:
-                    my_ip = iface_addrs[0]['addr']
-                    mask = iface_addrs[0]['netmask']
-                    cidr_bits = sum(bin(int(x)).count('1') for x in mask.split('.'))
-                    primary = str(_ip.ip_network(f"{my_ip}/{cidr_bits}", strict=False))
-        except Exception:
-            pass
+        # Collapse entries by SSID — keep earliest imported_at, count distinct BSSIDs
+        seen: dict = {}
+        for entry in data.get('imported', []):
+            ssid = entry.get('ssid', '')
+            if not ssid:
+                continue
+            if ssid not in seen:
+                seen[ssid] = {'ssid': ssid, 'bssid': entry.get('bssid', ''), 'imported_at': entry.get('imported_at', ''), 'ap_count': 1}
+            else:
+                seen[ssid]['ap_count'] += 1
+                # Keep earliest imported_at
+                if entry.get('imported_at', '') < seen[ssid]['imported_at']:
+                    seen[ssid]['imported_at'] = entry['imported_at']
 
-        if request.method == 'GET':
-            return jsonify({'subnets': subnets, 'primary': primary})
-
-        data = request.get_json() or {}
-        raw = str(data.get('cidr', '')).strip()
-        if not raw:
-            return jsonify({'error': 'Missing cidr field'}), 400
-
-        # Validate
-        try:
-            net = _ip.ip_network(raw, strict=False)
-            normalised = str(net)
-        except ValueError:
-            return jsonify({'error': f'Invalid CIDR: {raw}'}), 400
-
-        if request.method == 'POST':
-            if normalised == primary:
-                return jsonify({'error': 'This is already your primary subnet — no need to add it'}), 400
-            if normalised not in subnets:
-                subnets.append(normalised)
-                shared_data.config['scan_subnets'] = subnets
-                shared_data.scan_subnets = subnets
-                shared_data.save_config()
-            return jsonify({'subnets': subnets, 'primary': primary})
-
-        if request.method == 'DELETE':
-            subnets = [s for s in subnets if s != normalised]
-            shared_data.config['scan_subnets'] = subnets
-            shared_data.scan_subnets = subnets
-            shared_data.save_config()
-            return jsonify({'subnets': subnets, 'primary': primary})
-
+        return jsonify({'imported': list(seen.values())})
     except Exception as e:
-        logger.error(f"Error managing scan subnets: {e}")
+        logger.error(f"Failed to read wpa-sec imported list: {e}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/config/scan-subnets/trigger', methods=['POST'])
-def trigger_subnet_scan():
-    """Trigger an immediate nmap scan of a specific subnet in the background.
-
-    Body: {"cidr": "10.0.0.0/24"}
-    Returns immediately — results appear in the subnet scan log.
-    """
-    import ipaddress as _ip
-    try:
-        data = request.get_json() or {}
-        raw = str(data.get('cidr', '')).strip()
-        if not raw:
-            return jsonify({'error': 'Missing cidr field'}), 400
-        try:
-            net = _ip.ip_network(raw, strict=False)
-            normalised = str(net)
-        except ValueError:
-            return jsonify({'error': f'Invalid CIDR: {raw}'}), 400
-
-        def _bg_scan(cidr):
-            try:
-                from actions.scanning import NetworkScanner
-                scanner = NetworkScanner(shared_data)
-                portstart = shared_data.portstart
-                portend = shared_data.portend
-                extra_ports = shared_data.portlist
-
-                shared_data.append_subnet_scan_log(
-                    cidr, 'info', f'Scanning {cidr}\u2026',
-                )
-                results = scanner.run_nmap_network_scan(
-                    cidr, portstart, portend, extra_ports,
-                )
-                found = len(results)
-                # Persist discovered hosts into DB
-                for host, host_data in results.items():
-                    mac = host_data.get('mac', '')
-                    if not mac or mac == '00:00:00:00:00:00':
-                        ip_parts = host.split('.')
-                        if len(ip_parts) == 4:
-                            mac = f"00:00:{int(ip_parts[0]):02x}:{int(ip_parts[1]):02x}:{int(ip_parts[2]):02x}:{int(ip_parts[3]):02x}"
-                    if mac:
-                        scanner.db.upsert_host(
-                            mac=mac.lower().strip(),
-                            ip=host,
-                            hostname=host_data.get('hostname', ''),
-                            ports=','.join(map(str, sorted(host_data.get('open_ports', [])))),
-                        )
-                        scanner.db.update_ping_status(mac.lower().strip(), success=True)
-
-                if found > 0:
-                    shared_data.append_subnet_scan_log(
-                        cidr, 'ok',
-                        f'{found} device(s) found on {cidr}',
-                        devices=found,
-                    )
-                else:
-                    shared_data.append_subnet_scan_log(
-                        cidr, 'error',
-                        f'{cidr} \u2014 no devices responded',
-                        devices=0,
-                    )
-                logger.info(f"Subnet trigger scan complete for {cidr}: {found} hosts")
-            except Exception as e:
-                logger.error(f"Subnet trigger scan failed for {cidr}: {e}")
-                shared_data.append_subnet_scan_log(
-                    cidr, 'error', f'Scan failed: {e}',
-                )
-
-        import threading
-        t = threading.Thread(target=_bg_scan, args=(normalised,), daemon=True)
-        t.start()
-        return jsonify({'status': 'scan_triggered', 'cidr': normalised})
-
-    except Exception as e:
-        logger.error(f"Error triggering subnet scan: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/config/scan-subnets/log')
-def get_scan_subnets_log():
-    """Return the in-memory subnet scan log (newest last)."""
-    try:
-        log = shared_data.get_subnet_scan_log()
-        return jsonify({'log': log})
-    except Exception as e:
-        logger.error(f"Error fetching subnet scan log: {e}")
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/config/hardware-profiles')
-def get_hardware_profiles():
-    """Get predefined hardware profiles for different Raspberry Pi models"""
-    try:
-        profiles = {
-            'pi_zero_2w': {
-                'name': 'Raspberry Pi Zero 2 W',
-                'ram': 512,
-                'description': '512MB RAM - Minimal resource usage',
-                'settings': {
-                    'scanner_max_threads': 3,
-                    'orchestrator_max_concurrent': 2,
-                    'nmap_scan_aggressivity': '-T2',
-                    'scan_interval': 400,
-                    'scan_vuln_interval': 700,
-                    'max_concurrent_scans': 1,
-                    'memory_warning_threshold': 90,
-                    'memory_critical_threshold': 99,
-                    'enable_resource_monitoring': True
-                }
-            },
-            'pi_4_1gb': {
-                'name': 'Raspberry Pi 4 (1GB)',
-                'ram': 1024,
-                'description': '1GB RAM - Light resource usage',
-                'settings': {
-                    'scanner_max_threads': 5,
-                    'orchestrator_max_concurrent': 3,
-                    'nmap_scan_aggressivity': '-T3',
-                    'scan_interval': 240,
-                    'scan_vuln_interval': 480,
-                    'max_concurrent_scans': 2,
-                    'memory_warning_threshold': 75,
-                    'memory_critical_threshold': 90,
-                    'enable_resource_monitoring': True
-                }
-            },
-            'pi_4_2gb': {
-                'name': 'Raspberry Pi 4 (2GB)',
-                'ram': 2048,
-                'description': '2GB RAM - Moderate resource usage',
-                'settings': {
-                    'scanner_max_threads': 10,
-                    'orchestrator_max_concurrent': 5,
-                    'nmap_scan_aggressivity': '-T3',
-                    'scan_interval': 180,
-                    'scan_vuln_interval': 360,
-                    'max_concurrent_scans': 3,
-                    'memory_warning_threshold': 75,
-                    'memory_critical_threshold': 90,
-                    'enable_resource_monitoring': True
-                }
-            },
-            'pi_4_4gb': {
-                'name': 'Raspberry Pi 4 (4GB)',
-                'ram': 4096,
-                'description': '4GB RAM - Standard resource usage',
-                'settings': {
-                    'scanner_max_threads': 20,
-                    'orchestrator_max_concurrent': 8,
-                    'nmap_scan_aggressivity': '-T4',
-                    'scan_interval': 180,
-                    'scan_vuln_interval': 300,
-                    'max_concurrent_scans': 4,
-                    'memory_warning_threshold': 80,
-                    'memory_critical_threshold': 92,
-                    'enable_resource_monitoring': True
-                }
-            },
-            'pi_4_8gb': {
-                'name': 'Raspberry Pi 4 (8GB)',
-                'ram': 8192,
-                'description': '8GB RAM - High performance',
-                'settings': {
-                    'scanner_max_threads': 30,
-                    'orchestrator_max_concurrent': 10,
-                    'nmap_scan_aggressivity': '-T4',
-                    'scan_interval': 120,
-                    'scan_vuln_interval': 240,
-                    'max_concurrent_scans': 6,
-                    'memory_warning_threshold': 80,
-                    'memory_critical_threshold': 92,
-                    'enable_resource_monitoring': True
-                }
-            },
-            'pi_5_2gb': {
-                'name': 'Raspberry Pi 5 (2GB)',
-                'ram': 2048,
-                'description': '2GB RAM - Fast CPU, moderate RAM',
-                'settings': {
-                    'scanner_max_threads': 15,
-                    'orchestrator_max_concurrent': 6,
-                    'nmap_scan_aggressivity': '-T4',
-                    'scan_interval': 150,
-                    'scan_vuln_interval': 300,
-                    'max_concurrent_scans': 4,
-                    'memory_warning_threshold': 75,
-                    'memory_critical_threshold': 90,
-                    'enable_resource_monitoring': True
-                }
-            },
-            'pi_5_4gb': {
-                'name': 'Raspberry Pi 5 (4GB)',
-                'ram': 4096,
-                'description': '4GB RAM - High performance',
-                'settings': {
-                    'scanner_max_threads': 30,
-                    'orchestrator_max_concurrent': 12,
-                    'nmap_scan_aggressivity': '-T4',
-                    'scan_interval': 120,
-                    'scan_vuln_interval': 240,
-                    'max_concurrent_scans': 6,
-                    'memory_warning_threshold': 80,
-                    'memory_critical_threshold': 92,
-                    'enable_resource_monitoring': True
-                }
-            },
-            'pi_5_8gb': {
-                'name': 'Raspberry Pi 5 (8GB)',
-                'ram': 8192,
-                'description': '8GB RAM - Maximum performance',
-                'settings': {
-                    'scanner_max_threads': 40,
-                    'orchestrator_max_concurrent': 15,
-                    'nmap_scan_aggressivity': '-T4',
-                    'scan_interval': 90,
-                    'scan_vuln_interval': 180,
-                    'max_concurrent_scans': 8,
-                    'memory_warning_threshold': 82,
-                    'memory_critical_threshold': 93,
-                    'enable_resource_monitoring': True
-                }
-            },
-            'pi_5_16gb': {
-                'name': 'Raspberry Pi 5 (16GB)',
-                'ram': 16384,
-                'description': '16GB RAM - Extreme performance',
-                'settings': {
-                    'scanner_max_threads': 50,
-                    'orchestrator_max_concurrent': 20,
-                    'nmap_scan_aggressivity': '-T4',
-                    'scan_interval': 60,
-                    'scan_vuln_interval': 120,
-                    'max_concurrent_scans': 10,
-                    'memory_warning_threshold': 85,
-                    'memory_critical_threshold': 94,
-                    'enable_resource_monitoring': True
-                }
-            }
-        }
-        
-        return jsonify(profiles)
-    except Exception as e:
-        logger.error(f"Error getting hardware profiles: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/config/detect-hardware')
-def detect_hardware():
-    """Auto-detect current hardware and recommend profile"""
-    try:
-        import subprocess
-        import re
-        
-        # Detect Raspberry Pi model
-        model = 'unknown'
-        ram_mb = 0
-        recommended_profile = 'pi_zero_2w'  # Default to most conservative
-        
-        try:
-            # Read /proc/cpuinfo for model
-            with open('/proc/cpuinfo', 'r') as f:
-                cpuinfo = f.read()
-                
-            # Detect Pi model
-            if 'Raspberry Pi Zero 2' in cpuinfo:
-                model = 'Raspberry Pi Zero 2 W'
-                recommended_profile = 'pi_zero_2w'
-            elif 'Raspberry Pi 5' in cpuinfo:
-                model = 'Raspberry Pi 5'
-            elif 'Raspberry Pi 4' in cpuinfo:
-                model = 'Raspberry Pi 4'
-            elif 'Raspberry Pi 3' in cpuinfo:
-                model = 'Raspberry Pi 3'
-                
-        except Exception as e:
-            logger.warning(f"Could not read cpuinfo: {e}")
-        
-        # Detect RAM
-        if psutil_available:
-            try:
-                mem = psutil.virtual_memory()
-                ram_mb = int(mem.total / (1024 * 1024))
-                
-                # Match to closest profile
-                if model == 'Raspberry Pi Zero 2 W':
-                    recommended_profile = 'pi_zero_2w'
-                elif model == 'Raspberry Pi 5':
-                    if ram_mb >= 15000:
-                        recommended_profile = 'pi_5_16gb'
-                    elif ram_mb >= 7000:
-                        recommended_profile = 'pi_5_8gb'
-                    elif ram_mb >= 3500:
-                        recommended_profile = 'pi_5_4gb'
-                    else:
-                        recommended_profile = 'pi_5_2gb'
-                elif model == 'Raspberry Pi 4':
-                    if ram_mb >= 7000:
-                        recommended_profile = 'pi_4_8gb'
-                    elif ram_mb >= 3500:
-                        recommended_profile = 'pi_4_4gb'
-                    elif ram_mb >= 1800:
-                        recommended_profile = 'pi_4_2gb'
-                    else:
-                        recommended_profile = 'pi_4_1gb'
-                        
-            except Exception as e:
-                logger.warning(f"Could not detect RAM: {e}")
-        
-        # Get CPU count
-        cpu_count = psutil.cpu_count() if psutil_available else 1
-        
-        return jsonify({
-            'model': model,
-            'ram_mb': ram_mb,
-            'ram_gb': round(ram_mb / 1024, 1),
-            'cpu_count': cpu_count,
-            'recommended_profile': recommended_profile,
-            'detection_method': 'cpuinfo + psutil'
-        })
-        
-    except Exception as e:
-        logger.error(f"Error detecting hardware: {e}")
-        return jsonify({
-            'model': 'unknown',
-            'ram_mb': 0,
-            'ram_gb': 0,
-            'cpu_count': 1,
-            'recommended_profile': 'pi_zero_2w',
-            'detection_method': 'fallback',
-            'error': str(e)
-        }), 200
 
 @app.route('/api/config/apply-profile', methods=['POST'])
 def apply_hardware_profile():

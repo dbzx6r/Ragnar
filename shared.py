@@ -560,6 +560,8 @@ class SharedData:
             "steal_file_extensions": [".txt",".conf",".xml",".db",".sql",".key",".pem",".crt",".yaml",".yml",".config",".ini",".env",".cfg"],
             
             "__title_network__": "Network",
+            "aggressive_mode_enabled": False,
+            "ipcam_enabled": True,
             "nmap_scan_aggressivity": "-T4",
             "portstart": 1,
             "portend": 5500,
