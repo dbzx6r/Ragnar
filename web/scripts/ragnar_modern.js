@@ -524,6 +524,7 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeThreatIntelFilters();
     initializePwnUI();
     initializePwnagotchiVisibility();
+    initializeWpaSecVisibility();
     handleHeadlessMode();
 
 });
@@ -4735,6 +4736,102 @@ function togglePwnagotchiVisibility() {
     const isEnabled = checkbox.checked;
     localStorage.setItem('pwnagotchi-enabled', isEnabled ? 'true' : 'false');
     applyPwnVisibilityPreference(isEnabled);
+}
+
+// ── wpa-sec integration ───────────────────────────────────────────────────────
+
+function toggleWpaSecVisibility() {
+    const checkbox = document.getElementById('wpasec-enabled');
+    if (!checkbox) return;
+    const isEnabled = checkbox.checked;
+    localStorage.setItem('wpasec-section-visible', isEnabled ? 'true' : 'false');
+    const section = document.getElementById('wpasec-section');
+    if (section) section.style.display = isEnabled ? 'block' : 'none';
+}
+
+function initializeWpaSecVisibility() {
+    const checkbox = document.getElementById('wpasec-enabled');
+    if (!checkbox) return;
+
+    // Restore toggle state from localStorage
+    const stored = localStorage.getItem('wpasec-section-visible');
+    const isVisible = stored === 'true';
+    checkbox.checked = isVisible;
+    const section = document.getElementById('wpasec-section');
+    if (section) section.style.display = isVisible ? 'block' : 'none';
+
+    // Populate fields from live config
+    fetchAPI('/api/config').then(data => {
+        if (!data) return;
+        const apiKeyEl = document.getElementById('wpasec-api-key');
+        const intervalEl = document.getElementById('wpasec-poll-interval');
+        const priorityEl = document.getElementById('wpasec-priority');
+        const enabledEl = document.getElementById('wpasec-auto-connect');
+        const autoConnectEl = document.getElementById('wpasec-auto-connect-toggle');
+        const badgeEl = document.getElementById('wpasec-status-badge');
+        const activeEl = document.getElementById('wpasec-status-active');
+
+        if (apiKeyEl && data.wpasec_api_key) apiKeyEl.value = data.wpasec_api_key;
+        if (intervalEl && data.wpasec_poll_interval != null) intervalEl.value = data.wpasec_poll_interval;
+        if (priorityEl && data.wpasec_priority != null) priorityEl.value = data.wpasec_priority;
+        if (enabledEl) enabledEl.checked = Boolean(data.wpasec_enabled);
+        if (autoConnectEl) autoConnectEl.checked = data.wpasec_auto_connect !== false;
+
+        const enabled = Boolean(data.wpasec_enabled);
+        if (badgeEl) {
+            badgeEl.textContent = enabled ? 'Active' : 'Disabled';
+            badgeEl.className = `text-xs font-semibold uppercase tracking-wide px-3 py-1 rounded-full ${enabled ? 'bg-cyan-900/40 text-cyan-300 border border-cyan-700' : 'bg-slate-700 text-slate-200'}`;
+        }
+        if (activeEl) activeEl.textContent = enabled ? 'Yes' : 'No';
+    }).catch(() => {});
+}
+
+async function saveWpaSecConfig() {
+    const apiKey = (document.getElementById('wpasec-api-key')?.value || '').trim();
+    const pollInterval = parseInt(document.getElementById('wpasec-poll-interval')?.value || '3600', 10);
+    const priority = parseInt(document.getElementById('wpasec-priority')?.value || '5', 10);
+    const enabled = document.getElementById('wpasec-auto-connect')?.checked || false;
+    const autoConnect = document.getElementById('wpasec-auto-connect-toggle')?.checked !== false;
+
+    const payload = {
+        wpasec_enabled: enabled,
+        wpasec_api_key: apiKey,
+        wpasec_poll_interval: Math.max(300, pollInterval),
+        wpasec_priority: Math.min(10, Math.max(1, priority)),
+        wpasec_auto_connect: autoConnect
+    };
+
+    try {
+        const result = await postAPI('/api/config', payload);
+        if (result) {
+            showNotification('wpa-sec settings saved', 'success');
+            initializeWpaSecVisibility();
+        }
+    } catch (e) {
+        showNotification('Failed to save wpa-sec settings', 'error');
+    }
+}
+
+async function pollWpaSecNow() {
+    const resultEl = document.getElementById('wpasec-last-result');
+    const addedEl = document.getElementById('wpasec-networks-added');
+    if (resultEl) resultEl.textContent = 'Polling…';
+    try {
+        const result = await postAPI('/api/wpasec/poll', {});
+        if (result && result.error) {
+            if (resultEl) resultEl.textContent = `Error: ${result.error}`;
+            showNotification(`wpa-sec poll failed: ${result.error}`, 'error');
+        } else if (result) {
+            const added = result.added || 0;
+            const total = result.total_cracked || 0;
+            if (resultEl) resultEl.textContent = `OK — ${total} cracked total`;
+            if (addedEl) addedEl.textContent = `${added} new`;
+            showNotification(`wpa-sec poll complete: ${added} new network(s) added`, added > 0 ? 'success' : 'info');
+        }
+    } catch (e) {
+        if (resultEl) resultEl.textContent = 'Request failed';
+        showNotification('wpa-sec poll request failed', 'error');
+    }
 }
 
 function initializePwnagotchiVisibility() {
