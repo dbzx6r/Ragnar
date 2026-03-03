@@ -520,6 +520,8 @@ class SharedData:
             "router_scanner_enabled": True,
             "mqtt_scanner_enabled": True,
             "snmp_scanner_enabled": True,
+            "incognito_mode_enabled": False,
+            "original_mac": "",
             "tshark_enabled": False,
             "ngrep_enabled": False,
             "nuclei_enabled": False,

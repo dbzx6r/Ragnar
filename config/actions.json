@@ -194,5 +194,12 @@
         "b_port": null,
         "b_status": "nuclei_scan",
         "b_parent": null
+    },
+    {
+        "b_module": "device_disguise",
+        "b_class": "DeviceDisguise",
+        "b_port": null,
+        "b_status": "device_disguise",
+        "b_parent": null
     }
 ]

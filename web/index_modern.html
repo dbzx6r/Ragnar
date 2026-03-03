@@ -3623,6 +3623,24 @@
                             </div>
                         </div>
 
+                        <div class="glass rounded-lg p-4" style="border:1px solid rgba(168,85,247,0.25);background:rgba(88,28,135,0.15);">
+                            <div class="flex items-center justify-between mb-3">
+                                <h4 class="font-medium" style="display:flex;align-items:center;gap:0.4rem;">
+                                    <span style="font-size:1rem;">🕵️</span> Incognito Mode
+                                </h4>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="incognito-mode-enabled" class="sr-only peer" onchange="toggleIncognitoMode()">
+                                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all" style="peer-checked:background-color:#9333ea;" onload="this.style.backgroundColor = document.getElementById('incognito-mode-enabled').checked ? '#9333ea' : ''"></div>
+                                </label>
+                            </div>
+                            <div class="text-sm text-gray-400 mb-3">
+                                Disguise Ragnar as an iPhone on the network. Spoofs MAC address to an Apple OUI, sets hostname to iPhone, and broadcasts iPhone.local via mDNS.
+                            </div>
+                            <div class="text-xs text-gray-500">
+                                Requires root · Modifies wlan0 MAC · Restores original identity when disabled
+                            </div>
+                        </div>
+
                         <!-- Advanced Tools Section -->
                         <div class="col-span-full mt-2 mb-1">
                             <div style="border-top:1px solid rgba(255,255,255,0.08);padding-top:1rem;">

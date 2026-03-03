@@ -523,6 +523,7 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeRouterScannerToggle();
     initializeMQTTScannerToggle();
     initializeSNMPScannerToggle();
+    initializeIncognitoToggle();
     initializeTsharkToggle();
     initializeNgrepToggle();
     initializeNucleiToggle();
@@ -4649,6 +4650,27 @@ function initializeSNMPScannerToggle() {
         if (!data) return;
         const checkbox = document.getElementById('snmp-scanner-enabled');
         if (checkbox) checkbox.checked = data.snmp_scanner_enabled !== false;
+    }).catch(() => {});
+}
+
+// ── Incognito Mode ────────────────────────────────────────────────────────────
+
+function toggleIncognitoMode() {
+    const checkbox = document.getElementById('incognito-mode-enabled');
+    if (!checkbox) return;
+    postAPI('/api/config', { incognito_mode_enabled: checkbox.checked }).then(() => {
+        showNotification(
+            checkbox.checked ? 'Incognito Mode enabled — disguising as iPhone' : 'Incognito Mode disabled — restoring identity',
+            checkbox.checked ? 'success' : 'info'
+        );
+    }).catch(() => showNotification('Failed to update Incognito Mode setting', 'error'));
+}
+
+function initializeIncognitoToggle() {
+    fetchAPI('/api/config').then(data => {
+        if (!data) return;
+        const checkbox = document.getElementById('incognito-mode-enabled');
+        if (checkbox) checkbox.checked = data.incognito_mode_enabled === true;
     }).catch(() => {});
 }
 
