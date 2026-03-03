@@ -174,7 +174,8 @@ class WpaSecIntegration:
     def _parse_netlist(text: str) -> list:
         """
         Parse wpa-sec download response (?api&dl=1).
-        Each line: <BSSID>,<StationMAC>,<SSID>,<Password>
+        Each line: <BSSID>:<StationMAC>:<SSID>:<Password>
+        BSSID and StationMAC are 12-char hex strings (no colons within them).
         Returns list of dicts with keys: bssid, ssid, password
         """
         entries = []
@@ -182,9 +183,9 @@ class WpaSecIntegration:
             line = line.strip()
             if not line or line.startswith('#'):
                 continue
-            # Format: bssid,station_mac,ssid,password
-            # Split on comma with maxsplit=3 to preserve commas in password
-            parts = line.split(',', 3)
+            # Split on ':' with maxsplit=3 so passwords containing colons are preserved.
+            # BSSID and station_mac are always 12-char hex strings with no embedded colons.
+            parts = line.split(':', 3)
             if len(parts) < 4:
                 continue
             bssid = parts[0].strip().lower()
