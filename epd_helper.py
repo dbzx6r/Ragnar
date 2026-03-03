@@ -93,6 +93,13 @@ class EPDHelper:
     def clear(self):
         try:
             self.epd.Clear()
+            # For V4-style displays: seed both RAM buffers (0x24 new + 0x26 prev)
+            # so partial updates can compute correct diffs. Without this, displayPartial
+            # diffs against an uninitialized 0x26 buffer and renders nothing.
+            if hasattr(self.epd, 'displayPartBaseImage'):
+                linewidth = int(self.epd.width / 8) + (1 if self.epd.width % 8 else 0)
+                white_buf = [0xFF] * (linewidth * self.epd.height)
+                self.epd.displayPartBaseImage(white_buf)
             logger.info("EPD cleared.")
         except Exception as e:
             logger.error(f"Error clearing EPD: {e}")
