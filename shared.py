@@ -170,32 +170,53 @@ class SharedData:
         self.initialize_variables() # Initialize the variables used by the application
         self.load_gamification_data()  # Load persistent gamification progress
 
-        # Initialize network intelligence (after paths and config are ready)
+        # Initialize network intelligence and AI service in background
+        # to avoid blocking startup (these are not needed immediately)
         self.network_intelligence = None
-        if not self._pager_mode:
-            self.initialize_network_intelligence()
         self.threat_intelligence = None  # type: ignore
-
-        # Initialize AI service (after paths and config are ready)
         self.ai_service = None
-        if not self._pager_mode:
-            self.initialize_ai_service()
-
-        # Initialize counters for dashboard
-        if not self._pager_mode:
-            self.scanned_networks_count = self._calculate_scanned_networks_count()
-        else:
-            self.scanned_networks_count = 0
+        self.scanned_networks_count = 0
+        self._deferred_init_done = threading.Event()
 
         self.create_livestatusfile()
-        self.load_fonts() # Load the fonts used by the application
-        self.load_images() # Load the images used by the application
-        # self.create_initial_image() # Create the initial image displayed on the screen
+
+        # Defer heavy I/O (fonts, images, AI, network intelligence) to a
+        # background thread so the main thread can continue to start the
+        # display and web server sooner.
+        if not self._pager_mode:
+            threading.Thread(target=self._deferred_init, daemon=True).start()
+        else:
+            # Pager mode: load fonts/images synchronously (lightweight)
+            self.load_fonts()
+            self.load_images()
+            self._deferred_init_done.set()
 
         # Start background cleanup task for old hosts (needs DB)
         if not self._pager_mode and self.db is not None:
             self._start_cleanup_task()
         
+    def _deferred_init(self):
+        """Run heavy initialization tasks in a background thread.
+
+        Loads fonts, images, network intelligence, AI service, and
+        network counts without blocking the main startup path.
+        """
+        try:
+            self.load_fonts()
+            self.load_images()
+            self.initialize_network_intelligence()
+            self.initialize_ai_service()
+            self.scanned_networks_count = self._calculate_scanned_networks_count()
+            logger.info("Deferred initialization completed")
+        except Exception as e:
+            logger.error(f"Deferred initialization error: {e}")
+        finally:
+            self._deferred_init_done.set()
+
+    def wait_for_deferred_init(self, timeout: float = 30.0) -> bool:
+        """Wait for deferred init to finish (used by display before first render)."""
+        return self._deferred_init_done.wait(timeout=timeout)
+
     def initialize_network_intelligence(self):
         """Initialize the network intelligence system"""
         try:
@@ -471,7 +492,7 @@ class SharedData:
             "log_critical": True,
             "terminal_log_level": "all",
             
-            "startup_delay": 10,
+            "startup_delay": 2,
             "web_delay": 2,
             "screen_delay": 1,
             "comment_delaymin": 15,
@@ -673,7 +694,9 @@ class SharedData:
                     logger.warning(f"Could not generate actions.json: {e}")
             self._load_status_list_from_actions_json()
         else:
-            self.generate_actions_json()
+            # Skip costly re-import of every action module if actions.json
+            # is already up to date (same set of .py files in actions/).
+            self._generate_actions_json_if_needed()
         self.delete_webconsolelog()
         self.initialize_csv()
         self.initialize_epd_display()
@@ -754,7 +777,6 @@ class SharedData:
             return
         try:
             logger.info("Initializing EPD display...")
-            time.sleep(1)
             epd_type = self.config.get("epd_type", DEFAULT_EPD_TYPE)
 
             # Auto-detect if set to "auto" OR if still on factory default (user never ran installer with detection)
@@ -1053,6 +1075,34 @@ class SharedData:
         except Exception as e:
             logger.error(f"Unexpected error occurred while creating live status file: {e}")
 
+
+    def _generate_actions_json_if_needed(self):
+        """Only regenerate actions.json if the action modules have changed.
+
+        Compares the modification time of the actions directory against the
+        existing actions.json file.  If no .py file is newer, we skip the
+        expensive importlib.import_module() loop and just reload status_list.
+        """
+        try:
+            if os.path.exists(self.actions_file):
+                json_mtime = os.path.getmtime(self.actions_file)
+                # Check if any action .py file is newer than actions.json
+                needs_regen = False
+                for filename in os.listdir(self.actions_dir):
+                    if filename.endswith('.py') and filename != '__init__.py':
+                        py_path = os.path.join(self.actions_dir, filename)
+                        if os.path.getmtime(py_path) > json_mtime:
+                            needs_regen = True
+                            break
+                if not needs_regen:
+                    # actions.json is up to date — just load status_list from it
+                    self._load_status_list_from_actions_json()
+                    logger.info("actions.json is up to date — skipped regeneration")
+                    return
+        except Exception as e:
+            logger.debug(f"Actions freshness check failed, regenerating: {e}")
+        # Fall through: regenerate
+        self.generate_actions_json()
 
     def generate_actions_json(self):
         """Generate the actions JSON file, it will be used to store the actions configuration."""

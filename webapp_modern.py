@@ -13774,8 +13774,15 @@ def run_server(host='0.0.0.0', port=8000, ssl_cert=None, ssl_key=None, https_por
         if use_https:
             logger.info("⚠️  Using self-signed certificate - browser will show security warning")
 
-        # Prime synchronized data before clients connect
-        sync_all_counts()
+        # Synchronize counts in the background so the web server binds
+        # immediately instead of waiting for a full DB scan first.
+        def _deferred_sync():
+            try:
+                sync_all_counts()
+                logger.info("Initial sync_all_counts completed")
+            except Exception as e:
+                logger.error(f"Deferred sync_all_counts error: {e}")
+        socketio.start_background_task(_deferred_sync)
 
         # Start background status broadcaster
         socketio.start_background_task(broadcast_status_updates)

@@ -503,14 +503,14 @@ class WiFiManager:
 
         self._ensure_wifi_interfaces_up()
         
-        # Wait 30 seconds after boot before starting the endless loop (reduced from 2 minutes)
+        # Wait 5 seconds after boot before starting the endless loop (reduced from 30s)
         if self.boot_completed_time:
-            boot_wait_time = 30  # 30 seconds for faster startup
+            boot_wait_time = 5  # 5 seconds – interfaces are ready by now
             elapsed_since_boot = time.time() - self.boot_completed_time
             remaining_wait = boot_wait_time - elapsed_since_boot
             
             if remaining_wait > 0:
-                self.logger.info(f"Waiting {remaining_wait:.1f}s more before starting endless loop (30 seconds after boot)")
+                self.logger.info(f"Waiting {remaining_wait:.1f}s more before starting endless loop (5 seconds after boot)")
                 time.sleep(remaining_wait)
         
         # Check if we're already connected before starting the loop (Ethernet preferred)

@@ -15,7 +15,6 @@
 import threading
 import time
 import os
-import pandas as pd
 import signal
 import glob
 import logging
@@ -137,6 +136,7 @@ class Display:
         
     def update_vuln_count(self):
         """Update the vulnerability count on the display."""
+        import pandas as pd
         with self.semaphore:
             try:
                 if not os.path.exists(self.shared_data.vuln_summary_file):
@@ -206,6 +206,7 @@ class Display:
 
     def update_shared_data(self):
         """Update the shared data with the latest system information."""
+        import pandas as pd
         with self.semaphore:
             try:
                 # Create livestatus file if it doesn't exist
@@ -1144,6 +1145,10 @@ class Display:
 
     def run(self):
         """Main loop for updating the EPD display with shared data."""
+        # Wait for deferred initialization (fonts, images) to finish
+        # before attempting to render anything.
+        if hasattr(self.shared_data, 'wait_for_deferred_init'):
+            self.shared_data.wait_for_deferred_init(timeout=30)
         self.manual_mode_txt = ""
         while not self.shared_data.display_should_exit:
             try:
