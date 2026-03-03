@@ -171,9 +171,22 @@ class IpCameraScanner:
 
         if snapshot_path:
             logger.info(f"  📸 Snapshot saved: {snapshot_path}")
+            try:
+                self.shared_data.log_activity(
+                    "ipcam", f"Camera snapshot: {ip} ({brand})",
+                    f"Credentials: {user}:{password}", "camera"
+                )
+            except Exception:
+                pass
             return 'success'
         else:
-            logger.warning(f"  Creds found but snapshot failed for {ip}")
+            try:
+                self.shared_data.log_activity(
+                    "ipcam", f"Camera access: {ip} ({brand}) — creds found, no snapshot",
+                    f"Credentials: {user}:{password}", "camera"
+                )
+            except Exception:
+                pass
             return 'success'   # still a win — creds are saved in metadata
 
     # ------------------------------------------------------------------

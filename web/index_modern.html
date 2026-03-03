@@ -851,6 +851,23 @@
             </div>
         </div>
         
+        <!-- Activity Feed Card (end of dashboard tab) -->
+        <div class="mt-6 glass rounded-xl p-6">
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-3">
+                    <svg class="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                    </svg>
+                    <h3 class="text-lg font-semibold">Live Activity</h3>
+                </div>
+                <span id="activity-feed-count" class="text-xs text-gray-500"></span>
+            </div>
+            <div id="activity-feed-list" class="space-y-1 overflow-y-auto" style="max-height: 280px;">
+                <p class="text-gray-500 text-sm text-center py-6">No activity yet — events will appear here as Ragnar works.</p>
+            </div>
+        </div>
+        </div>
+
         <!-- Credentials Tab -->
         <div id="credentials-tab" class="tab-content hidden">
             <div class="glass rounded-xl p-6">

@@ -564,6 +564,19 @@ class Orchestrator:
                     logger.debug(f"Updated stats after successful {action.action_name}")
                 except Exception as stats_error:
                     logger.warning(f"Could not update stats: {stats_error}")
+                # Log to activity feed for credential/brute-force actions
+                brute_actions = {'SSHBruteforce', 'SMBBruteforce', 'FTPBruteforce',
+                                 'TelnetBruteforce', 'RDPBruteforce', 'SQLBruteforce'}
+                if action.action_name in brute_actions:
+                    try:
+                        hostname = row.get('Hostnames', '') or ''
+                        label = hostname or ip
+                        self.shared_data.log_activity(
+                            "creds", f"Credentials found: {label} ({action.action_name})",
+                            f"IP: {ip}", "key"
+                        )
+                    except Exception:
+                        pass
             
             # SQLite writes happen automatically in action modules - no CSV write needed
             # self.shared_data.write_data(current_data)

@@ -809,6 +809,12 @@ function setupAutoRefresh() {
             loadDashboardData();
         }
     }, 20000); // Every 20 seconds when on dashboard (reduced from 15s)
+
+    // Activity feed — refresh every 10s when on dashboard
+    autoRefreshIntervals.activityFeed = setInterval(() => {
+        if (currentTab === 'dashboard') loadActivityFeed();
+    }, 10000);
+    loadActivityFeed(); // Load immediately on page open
     
     // Set up periodic update checking
     autoRefreshIntervals.updates = setInterval(() => {
@@ -4512,6 +4518,48 @@ function togglePwnagotchiVisibility() {
     const isEnabled = checkbox.checked;
     localStorage.setItem('pwnagotchi-enabled', isEnabled ? 'true' : 'false');
     applyPwnVisibilityPreference(isEnabled);
+}
+
+// ── Live Activity Feed ────────────────────────────────────────────────────────
+
+const ACTIVITY_ICONS = {
+    wpasec:  { svg: `<svg class="w-4 h-4 text-cyan-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"></path></svg>` },
+    ipcam:   { svg: `<svg class="w-4 h-4 text-purple-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.069A1 1 0 0121 8.878v6.244a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"></path></svg>` },
+    creds:   { svg: `<svg class="w-4 h-4 text-yellow-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path></svg>` },
+    vuln:    { svg: `<svg class="w-4 h-4 text-red-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"></path></svg>` },
+    web:     { svg: `<svg class="w-4 h-4 text-green-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"></path></svg>` },
+    default: { svg: `<svg class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>` },
+};
+
+async function loadActivityFeed() {
+    const listEl = document.getElementById('activity-feed-list');
+    const countEl = document.getElementById('activity-feed-count');
+    if (!listEl) return;
+    try {
+        const data = await fetchAPI('/api/activity/feed?limit=20');
+        const events = (data && data.events) ? data.events : [];
+        if (countEl) countEl.textContent = events.length ? `${events.length} recent events` : '';
+        if (events.length === 0) {
+            listEl.innerHTML = '<p class="text-gray-500 text-sm text-center py-6">No activity yet — events will appear here as Ragnar works.</p>';
+            return;
+        }
+        const rows = events.map(e => {
+            const iconDef = ACTIVITY_ICONS[e.type] || ACTIVITY_ICONS.default;
+            const time = e.ts ? new Date(e.ts).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
+            const detail = e.detail ? `<p class="text-xs text-gray-500 mt-0.5">${escapeHtml(e.detail)}</p>` : '';
+            return `<div class="flex items-start gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-800/50 transition-colors">
+                ${iconDef.svg}
+                <div class="min-w-0 flex-1">
+                    <p class="text-sm text-white">${escapeHtml(e.message)}</p>
+                    ${detail}
+                </div>
+                <span class="text-xs text-gray-600 flex-shrink-0 ml-2">${time}</span>
+            </div>`;
+        }).join('');
+        listEl.innerHTML = rows;
+    } catch (err) {
+        // Silent fail — don't disrupt dashboard if feed errors
+    }
 }
 
 // ── IP Camera Scanner ─────────────────────────────────────────────────────────

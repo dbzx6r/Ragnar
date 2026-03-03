@@ -3285,6 +3285,19 @@ def detect_hardware():
             'error': str(e)
         }), 200
 
+@app.route('/api/activity/feed', methods=['GET'])
+def activity_feed():
+    """Return the live activity log (last N events, newest first)."""
+    try:
+        limit = min(int(request.args.get('limit', 20)), 50)
+        events = list(shared_data.activity_log)[-limit:]
+        events.reverse()
+        return jsonify({'events': events})
+    except Exception as e:
+        logger.error(f"Error reading activity feed: {e}")
+        return jsonify({'events': []})
+
+
 @app.route('/api/wpasec/poll', methods=['POST'])
 def wpasec_poll_now():
     """Trigger an immediate wpa-sec poll outside the background schedule."""

@@ -23,7 +23,7 @@ import logging
 import subprocess
 import threading
 import traceback
-from datetime import datetime
+from collections import deque
 try:
     from PIL import Image, ImageFont
 except ImportError:
@@ -903,6 +903,7 @@ class SharedData:
         self.networkkbnbr = 0
         self.attacksnbr = 0
         self.vulnerable_host_count = 0
+        self.activity_log = deque(maxlen=50)  # Live activity feed (thread-safe append)
         self.gamification_data = {}
         self.points_per_level = 200
         self.points_per_mac = 15
@@ -1180,6 +1181,17 @@ class SharedData:
         except Exception as e:
             logger.error(f"Unexpected error in initialize_csv: {e}")
 
+
+    def log_activity(self, event_type: str, message: str, detail: str = "", icon: str = ""):
+        """Append an event to the live activity feed."""
+        from datetime import datetime as _dt
+        self.activity_log.append({
+            "type": event_type,
+            "message": message,
+            "detail": detail,
+            "icon": icon,
+            "ts": _dt.now().isoformat(timespec="seconds"),
+        })
 
     def load_config(self):
         """Load the configuration from the shared configuration JSON file."""

@@ -172,6 +172,14 @@ class WpaSecIntegration:
 
         self._save_cache(new_entries)
         self.logger.info(f"wpa-sec poll complete: {result['added']} new network(s) added ({len(entries)} total cracked)")
+        if result['added'] > 0:
+            try:
+                self.shared_data.log_activity(
+                    "wpasec", f"wpa-sec: {result['added']} new network(s) imported",
+                    f"{len(entries)} total cracked", "wifi"
+                )
+            except Exception:
+                pass
         return result
 
     # ------------------------------------------------------------------
