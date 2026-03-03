@@ -10867,9 +10867,13 @@ def _list_all_networks():
     return result
 
 
-def _resolve_loot_path(virtual_root, loot_subdir, path):
+def _resolve_loot_path(virtual_root, network_rel_path, path):
     """
-    Resolve a virtual per-network loot path to a real filesystem path.
+    Resolve a virtual per-network path to a real filesystem path.
+
+    network_rel_path is the subdirectory relative to the network root, e.g.:
+      'loot/data_stolen', 'loot/credentials',
+      'output/scan_results', 'output/vulnerabilities'
 
     Returns None when the caller should show the network list (path == virtual_root).
     Raises ValueError on path traversal or invalid slug.
@@ -10887,8 +10891,8 @@ def _resolve_loot_path(virtual_root, loot_subdir, path):
         raise ValueError(f'Invalid network slug: {slug}')
 
     networks_dir = _get_networks_dir()
-    loot_dir = os.path.join(networks_dir, slug, 'loot', loot_subdir)
-    actual = os.path.join(loot_dir, subpath) if subpath else loot_dir
+    category_dir = os.path.join(networks_dir, slug, *network_rel_path.split('/'))
+    actual = os.path.join(category_dir, subpath) if subpath else category_dir
 
     # Security: path must stay within networks_dir
     real_actual = os.path.realpath(actual)
@@ -10899,16 +10903,16 @@ def _resolve_loot_path(virtual_root, loot_subdir, path):
     return actual
 
 
-def _network_loot_dirs(loot_subdir, virtual_root):
+def _network_loot_dirs(network_rel_path, virtual_root):
     """Return a list-API response listing all networks as virtual directories."""
     networks = _list_all_networks()
     dirs = []
     for n in networks:
-        loot_dir = os.path.join(n['network_dir'], 'loot', loot_subdir)
+        category_dir = os.path.join(n['network_dir'], *network_rel_path.split('/'))
         mtime = 0
-        if os.path.isdir(loot_dir):
+        if os.path.isdir(category_dir):
             try:
-                mtime = os.path.getmtime(loot_dir)
+                mtime = os.path.getmtime(category_dir)
             except OSError:
                 pass
         dirs.append({
@@ -10943,21 +10947,21 @@ def list_files_api():
         # Map paths to actual directories
         actual_path = ""
         if path.startswith('/data_stolen'):
-            actual_path = _resolve_loot_path('/data_stolen', 'data_stolen', path)
+            actual_path = _resolve_loot_path('/data_stolen', 'loot/data_stolen', path)
             if actual_path is None:
-                return jsonify(_network_loot_dirs('data_stolen', '/data_stolen'))
+                return jsonify(_network_loot_dirs('loot/data_stolen', '/data_stolen'))
         elif path.startswith('/scan_results'):
-            actual_path = shared_data.scan_results_dir
-            if len(path) > 13:  # More than just '/scan_results'
-                actual_path = os.path.join(actual_path, path[14:])
-        elif path.startswith('/crackedpwd'):
-            actual_path = _resolve_loot_path('/crackedpwd', 'credentials', path)
+            actual_path = _resolve_loot_path('/scan_results', 'output/scan_results', path)
             if actual_path is None:
-                return jsonify(_network_loot_dirs('credentials', '/crackedpwd'))
+                return jsonify(_network_loot_dirs('output/scan_results', '/scan_results'))
+        elif path.startswith('/crackedpwd'):
+            actual_path = _resolve_loot_path('/crackedpwd', 'loot/credentials', path)
+            if actual_path is None:
+                return jsonify(_network_loot_dirs('loot/credentials', '/crackedpwd'))
         elif path.startswith('/vulnerabilities'):
-            actual_path = shared_data.vulnerabilities_dir
-            if len(path) > 16:  # More than just '/vulnerabilities'
-                actual_path = os.path.join(actual_path, path[17:])
+            actual_path = _resolve_loot_path('/vulnerabilities', 'output/vulnerabilities', path)
+            if actual_path is None:
+                return jsonify(_network_loot_dirs('output/vulnerabilities', '/vulnerabilities'))
         elif path.startswith('/logs'):
             actual_path = shared_data.datadir + '/logs'
             if len(path) > 5:  # More than just '/logs'
@@ -11010,19 +11014,25 @@ def preview_file_api():
         # Map virtual path to actual path
         actual_path = ''
         if file_path.startswith('/data_stolen'):
-            resolved = _resolve_loot_path('/data_stolen', 'data_stolen', file_path)
+            resolved = _resolve_loot_path('/data_stolen', 'loot/data_stolen', file_path)
             if resolved is None:
                 return jsonify({'error': 'Invalid path'}), 400
             actual_path = resolved
         elif file_path.startswith('/scan_results'):
-            actual_path = shared_data.scan_results_dir + file_path[13:]
+            resolved = _resolve_loot_path('/scan_results', 'output/scan_results', file_path)
+            if resolved is None:
+                return jsonify({'error': 'Invalid path'}), 400
+            actual_path = resolved
         elif file_path.startswith('/crackedpwd'):
-            resolved = _resolve_loot_path('/crackedpwd', 'credentials', file_path)
+            resolved = _resolve_loot_path('/crackedpwd', 'loot/credentials', file_path)
             if resolved is None:
                 return jsonify({'error': 'Invalid path'}), 400
             actual_path = resolved
         elif file_path.startswith('/vulnerabilities'):
-            actual_path = shared_data.vulnerabilities_dir + file_path[16:]
+            resolved = _resolve_loot_path('/vulnerabilities', 'output/vulnerabilities', file_path)
+            if resolved is None:
+                return jsonify({'error': 'Invalid path'}), 400
+            actual_path = resolved
         elif file_path.startswith('/logs'):
             actual_path = shared_data.datadir + '/logs' + file_path[5:]
         elif file_path.startswith('/backups'):
@@ -11085,19 +11095,25 @@ def download_file_api():
         # Map virtual path to actual path
         actual_path = ""
         if file_path.startswith('/data_stolen'):
-            resolved = _resolve_loot_path('/data_stolen', 'data_stolen', file_path)
+            resolved = _resolve_loot_path('/data_stolen', 'loot/data_stolen', file_path)
             if resolved is None:
                 return jsonify({'error': 'Invalid file path'}), 400
             actual_path = resolved
         elif file_path.startswith('/scan_results'):
-            actual_path = shared_data.scan_results_dir + file_path[13:]
+            resolved = _resolve_loot_path('/scan_results', 'output/scan_results', file_path)
+            if resolved is None:
+                return jsonify({'error': 'Invalid file path'}), 400
+            actual_path = resolved
         elif file_path.startswith('/crackedpwd'):
-            resolved = _resolve_loot_path('/crackedpwd', 'credentials', file_path)
+            resolved = _resolve_loot_path('/crackedpwd', 'loot/credentials', file_path)
             if resolved is None:
                 return jsonify({'error': 'Invalid file path'}), 400
             actual_path = resolved
         elif file_path.startswith('/vulnerabilities'):
-            actual_path = shared_data.vulnerabilities_dir + file_path[16:]
+            resolved = _resolve_loot_path('/vulnerabilities', 'output/vulnerabilities', file_path)
+            if resolved is None:
+                return jsonify({'error': 'Invalid file path'}), 400
+            actual_path = resolved
         elif file_path.startswith('/logs'):
             actual_path = shared_data.datadir + '/logs' + file_path[5:]
         elif file_path.startswith('/backups'):
@@ -11134,19 +11150,25 @@ def delete_file_api():
         # Map virtual path to actual path
         actual_path = ""
         if file_path.startswith('/data_stolen'):
-            resolved = _resolve_loot_path('/data_stolen', 'data_stolen', file_path)
+            resolved = _resolve_loot_path('/data_stolen', 'loot/data_stolen', file_path)
             if resolved is None:
                 return jsonify({'error': 'Invalid file path'}), 400
             actual_path = resolved
         elif file_path.startswith('/scan_results'):
-            actual_path = shared_data.scan_results_dir + file_path[13:]
+            resolved = _resolve_loot_path('/scan_results', 'output/scan_results', file_path)
+            if resolved is None:
+                return jsonify({'error': 'Invalid file path'}), 400
+            actual_path = resolved
         elif file_path.startswith('/crackedpwd'):
-            resolved = _resolve_loot_path('/crackedpwd', 'credentials', file_path)
+            resolved = _resolve_loot_path('/crackedpwd', 'loot/credentials', file_path)
             if resolved is None:
                 return jsonify({'error': 'Invalid file path'}), 400
             actual_path = resolved
         elif file_path.startswith('/vulnerabilities'):
-            actual_path = shared_data.vulnerabilities_dir + file_path[16:]
+            resolved = _resolve_loot_path('/vulnerabilities', 'output/vulnerabilities', file_path)
+            if resolved is None:
+                return jsonify({'error': 'Invalid file path'}), 400
+            actual_path = resolved
         elif file_path.startswith('/logs'):
             actual_path = shared_data.datadir + '/logs' + file_path[5:]
         elif file_path.startswith('/backups'):
