@@ -526,6 +526,4053 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeThreatIntelFilters();
     initializePwnUI();
     initializePwnagotchiVisibility();
+    initializeWpaSecVisibility();
+    initializeIpCamToggle();
+    initializeRouterScannerToggle();
+    initializeMQTTScannerToggle();
+    initializeSNMPScannerToggle();
+    initializeAggressiveMode();
+    handleHeadlessMode();
+
+});
+
+
+function initializeSocket() {
+    socket = io({
+        reconnection: true,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: RECONNECT_DELAY_MAX
+    });
+
+    socket.on('connect', function() {
+        console.log('Connected to Ragnar server');
+        updateConnectionStatus(true);
+        reconnectAttempts = 0;
+        addConsoleMessage('Connected to Ragnar server', 'success');
+
+        socket.emit('request_status');
+        socket.emit('request_logs');
+        refreshPwnagotchiStatus({ silent: true });
+    });
+
+    socket.on('connected', function(data) {
+        // Server sends auth_configured flag on every socket connect
+        if (data && typeof data.auth_configured !== 'undefined') {
+            const show = data.auth_configured;
+            const logoutBtn = document.getElementById('logout-btn');
+            if (logoutBtn) logoutBtn.classList.toggle('hidden', !show);
+            const mobileLogoutBtn = document.getElementById('mobile-logout-btn');
+            if (mobileLogoutBtn) mobileLogoutBtn.classList.toggle('hidden', !show);
+        }
+    });
+
+    socket.on('disconnect', function() {
+        console.log('Disconnected from Ragnar server');
+        updateConnectionStatus(false);
+        addConsoleMessage('Disconnected from server', 'error');
+        setTimeout(() => {
+            if (socket && socket.disconnected) {
+                console.log('Attempting manual socket reconnection');
+                socket.connect();
+            }
+        }, 2000);
+    });
+
+    socket.on('status_update', function(data) {
+        updateDashboardStatus(data);
+    });
+
+    socket.on('log_update', function(logs) {
+        updateConsole(logs);
+    });
+
+    socket.on('pwnagotchi_status', function(statusPacket) {
+        const previousState = pwnStatus.state;
+        updatePwnagotchiUI(statusPacket);
+        if (statusPacket && statusPacket.state && statusPacket.state !== previousState) {
+            addConsoleMessage(`Pwnagotchi status changed: ${formatPwnStateLabel(statusPacket.state)}`, 'info');
+        }
+    });
+
+    socket.on('network_update', function(data) {
+        if (currentTab === 'network') {
+            loadStableNetworkData();
+        }
+    });
+
+    socket.on('credentials_update', function(data) {
+        if (currentTab === 'discovered') {
+            displayCredentialsTable(data);
+        }
+    });
+
+    socket.on('loot_update', function(data) {
+        if (currentTab === 'discovered') {
+            displayLootTable(data);
+        }
+    });
+
+    socket.on('config_updated', function(config) {
+        addConsoleMessage('Configuration updated successfully', 'info');
+        if (currentTab === 'config') {
+            displayConfigForm(config);
+        }
+        updateAttackWarningBanner(Boolean(config && config.enable_attacks));
+    });
+
+    socket.on('scan_started', function(data) {
+        handleScanStarted(data);
+    });
+
+    socket.on('scan_progress', function(data) {
+        handleScanProgress(data);
+    });
+
+    socket.on('scan_host_update', function(data) {
+        handleScanHostUpdate(data);
+    });
+
+    socket.on('scan_completed', function(data) {
+        handleScanCompleted(data);
+    });
+
+    socket.on('scan_error', function(data) {
+        handleScanError(data);
+    });
+
+    socket.on('deep_scan_update', function(data) {
+        handleDeepScanUpdate(data);
+    });
+
+    socket.on('lynis_update', function(data) {
+        handleLynisUpdate(data);
+    });
+
+    socket.on('manual_attack_update', function(data) {
+        handleManualAttackUpdate(data);
+    });
+
+    socket.on('connect_error', function(error) {
+        reconnectAttempts++;
+        console.error('Connection error:', error);
+        if (reconnectAttempts === RECONNECT_WARNING_THRESHOLD) {
+            addConsoleMessage('Reconnecting to server… still attempting to reach backend', 'warning');
+        } else if (reconnectAttempts > RECONNECT_WARNING_THRESHOLD && reconnectAttempts % RECONNECT_WARNING_THRESHOLD === 0) {
+            addConsoleMessage(`Still reconnecting (attempt ${reconnectAttempts}). Will keep trying until successful.`, 'warning');
+        }
+    });
+}
+
+function updateConnectionStatus(connected) {
+    const statusEl = document.getElementById('connection-status');
+    if (statusEl) {
+        if (connected) {
+            statusEl.innerHTML = `
+                <span class="w-2 h-2 bg-green-500 rounded-full pulse-glow"></span>
+                <span class="text-xs text-gray-400">Connected</span>
+            `;
+        } else {
+            statusEl.innerHTML = `
+                <span class="w-2 h-2 bg-red-500 rounded-full"></span>
+                <span class="text-xs text-gray-400">Disconnected</span>
+            `;
+        }
+    }
+}
+
+function setupEventListeners() {
+    document.querySelectorAll('[data-tab]').forEach(button => {
+        button.addEventListener('click', function() {
+            const tabName = this.getAttribute('data-tab');
+            showTab(tabName);
+        });
+    });
+
+    document.addEventListener('click', function(e) {
+        if (e.target.classList.contains('refresh-btn')) {
+            refreshCurrentTab();
+        }
+    });
+
+    const clearBtn = document.getElementById('clear-console');
+    if (clearBtn) {
+        clearBtn.addEventListener('click', clearConsole);
+    }
+
+    const customScanBtn = document.getElementById('custom-deep-scan-btn');
+    if (customScanBtn) {
+        customScanBtn.addEventListener('click', handleCustomDeepScanRequest);
+    }
+
+    const customScanInput = document.getElementById('custom-deep-scan-ip');
+    if (customScanInput) {
+        customScanInput.addEventListener('keydown', function(event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                handleCustomDeepScanRequest();
+            }
+        });
+    }
+
+    const manualPortDropdown = document.getElementById('manual-port-dropdown');
+    if (manualPortDropdown) {
+        manualPortDropdown.addEventListener('change', () => {
+            updateManualActions();
+        });
+    }
+
+    const manualActionDropdown = document.getElementById('manual-action-dropdown');
+    if (manualActionDropdown) {
+        manualActionDropdown.addEventListener('change', () => {
+            window.manualActionPreference = manualActionDropdown.value;
+        });
+    }
+
+    const automationToggleBtn = document.getElementById('automation-toggle-btn');
+    if (automationToggleBtn) {
+        automationToggleBtn.addEventListener('click', handleAutomationToggle);
+    }
+}
+
+function initializeTabs() {
+    showTab('dashboard');
+}
+
+function showTab(tabName) {
+    currentTab = tabName;
+
+    if (systemMonitoringInterval && tabName !== 'system') {
+        clearInterval(systemMonitoringInterval);
+        systemMonitoringInterval = null;
+    }
+    
+    document.querySelectorAll('.tab-content').forEach(tab => {
+        tab.classList.add('hidden');
+    });
+    
+    document.querySelectorAll('.nav-btn, [data-tab]').forEach(btn => {
+        btn.classList.remove('bg-Ragnar-600');
+        btn.classList.add('text-gray-300', 'hover:text-white', 'hover:bg-gray-700');
+    });
+    
+    const selectedTab = document.getElementById(`${tabName}-tab`);
+    if (selectedTab) {
+        selectedTab.classList.remove('hidden');
+    }
+    
+    const selectedBtn = document.querySelector(`[data-tab="${tabName}"]`);
+    if (selectedBtn) {
+        selectedBtn.classList.add('bg-Ragnar-600');
+        selectedBtn.classList.remove('text-gray-300', 'hover:text-white', 'hover:bg-gray-700');
+    }
+    
+    loadTabData(tabName);
+    
+    const mobileMenu = document.getElementById('mobile-menu');
+    if (mobileMenu) {
+        mobileMenu.classList.add('hidden');
+    }
+}
+
+function refreshCurrentTab() {
+    loadTabData(currentTab);
+    addConsoleMessage(`Refreshed ${currentTab} data`, 'info');
+}
+
+function setupAutoRefresh() {
+
+    autoRefreshIntervals.network = setInterval(() => {
+        if (currentTab === 'network' && socket && socket.connected) {
+            socket.emit('request_network');
+        }
+    }, 10000); // Every 10 seconds
+
+    autoRefreshIntervals.connect = setInterval(() => {
+        if (currentTab === 'connect') {
+            refreshWifiStatus();
+        }
+        if (currentTab === 'pentest' && manualModeActive) {
+            refreshBluetoothStatus();
+        }
+    }, 15000); // Every 15 seconds
+
+    autoRefreshIntervals.discovered = setInterval(() => {
+        if (currentTab === 'discovered' && socket && socket.connected) {
+            socket.emit('request_credentials');
+            socket.emit('request_loot');
+            loadAttackLogs(); // Also refresh attack logs
+            // Don't auto-refresh vulnerability intel to prevent card reset
+        }
+    }, 20000); // Every 20 seconds
+    
+    // OPTIMIZATION: Reduce console log polling frequency (was 5s, now 10s)
+    // Console logs are not critical and 5s polling adds unnecessary load on Pi Zero
+    autoRefreshIntervals.console = setInterval(() => {
+        if (currentTab === 'dashboard') {
+            loadConsoleLogs();
+        }
+    }, 10000); // Every 10 seconds when on dashboard (reduced from 5s)
+    
+    // OPTIMIZATION: Reduce dashboard refresh frequency (was 15s, now 20s)
+    // Background sync runs every 15s, so 20s refresh is sufficient
+    autoRefreshIntervals.dashboard = setInterval(() => {
+        if (currentTab === 'dashboard') {
+            loadDashboardData();
+        }
+    }, 20000); // Every 20 seconds when on dashboard (reduced from 15s)
+
+    // Activity feed — refresh every 10s when on dashboard
+    autoRefreshIntervals.activityFeed = setInterval(() => {
+        if (currentTab === 'dashboard') loadActivityFeed();
+    }, 10000);
+    loadActivityFeed(); // Load immediately on page open
+    
+    // Set up periodic update checking
+    autoRefreshIntervals.updates = setInterval(() => {
+        checkForUpdatesQuiet();
+    }, 300000); // Every 5 minutes
+    
+    // OPTIMIZATION: Defer initial update check (was 5s, now 30s)
+    // Not critical for initial dashboard load
+    setTimeout(() => {
+        checkForUpdatesQuiet();
+    }, 30000); // Check 30 seconds after page load (deferred from 5s)
+
+    setPwnStatusPollInterval(PWN_STATUS_POLL_INTERVAL);
+}
+
+function initializeMobileMenu() {
+    const menuBtn = document.getElementById('mobile-menu-btn');
+    const mobileMenu = document.getElementById('mobile-menu');
+    
+    if (menuBtn && mobileMenu) {
+        menuBtn.addEventListener('click', () => {
+            mobileMenu.classList.toggle('hidden');
+        });
+    }
+}
+
+function initializeThreatIntelFilters() {
+    const buttons = document.querySelectorAll('.threat-intel-filter-btn');
+    if (!buttons || buttons.length === 0) {
+        return;
+    }
+
+    buttons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const status = btn.getAttribute('data-status');
+            setThreatIntelFilter(status);
+        });
+    });
+
+    // Ensure initial visual state matches default filter without reloading data
+    setThreatIntelFilter(threatIntelStatusFilter, { skipReload: true });
+}
+
+// ============================================================================
+// DATA LOADING
+// ============================================================================
+
+async function loadInitialData() {
+    try {
+        // Check auth status to show/hide logout button and wait for DB if needed
+        try {
+            const authStatus = await fetchAPI('/api/auth/status');
+            const logoutBtn = document.getElementById('logout-btn');
+            if (logoutBtn) logoutBtn.classList.toggle('hidden', !authStatus.configured);
+            const mobileLogoutBtn = document.getElementById('mobile-logout-btn');
+            if (mobileLogoutBtn) mobileLogoutBtn.classList.toggle('hidden', !authStatus.configured);
+
+        } catch (e) { /* ignore - auth check is non-critical */ }
+
+        // OPTIMIZATION: Use combined /api/dashboard/quick endpoint for fast loading
+        // This eliminates multiple API calls and reduces load time from 5-10s to <2s on Pi Zero
+
+        // Load critical dashboard data using optimized combined endpoint
+        const quickData = await fetchAPI('/api/dashboard/quick');
+        if (quickData) {
+            // Update both stats and status from single response
+            updateDashboardStats(quickData);
+            updateDashboardStatus(quickData);
+        }
+        
+        // OPTIMIZATION: Defer WiFi + LAN status to after dashboard is visible
+        setTimeout(() => {
+            refreshWifiStatus().catch(err => console.warn('WiFi status load failed:', err));
+            refreshEthernetStatus().catch(err => console.warn('LAN status load failed:', err));
+        }, 200);
+        
+        // OPTIMIZATION: Defer console logs to much later (lowest priority)
+        setTimeout(() => {
+            loadConsoleLogs().then(() => {
+                addConsoleMessage('Ragnar Modern Web Interface Initialized', 'success');
+                addConsoleMessage('Dashboard loaded successfully', 'info');
+            }).catch(err => {
+                console.warn('Console logs load failed:', err);
+                addConsoleMessage('Error loading console logs', 'warning');
+            });
+        }, 1000);
+        
+        // OPTIMIZATION: Completely defer tab preloading until user interacts or 10s passes
+        // This prevents overwhelming the Pi Zero during initial page load
+        let preloadTriggered = false;
+        
+        // Trigger preload on first user interaction (hover, click, scroll)
+        const triggerPreload = () => {
+            if (!preloadTriggered) {
+                preloadTriggered = true;
+                console.log('User interaction detected - starting background tab preload');
+                setTimeout(() => preloadAllTabs(), 100);
+            }
+        };
+        
+        // Listen for user interactions
+        document.addEventListener('mousemove', triggerPreload, { once: true });
+        document.addEventListener('click', triggerPreload, { once: true });
+        document.addEventListener('scroll', triggerPreload, { once: true });
+        document.addEventListener('touchstart', triggerPreload, { once: true });
+        
+        // Fallback: preload after 10 seconds if no user interaction
+        setTimeout(() => {
+            if (!preloadTriggered) {
+                preloadTriggered = true;
+                console.log('Auto-starting background tab preload after timeout');
+                preloadAllTabs();
+            }
+        }, 10000);
+        
+    } catch (error) {
+        console.error('Error loading initial data:', error);
+        addConsoleMessage('Error loading critical dashboard data', 'error');
+    }
+}
+
+// OPTIMIZATION: Lazy preload tabs only when needed, with longer delays to reduce Pi Zero load
+async function preloadAllTabs() {
+    console.log('Starting background preload of all tabs...');
+    
+    try {
+        // Preload in batches with longer delays to avoid overwhelming Pi Zero
+        
+        // Batch 1: Network tab (most frequently accessed after dashboard)
+        await loadNetworkData().catch(err => console.warn('Network preload failed:', err));
+        preloadedTabs.add('network');
+        
+        // Longer delay between batches (500ms instead of 200ms)
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Batch 2: Discovered tab (credentials, loot, attacks, vulnerabilities)
+        await Promise.all([
+            loadCredentialsData().catch(err => console.warn('Credentials preload failed:', err)),
+            loadLootData().catch(err => console.warn('Loot preload failed:', err)),
+            loadAttackLogs().catch(err => console.warn('Attack logs preload failed:', err)),
+            loadVulnerabilityIntel().catch(err => console.warn('Vulnerability intel preload failed:', err))
+        ]);
+        preloadedTabs.add('discovered');
+        
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Batch 3: Threat Intel tab
+        await loadThreatIntelData().catch(err => console.warn('Threat intel preload failed:', err));
+        preloadedTabs.add('threat-intel');
+        
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Batch 4: Connect tab
+        await loadConnectData().catch(err => console.warn('Connect preload failed:', err));
+        preloadedTabs.add('connect');
+        
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Batch 5: E-Paper tab
+        await loadEpaperDisplay().catch(err => console.warn('E-Paper preload failed:', err));
+        preloadedTabs.add('epaper');
+        
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Batch 6: Files and Config (lower priority)
+        await Promise.all([
+            loadFilesData().catch(err => console.warn('Files preload failed:', err)),
+            loadConfigData().catch(err => console.warn('Config preload failed:', err))
+        ]);
+        preloadedTabs.add('files');
+        preloadedTabs.add('config');
+        
+        // Batch 7: Traffic Analysis and Advanced Vulnerability scanning (server mode only)
+        if (serverModeEnabled) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+            await Promise.all([
+                loadTrafficAnalysisData().catch(err => console.warn('Traffic preload failed:', err)),
+                loadAdvancedVulnData().catch(err => console.warn('Adv vuln preload failed:', err))
+            ]);
+            preloadedTabs.add('traffic');
+            preloadedTabs.add('adv-vuln');
+        }
+
+        // System and NetKB tabs load on-demand (they use different patterns)
+
+        console.log('Background tab preload completed');
+        addConsoleMessage('All tabs preloaded and ready', 'success');
+        
+    } catch (error) {
+        console.error('Error during tab preloading:', error);
+    }
+}
+
+async function loadTabData(tabName) {
+    // If tab was already preloaded, skip reloading unless it's a dynamic tab
+    // System and netkb always load (they use polling/intervals)
+    // Network and threat-intel always refresh for up-to-date data
+    const alreadyPreloaded = preloadedTabs.has(tabName);
+    
+    switch(tabName) {
+        case 'dashboard':
+            // Load dashboard stats immediately, defer console logs
+            await loadDashboardData();
+            setTimeout(() => loadConsoleLogs(), 50);
+            break;
+        case 'network':
+            // Always refresh network data when switching to this tab
+            await loadNetworkData();
+            break;
+        case 'connect':
+            if (!alreadyPreloaded) {
+                await loadConnectData();
+            } else {
+                await refreshWifiStatus().catch(err => console.warn('WiFi refresh failed:', err));
+                await refreshEthernetStatus().catch(err => console.warn('LAN refresh failed:', err));
+                await refreshBluetoothStatus().catch(err => console.warn('Bluetooth refresh failed:', err));
+            }
+            break;
+        case 'pentest':
+            if (manualModeActive) {
+                await loadPentestData();
+            } else {
+                addConsoleMessage('Enable Pentest Mode to access the Pentest tab', 'warning');
+                showTab('dashboard');
+            }
+            break;
+        case 'discovered':
+            if (!alreadyPreloaded) {
+                await Promise.all([
+                    loadCredentialsData(),
+                    loadLootData(),
+                    loadAttackLogs(),
+                    loadVulnerabilityIntel()
+                ]);
+            }
+            await refreshPwnagotchiStatus({ silent: true });
+            break;
+        case 'threat-intel':
+            // Always refresh threat intel data when switching to this tab
+            await loadThreatIntelData();
+            break;
+        case 'files':
+            if (!alreadyPreloaded) {
+                await loadFilesData();
+                // Images are not auto-loaded to save processing power
+                // User must click "Load Images" button to load them
+            }
+            break;
+        case 'system':
+            // Always load system (uses intervals)
+            loadSystemData();
+            break;
+        case 'netkb':
+            // Always load netkb
+            loadNetkbData();
+            break;
+        case 'epaper':
+            if (!alreadyPreloaded) {
+                await loadEpaperDisplay();
+            }
+            break;
+        case 'config':
+            if (!alreadyPreloaded) {
+                await loadConfigData();
+            } else {
+                await refreshPwnagotchiStatus({ silent: true });
+            }
+            break;
+        case 'traffic':
+            loadTrafficAnalysisData(); // Non-blocking - tab shows immediately, data fills in
+            break;
+        case 'adv-vuln':
+            loadAdvancedVulnData(); // Non-blocking - tab shows immediately, data fills in
+            break;
+        case 'credentials':
+            loadCredentials();
+            break;
+        case 'network-map':
+            if (!_mapInitialized) { _mapInitialized = true; loadNetworkMap(); }
+            break;
+    }
+}
+
+async function loadDashboardData() {
+    try {
+        // OPTIMIZATION: Show loading state with pulse animation
+        const statsElements = [
+            'target-count', 'target-total-count', 'target-inactive-count',
+            'port-count', 'vuln-count', 'cred-count', 'level-count', 'scanned-network-count', 'points-count'
+        ];
+        
+        // Add subtle pulse animation to show loading
+        statsElements.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.classList.add('animate-pulse');
+        });
+        
+        // OPTIMIZATION: Use combined quick endpoint for faster loading
+        const data = await fetchAPI('/api/dashboard/quick');
+        
+        // Remove pulse animation
+        statsElements.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.classList.remove('animate-pulse');
+        });
+        
+        if (data) {
+            // Update status block immediately
+            updateDashboardStatus(data);
+            await refreshDashboardStatsForCurrentSelection({ forceRefresh: true, fallbackData: data });
+        }
+        
+        // Load AI insights if configured
+        await loadAIInsights();
+    } catch (error) {
+        console.error('Error loading dashboard data:', error);
+        // Remove pulse animation on error too
+        const statsElements = [
+            'target-count', 'target-total-count', 'target-inactive-count',
+            'port-count', 'vuln-count', 'cred-count', 'level-count', 'scanned-network-count', 'points-count'
+        ];
+        statsElements.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.classList.remove('animate-pulse');
+        });
+    }
+}
+
+function toNumber(value, fallback = 0) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function formatRelativeTime(seconds) {
+    if (!Number.isFinite(seconds)) {
+        return null;
+    }
+
+    let remaining = Math.max(0, Math.floor(seconds));
+    const units = [
+        { label: 'd', value: 86400 },
+        { label: 'h', value: 3600 },
+        { label: 'm', value: 60 },
+        { label: 's', value: 1 }
+    ];
+
+    const parts = [];
+    for (const unit of units) {
+        if (remaining >= unit.value || (unit.label === 's' && parts.length === 0)) {
+            const amount = Math.floor(remaining / unit.value);
+            if (amount > 0 || unit.label === 's') {
+                parts.push(`${amount}${unit.label}`);
+            }
+            remaining -= amount * unit.value;
+        }
+        if (parts.length >= 2) {
+            break;
+        }
+    }
+
+    return parts.length > 0 ? parts.join(' ') : '0s';
+}
+
+function buildLastSyncDisplay(stats) {
+    if (!stats) {
+        return 'Sync pending…';
+    }
+
+    const ageSeconds = toNumber(stats.last_sync_age_seconds, NaN);
+    const hasAge = Number.isFinite(ageSeconds);
+    const relative = hasAge ? `${formatRelativeTime(ageSeconds)} ago` : '';
+
+    let timestampSource = stats.last_sync_iso ?? stats.last_sync_time ?? stats.last_sync_timestamp;
+    let isoValue = null;
+
+    if (typeof timestampSource === 'number') {
+        isoValue = new Date(timestampSource * 1000).toISOString();
+    } else if (typeof timestampSource === 'string' && timestampSource) {
+        isoValue = timestampSource;
+    }
+
+    let absolute = '';
+    if (isoValue) {
+        const parsed = new Date(isoValue);
+        if (!Number.isNaN(parsed.getTime())) {
+            absolute = parsed.toLocaleString();
+        }
+    }
+
+    if (relative && absolute) {
+        return `${relative} (${absolute})`;
+    }
+
+    if (relative) {
+        return relative;
+    }
+
+    if (absolute) {
+        return absolute;
+    }
+
+    return 'Sync pending…';
+}
+
+function updateDashboardStats(stats) {
+    if (!stats || typeof stats !== 'object') {
+        return;
+    }
+
+    const activeTargets = toNumber(stats.active_target_count ?? stats.target_count, 0);
+    const inactiveTargets = toNumber(stats.inactive_target_count ?? stats.offline_target_count, 0);
+    const totalTargets = toNumber(stats.total_target_count ?? activeTargets + inactiveTargets, activeTargets + inactiveTargets);
+
+    const newTargetList = Array.isArray(stats.new_target_ips) ? stats.new_target_ips :
+        (Array.isArray(stats.new_targets) ? stats.new_targets : []);
+    const lostTargetList = Array.isArray(stats.lost_target_ips) ? stats.lost_target_ips :
+        (Array.isArray(stats.lost_targets) ? stats.lost_targets : []);
+
+    const newTargets = toNumber(stats.new_target_count ?? stats.new_targets ?? newTargetList.length, newTargetList.length);
+    const lostTargets = toNumber(stats.lost_target_count ?? stats.lost_targets ?? lostTargetList.length, lostTargetList.length);
+
+    const portCount = toNumber(stats.port_count ?? stats.open_port_count, 0);
+    const vulnCount = toNumber(stats.vulnerability_count ?? stats.vuln_count, 0);
+    const vulnerableHostsCount = toNumber(stats.vulnerable_hosts_count ?? stats.vulnerable_host_count ?? 0, 0);
+    const credCount = toNumber(stats.credential_count ?? stats.cred_count, 0);
+    const level = toNumber(stats.level ?? stats.levelnbr, 0);
+    const points = toNumber(stats.points ?? stats.coins, 0);
+    const scannedNetworks = Math.max(0, toNumber(stats.scanned_network_count ?? stats.networks_scanned, 0));
+
+    updateElement('target-count', activeTargets);
+    scaleStatNumber('target-count', activeTargets);
+    updateElement('target-total-count', totalTargets);
+    updateElement('target-inactive-count', inactiveTargets);
+    updateElement('target-new-count', newTargets);
+    updateElement('target-lost-count', lostTargets);
+
+    const newCountElement = document.getElementById('target-new-count');
+    if (newCountElement) {
+        newCountElement.title = newTargetList.length > 0 ? newTargetList.join(', ') : 'No recent additions';
+    }
+
+    const lostCountElement = document.getElementById('target-lost-count');
+    if (lostCountElement) {
+        lostCountElement.title = lostTargetList.length > 0 ? lostTargetList.join(', ') : 'No recent drops';
+    }
+
+    updateElement('port-count', portCount);
+    scaleStatNumber('port-count', portCount);
+    updateElement('vuln-count', vulnCount);
+    scaleStatNumber('vuln-count', vulnCount);
+    updateElement('dashboard-vulnerable-hosts-count', vulnerableHostsCount);
+    updateElement('cred-count', credCount);
+    scaleStatNumber('cred-count', credCount);
+    updateElement('level-count', level);
+    scaleStatNumber('level-count', level);
+    updateElement('scanned-network-count', scannedNetworks);
+    scaleStatNumber('scanned-network-count', scannedNetworks);
+    updateElement('dashboard-scanned-network-count', scannedNetworks);
+    scaleStatNumber('dashboard-scanned-network-count', scannedNetworks);
+    updateElement('points-count', points);
+
+    const activeSummary = totalTargets > 0 ? `${activeTargets}/${totalTargets} active` : `${activeTargets} active`;
+    const newSummary = newTargets > 0 ? `${newTargets} new` : 'No new targets';
+    const lostSummary = lostTargets > 0 ? `${lostTargets} lost` : 'No targets lost';
+
+    updateElement('active-target-summary', activeSummary);
+    updateElement('new-target-summary', newSummary);
+    updateElement('lost-target-summary', lostSummary);
+    updateElement('last-sync-display', buildLastSyncDisplay(stats));
+}
+
+async function loadNetworkData() {
+    try {
+        // Use the new stable network data endpoint
+        await loadStableNetworkData();
+        
+        // Update the status detection info banner with current config
+        updateNetworkStatusBanner();
+    } catch (error) {
+        console.error('Error loading network data:', error);
+        addConsoleMessage('Failed to load network data', 'error');
+    }
+}
+
+async function updateNetworkStatusBanner() {
+    try {
+        const configResponse = await fetchAPI('/api/config');
+        if (configResponse && configResponse.success) {
+            const maxFailedPings = configResponse.config.network_max_failed_pings || 15;
+            const offlineMinutes = Math.round((maxFailedPings * 60) / 60); // 60 second ARP scans
+            
+            const failedPingsEl = document.getElementById('network-status-failed-pings');
+            const offlineTimeEl = document.getElementById('network-status-offline-time');
+            
+            if (failedPingsEl) {
+                failedPingsEl.textContent = maxFailedPings;
+            }
+            if (offlineTimeEl) {
+                offlineTimeEl.textContent = `${offlineMinutes} minutes`;
+            }
+        }
+    } catch (error) {
+        console.debug('Could not update network status banner:', error);
+    }
+}
+
+// ============================================================================
+// STABLE NETWORK DATA FUNCTIONS
+// ============================================================================
+
+async function loadStableNetworkData() {
+    try {
+        const { network } = getSelectedDashboardNetworkKey() || {};
+        const query = network ? `/api/network/stable?network=${encodeURIComponent(network)}` : '/api/network/stable';
+        const data = await fetchAPI(query);
+        
+        if (data.success) {
+            displayStableNetworkTable(data);
+            addConsoleMessage(`Network data loaded: ${data.count} hosts`, 'info');
+        } else {
+            addConsoleMessage(`Failed to load network data: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error loading stable network data:', error);
+        addConsoleMessage(`Network data error: ${error.message}`, 'error');
+    }
+}
+
+function displayStableNetworkTable(data) {
+    const tableBody = document.getElementById('network-hosts-table');
+    const hostCountSpan = document.getElementById('host-count');
+    
+    if (!tableBody) return;
+    
+    // Save all existing deep scan button states before clearing table
+    const existingRows = tableBody.querySelectorAll('tr[data-ip]');
+    existingRows.forEach(row => {
+        const ip = row.getAttribute('data-ip');
+        if (ip) {
+            saveDeepScanButtonState(ip);
+        }
+    });
+    
+    tableBody.innerHTML = '';
+    
+    if (!data.hosts || data.hosts.length === 0) {
+        tableBody.innerHTML = `
+            <tr>
+                <td colspan="8" class="text-center py-8 text-gray-400">
+                    No hosts discovered yet. Network scanning is running in the background.
+                </td>
+            </tr>
+        `;
+        if (hostCountSpan) hostCountSpan.textContent = '0 hosts';
+        return;
+    }
+    
+    // Use DocumentFragment for better performance
+    const fragment = document.createDocumentFragment();
+    
+    data.hosts.forEach((host, index) => {
+        // DEBUG: Log first few host objects to see structure
+        if (index < 5) {
+            console.log(`🔍 Host ${index}:`, host);
+            console.log(`   IP field:`, host.ip, typeof host.ip);
+            console.log(`   All fields:`, Object.keys(host));
+        }
+        
+        const row = document.createElement('tr');
+        row.className = 'border-b border-slate-700 hover:bg-slate-700/50 transition-colors';
+        
+        // Status indicator
+        const statusIcon = host.status === 'up' ? 
+            '<span class="flex items-center"><div class="w-2 h-2 bg-green-500 rounded-full mr-2"></div>Online</span>' :
+            '<span class="flex items-center"><div class="w-2 h-2 bg-gray-500 rounded-full mr-2"></div>Unknown</span>';
+        
+        // Format MAC address
+        let macDisplay = host.mac === 'Unknown' ? 
+            '<span class="text-gray-500">Unknown</span>' : 
+            `<span class="font-mono text-xs">${host.mac}</span>`;
+        
+        // Format ports
+        let portsDisplay = host.ports === 'Unknown' || host.ports === 'Scanning...' ? 
+            '<span class="text-gray-500">Unknown</span>' : 
+            `<span class="text-xs">${host.ports}</span>`;
+        
+        // Format vulnerabilities
+        let vulnDisplay = host.vulnerabilities === '0' ? 
+            '<span class="text-gray-500">None</span>' : 
+            `<span class="text-orange-400">${host.vulnerabilities}</span>`;
+        
+        // Format last scan
+        let lastScanDisplay = host.last_scan === 'Never' || host.last_scan === 'Unknown' ? 
+            '<span class="text-gray-500">Never</span>' : 
+            `<span class="text-xs">${formatTimeAgo(host.last_scan)}</span>`;
+        
+        row.innerHTML = `
+            <td class="py-3 px-4">${statusIcon}</td>
+            <td class="py-3 px-4 font-mono text-sm">${host.ip}</td>
+            <td class="py-3 px-4">${host.hostname === 'Unknown' ? '<span class="text-gray-500">Unknown</span>' : host.hostname}</td>
+            <td class="py-3 px-4">${macDisplay}</td>
+            <td class="py-3 px-4">${portsDisplay}</td>
+            <td class="py-3 px-4">${vulnDisplay}</td>
+            <td class="py-3 px-4">${lastScanDisplay}</td>
+            <td class="py-3 px-4">
+                <button onclick="triggerDeepScan('${host.ip}', { mode: 'full' })" 
+                        id="deep-scan-btn-${host.ip.replace(/\./g, '-')}"
+                        data-scan-status="idle"
+                        class="deep-scan-button bg-purple-600 hover:bg-purple-700 text-white text-xs px-3 py-1 rounded transition-all duration-300"
+                        title="Scan all 65535 ports with TCP connect (-sT). IP: ${host.ip}">
+                    Deep Scan
+                </button>
+            </td>
+        `;
+        
+        // Set data-ip attribute for state management
+        row.setAttribute('data-ip', host.ip);
+        
+        fragment.appendChild(row);
+        
+        // Restore deep scan button state after adding to fragment
+        // (will be applied after fragment is appended to DOM)
+    });
+    
+    // Append all rows at once for better performance
+    tableBody.appendChild(fragment);
+    
+    // Now restore button states after DOM is updated
+    data.hosts.forEach(host => {
+        restoreDeepScanButtonState(host.ip);
+    });
+    
+    // Update host count
+    if (hostCountSpan) {
+        hostCountSpan.textContent = `${data.hosts.length} hosts`;
+    }
+    
+    // Cleanup old button states for removed hosts
+    cleanupOldDeepScanStates();
+}
+
+function formatTimeAgo(timeString) {
+    try {
+        if (!timeString || timeString === 'Never' || timeString === 'Unknown') {
+            return 'Never';
+        }
+        
+        // If it's already a relative time string, return as is
+        if (timeString.includes('ago') || timeString.includes('Recently')) {
+            return timeString;
+        }
+        
+        const date = new Date(timeString);
+        if (isNaN(date.getTime())) {
+            return timeString; // Return original if can't parse
+        }
+        
+        const now = new Date();
+        const diffMs = now - date;
+        const diffMins = Math.floor(diffMs / (1000 * 60));
+        const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+        
+        if (diffMins < 1) return 'Just now';
+        if (diffMins < 60) return `${diffMins}m ago`;
+        if (diffHours < 24) return `${diffHours}h ago`;
+        if (diffDays < 7) return `${diffDays}d ago`;
+        
+        return date.toLocaleDateString();
+    } catch (error) {
+        return timeString;
+    }
+}
+
+// Real-time scanning variables
+let currentScanState = {
+    isScanning: false,
+    totalHosts: 0,
+    scannedHosts: 0,
+    currentTarget: '',
+    startTime: null
+};
+
+// Deep scan button state management
+let deepScanButtonStates = new Map(); // Map<IP, {status, text, classes, disabled}>
+
+function saveDeepScanButtonState(ip) {
+    const buttonId = `deep-scan-btn-${ip.replace(/\./g, '-')}`;
+    const button = document.getElementById(buttonId);
+    
+    if (button) {
+        const state = {
+            status: button.dataset.scanStatus || 'idle',
+            text: button.textContent,
+            classes: button.className,
+            disabled: button.disabled,
+            title: button.title
+        };
+        deepScanButtonStates.set(ip, state);
+        console.log(`💾 Saved deep scan button state for ${ip}:`, state);
+    }
+}
+
+function restoreDeepScanButtonState(ip) {
+    const buttonId = `deep-scan-btn-${ip.replace(/\./g, '-')}`;
+    const button = document.getElementById(buttonId);
+    const state = deepScanButtonStates.get(ip);
+    
+    if (button && state) {
+        button.textContent = state.text;
+        button.className = state.classes;
+        button.disabled = state.disabled;
+        button.title = state.title;
+        button.dataset.scanStatus = state.status;
+        console.log(`🔄 Restored deep scan button state for ${ip}:`, state);
+    } else if (button && !state) {
+        console.log(`⚠️ No saved state found for ${ip}, keeping default button state`);
+    }
+}
+
+function clearDeepScanButtonState(ip) {
+    if (deepScanButtonStates.has(ip)) {
+        deepScanButtonStates.delete(ip);
+        console.log(`🗑️ Cleared deep scan button state for ${ip}`);
+    }
+}
+
+function cleanupOldDeepScanStates() {
+    // Remove states for IPs that no longer have buttons in the DOM
+    let cleanedCount = 0;
+    for (const [ip] of deepScanButtonStates) {
+        const buttonId = `deep-scan-btn-${ip.replace(/\./g, '-')}`;
+        if (!document.getElementById(buttonId)) {
+            deepScanButtonStates.delete(ip);
+            cleanedCount++;
+        }
+    }
+    if (cleanedCount > 0) {
+        console.log(`🧹 Cleaned up ${cleanedCount} old deep scan button states`);
+    }
+}
+
+// Real-time scanning control functions
+async function startRealtimeScan() {
+    const startBtn = document.getElementById('start-network-scan');
+    const stopBtn = document.getElementById('stop-network-scan');
+    
+    try {
+        startBtn.disabled = true;
+        startBtn.innerHTML = '⏳ Starting...';
+        
+        const response = await networkAwareFetch('/api/scan/start-realtime', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+        
+        if (response.ok) {
+            currentScanState.isScanning = true;
+            currentScanState.startTime = new Date();
+            stopBtn.disabled = false;
+            startBtn.innerHTML = '⏳ Scanning...';
+            
+            // Show progress section
+            document.getElementById('scan-progress').classList.remove('hidden');
+            
+            addConsoleMessage('Real-time network scan started', 'info');
+        } else {
+            throw new Error('Failed to start scan');
+        }
+    } catch (error) {
+        console.error('Error starting scan:', error);
+        addConsoleMessage('Failed to start network scan: ' + error.message, 'error');
+        resetScanButtons();
+    }
+}
+
+async function stopRealtimeScan() {
+    const stopBtn = document.getElementById('stop-network-scan');
+    
+    try {
+        stopBtn.disabled = true;
+        stopBtn.innerHTML = '⏳ Stopping...';
+        
+        // Emit stop scan event via WebSocket
+        socket.emit('stop_scan');
+        
+        addConsoleMessage('Stopping network scan...', 'info');
+    } catch (error) {
+        console.error('Error stopping scan:', error);
+        addConsoleMessage('Failed to stop network scan: ' + error.message, 'error');
+        stopBtn.disabled = false;
+        stopBtn.innerHTML = '⏹️ Stop Scan';
+    }
+}
+
+function resetScanButtons() {
+    const startBtn = document.getElementById('start-network-scan');
+    const stopBtn = document.getElementById('stop-network-scan');
+    
+    startBtn.disabled = false;
+    startBtn.innerHTML = '<span class="group-disabled:hidden">🔍</span> Start Full Scan';
+    stopBtn.disabled = true;
+    stopBtn.innerHTML = '⏹️ Stop Scan';
+    
+    currentScanState.isScanning = false;
+    document.getElementById('scan-progress').classList.add('hidden');
+}
+
+// WebSocket event handlers for real-time scanning
+function handleScanStarted(data) {
+    currentScanState.totalHosts = data.total_hosts || 0;
+    currentScanState.scannedHosts = 0;
+    
+    updateScanProgress();
+    addConsoleMessage(`Started scanning ${currentScanState.totalHosts} hosts`, 'info');
+}
+
+function handleScanProgress(data) {
+    currentScanState.scannedHosts = data.completed || 0;
+    currentScanState.currentTarget = data.current_target || '';
+    
+    updateScanProgress();
+}
+
+function handleScanHostUpdate(data) {
+    if (!data) {
+        return;
+    }
+
+    const eventType = data.type || data.event || 'host_update';
+
+    if (eventType === 'sep_scan_output') {
+        if (data.message) {
+            const prefix = data.ip ? `[sep-scan ${data.ip}]` : '[sep-scan]';
+            addConsoleMessage(`${prefix} ${data.message}`, 'info');
+        }
+        return;
+    }
+
+    if (eventType === 'sep_scan_error') {
+        const prefix = data.ip ? `sep-scan error for ${data.ip}` : 'sep-scan error';
+        addConsoleMessage(`${prefix}: ${data.message || 'Unknown error'}`, 'error');
+        return;
+    }
+
+    if (eventType === 'sep_scan_completed') {
+        const ipLabel = data.ip || 'target';
+        const statusLabel = data.status === 'success' ? 'successfully' : 'with issues';
+        const level = data.status === 'success' ? 'success' : 'warning';
+        addConsoleMessage(`sep-scan completed for ${ipLabel} ${statusLabel}`, level);
+
+        if (currentTab === 'network') {
+            loadNetworkData();
+        }
+        return;
+    }
+
+    // Update the network table with new host data
+    if (eventType === 'host_updated' || data.ip || data.IPs) {
+        if (currentTab === 'network') {
+            updateHostInTable(data);
+        }
+
+        // Update threat intelligence and NetKB if vulnerabilities found
+        if (data.vulnerabilities && data.vulnerabilities.length > 0) {
+            if (currentTab === 'threat-intel') {
+                loadThreatIntelData();
+            }
+            if (currentTab === 'netkb') {
+                loadNetkbData();
+            }
+        }
+        return;
+    }
+}
+
+function handleScanCompleted(data) {
+    addConsoleMessage(`Network scan completed. Found ${data.hosts_discovered || 0} hosts, ${data.vulnerabilities_found || 0} vulnerabilities`, 'success');
+    resetScanButtons();
+    
+    // Refresh all relevant tabs
+    if (currentTab === 'network') {
+        loadNetworkData();
+    }
+}
+
+function handleScanError(data) {
+    addConsoleMessage(`Scan error: ${data.error}`, 'error');
+    resetScanButtons();
+}
+
+// ============================================================================
+// DEEP SCAN FUNCTIONS
+// ============================================================================
+
+async function handleCustomDeepScanRequest() {
+    const inputEl = document.getElementById('custom-deep-scan-ip');
+    const statusEl = document.getElementById('custom-deep-scan-status');
+    const buttonEl = document.getElementById('custom-deep-scan-btn');
+    if (!inputEl || !statusEl || !buttonEl) {
+        return;
+    }
+
+    const ip = inputEl.value.trim();
+    if (!ip) {
+        statusEl.textContent = 'Enter a target IP address before scanning.';
+        addConsoleMessage('Manual deep scan aborted: no IP provided', 'warning');
+        return;
+    }
+    if (!isValidIPv4(ip)) {
+        statusEl.textContent = 'Please enter a valid IPv4 address (e.g., 192.168.1.192).';
+        addConsoleMessage(`Manual deep scan aborted: invalid IPv4 (${ip})`, 'error');
+        return;
+    }
+
+    const originalText = buttonEl.dataset.defaultText || buttonEl.textContent;
+    buttonEl.dataset.defaultText = originalText;
+    buttonEl.disabled = true;
+    buttonEl.classList.add('cursor-wait', 'opacity-80');
+    buttonEl.textContent = 'Starting...';
+
+    statusEl.dataset.currentIp = ip;
+    statusEl.textContent = `Launching custom scan for ${ip} (top 3000 ports)...`;
+
+    addConsoleMessage(`Manual deep scan request queued for ${ip} (top 3000 ports)`, 'info');
+
+    try {
+        const success = await triggerDeepScan(ip, { mode: 'top3000', source: 'custom' });
+        if (success) {
+            statusEl.textContent = `Scan running on ${ip}. Watch the console for live updates.`;
+        } else {
+            statusEl.textContent = `Failed to start scan for ${ip}. See console for details.`;
+            statusEl.dataset.currentIp = '';
+        }
+    } catch (error) {
+        statusEl.textContent = `Unexpected error starting scan: ${error.message}`;
+        statusEl.dataset.currentIp = '';
+    } finally {
+        buttonEl.disabled = false;
+        buttonEl.classList.remove('cursor-wait', 'opacity-80');
+        buttonEl.textContent = buttonEl.dataset.defaultText;
+    }
+}
+
+// TEST FUNCTION - Direct deep scan test
+function testDeepScan() {
+    console.log('🧪 Testing deep scan with hardcoded IP...');
+    triggerDeepScan('192.168.1.211');
+}
+
+async function triggerDeepScan(ip, options = {}) {
+    try {
+        // EXPLICIT DEBUG: Log what we received
+        console.log('🔍 triggerDeepScan CALLED');
+        console.log('   Received IP parameter:', ip);
+        console.log('   IP type:', typeof ip);
+        console.log('   IP length:', ip ? ip.length : 'null/undefined');
+        
+        if (!ip) {
+            console.error('❌ IP parameter is empty in triggerDeepScan!');
+            addConsoleMessage('Error: No IP address provided for deep scan', 'error');
+            return;
+        }
+
+        const mode = (options.mode || 'full').toLowerCase();
+        const portstart = Number.isInteger(options.portstart) ? options.portstart : undefined;
+        const portend = Number.isInteger(options.portend) ? options.portend : undefined;
+        const modeDescription = mode === 'top3000' ? 'top 3000 ports' : 'all 65535 ports';
+        
+        // Update button immediately to show scan is starting
+        const buttonId = `deep-scan-btn-${ip.replace(/\./g, '-')}`;
+        const button = document.getElementById(buttonId);
+        if (button) {
+            button.classList.remove('bg-purple-600', 'hover:bg-purple-700');
+            button.classList.add('bg-blue-600', 'cursor-wait');
+            button.disabled = true;
+            button.textContent = 'Initiating...';
+            button.dataset.scanStatus = 'initiating';
+            // Save the updated state
+            saveDeepScanButtonState(ip);
+        }
+        
+        addConsoleMessage(`Starting deep scan on ${ip} (${modeDescription})...`, 'info');
+        
+        console.log('📤 Sending POST request to /api/scan/deep');
+        const requestBody = { ip: ip };
+        if (mode) {
+            requestBody.mode = mode;
+        }
+        if (portstart !== undefined) {
+            requestBody.portstart = portstart;
+        }
+        if (portend !== undefined) {
+            requestBody.portend = portend;
+        }
+        console.log('   Request body:', JSON.stringify(requestBody));
+        
+        const response = await networkAwareFetch('/api/scan/deep', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(requestBody)
+        });
+        
+        console.log('📥 Response received, status:', response.status);
+        
+        const data = await response.json();
+        console.log('📋 Response data:', data);
+        
+        if (data.status === 'success') {
+            addConsoleMessage(`Deep scan initiated for ${ip} - scanning ${modeDescription}`, 'success');
+            return true;
+        } else {
+            addConsoleMessage(`Failed to start deep scan: ${data.message}`, 'error');
+            // Reset button on failure
+            if (button) {
+                button.classList.remove('bg-blue-600', 'cursor-wait');
+                button.classList.add('bg-purple-600', 'hover:bg-purple-700');
+                button.disabled = false;
+                button.textContent = 'Deep Scan';
+                button.dataset.scanStatus = 'idle';
+                clearDeepScanButtonState(ip);
+            }
+            return false;
+        }
+    } catch (error) {
+        console.error('Error triggering deep scan:', error);
+        addConsoleMessage(`Error starting deep scan: ${error.message}`, 'error');
+        
+        // Reset button on error
+        const buttonId = `deep-scan-btn-${ip.replace(/\./g, '-')}`;
+        const button = document.getElementById(buttonId);
+        if (button) {
+            button.classList.remove('bg-blue-600', 'cursor-wait');
+            button.classList.add('bg-purple-600', 'hover:bg-purple-700');
+            button.disabled = false;
+            button.textContent = 'Deep Scan';
+            button.dataset.scanStatus = 'idle';
+            clearDeepScanButtonState(ip);
+        }
+        return false;
+    }
+}
+
+function handleLynisUpdate(data) {
+    const { type, ip, message, stage, details } = data;
+    
+    // Get Lynis UI elements
+    const lynisButton = document.getElementById('manual-lynis-btn');
+    const lynisStatus = document.getElementById('lynis-audit-status');
+    
+    switch (type) {
+        case 'lynis_started':
+            addConsoleMessage(`🔐 ${message}`, 'info');
+            if (lynisButton) {
+                lynisButton.classList.remove('bg-red-600', 'hover:bg-red-700');
+                lynisButton.classList.add('bg-blue-600', 'cursor-wait');
+                lynisButton.disabled = true;
+                lynisButton.textContent = 'Audit started';
+            }
+            if (lynisStatus) {
+                lynisStatus.textContent = message;
+                lynisStatus.className = 'text-sm text-blue-600 mt-2';
+            }
+            break;
+            
+        case 'lynis_progress':
+            // Update button with progress messages
+            if (lynisButton) {
+                const event = data.event;
+                if (event === 'connecting') {
+                    lynisButton.textContent = 'Connecting...';
+                } else if (event === 'connected') {
+                    lynisButton.textContent = 'Connected';
+                } else if (event === 'installing') {
+                    lynisButton.textContent = 'Installing Lynis...';
+                } else if (event === 'lynis_found') {
+                    lynisButton.textContent = 'Lynis ready';
+                } else if (event === 'audit_starting') {
+                    lynisButton.textContent = 'Running audit...';
+                } else if (event === 'processing') {
+                    lynisButton.textContent = 'Processing results...';
+                }
+            }
+            if (lynisStatus && message) {
+                lynisStatus.textContent = message;
+                if (details) {
+                    lynisStatus.textContent += ` (${details})`;
+                }
+            }
+            // Add console message for major stage changes
+            if (stage && ['connection', 'setup', 'audit', 'processing'].includes(stage)) {
+                addConsoleMessage(`   ${message}`, 'info');
+            }
+            break;
+            
+        case 'lynis_completed':
+            addConsoleMessage(`✅ ${message}`, 'success');
+            
+            // Update button to show completion
+            if (lynisButton) {
+                lynisButton.classList.remove('bg-blue-600', 'cursor-wait');
+                lynisButton.classList.add('bg-green-600');
+                lynisButton.textContent = '✅ Audit complete';
+                lynisButton.disabled = true;
+                
+                // Reset button after 3 seconds
+                setTimeout(() => {
+                    if (lynisButton) {
+                        lynisButton.classList.remove('bg-green-600');
+                        lynisButton.classList.add('bg-red-600', 'hover:bg-red-700');
+                        lynisButton.textContent = 'Run Lynis Audit';
+                        lynisButton.disabled = false;
+                    }
+                }, 3000);
+            }
+            if (lynisStatus) {
+                lynisStatus.textContent = `Audit completed for ${ip}. Check vulnerabilities directory for results.`;
+                lynisStatus.className = 'text-sm text-green-600 mt-2';
+            }
+            break;
+            
+        case 'lynis_error':
+            addConsoleMessage(`❌ ${message}`, 'error');
+            
+            // Update button to show error
+            if (lynisButton) {
+                lynisButton.classList.remove('bg-blue-600', 'cursor-wait');
+                lynisButton.classList.add('bg-red-600');
+                lynisButton.textContent = '❌ Audit failed';
+                lynisButton.disabled = true;
+                
+                // Reset button after 3 seconds
+                setTimeout(() => {
+                    if (lynisButton) {
+                        lynisButton.classList.remove('bg-red-600');
+                        lynisButton.classList.add('bg-red-600', 'hover:bg-red-700');
+                        lynisButton.textContent = 'Run Lynis Audit';
+                        lynisButton.disabled = false;
+                    }
+                }, 3000);
+            }
+            if (lynisStatus) {
+                lynisStatus.textContent = message;
+                lynisStatus.className = 'text-sm text-red-600 mt-2';
+            }
+            break;
+    }
+}
+
+function handleDeepScanUpdate(data) {
+    const { type, ip, message } = data;
+    
+    // Get the button for this IP
+    const buttonId = `deep-scan-btn-${ip.replace(/\./g, '-')}`;
+    const button = document.getElementById(buttonId);
+    const customStatusEl = document.getElementById('custom-deep-scan-status');
+    const updateCustomStatus = customStatusEl && customStatusEl.dataset.currentIp === ip;
+    
+    switch (type) {
+        case 'deep_scan_started':
+            addConsoleMessage(`🔍 ${message}`, 'info');
+            if (button) {
+                button.classList.remove('bg-purple-600', 'hover:bg-purple-700');
+                button.classList.add('bg-blue-600', 'cursor-wait');
+                button.disabled = true;
+                button.textContent = 'Scan started';
+                button.dataset.scanStatus = 'scanning';
+                // Save the updated state
+                saveDeepScanButtonState(ip);
+            }
+            if (updateCustomStatus && message) {
+                customStatusEl.textContent = message;
+            }
+            break;
+        
+        case 'deep_scan_progress':
+            // Update button with short progress messages
+            if (button) {
+                const event = data.event;
+                if (event === 'scanning') {
+                    button.textContent = 'Scanning...';
+                } else if (event === 'hostname') {
+                    // Extract short hostname (max 20 chars already in message)
+                    button.textContent = message;
+                } else if (event === 'port_found') {
+                    const port = data.port;
+                    const service = data.service;
+                    button.textContent = `Port ${port} found`;
+                }
+                button.dataset.scanStatus = 'scanning';
+                // Save the updated state
+                saveDeepScanButtonState(ip);
+            }
+            if (updateCustomStatus && message) {
+                customStatusEl.textContent = message;
+            }
+            break;
+            
+        case 'deep_scan_completed':
+            const portCount = data.open_ports ? data.open_ports.length : 0;
+            const duration = data.scan_duration ? data.scan_duration.toFixed(2) : 'unknown';
+            addConsoleMessage(`✅ Deep scan of ${ip} complete: ${portCount} ports found in ${duration}s`, 'success');
+            
+            // Show detailed port information
+            if (data.open_ports && data.open_ports.length > 0) {
+                const portList = data.open_ports.slice(0, 10).join(', ');
+                const moreText = data.open_ports.length > 10 ? ` (+${data.open_ports.length - 10} more)` : '';
+                addConsoleMessage(`   Open ports: ${portList}${moreText}`, 'info');
+            }
+            
+            // Update button to show completion
+            if (button) {
+                button.classList.remove('bg-blue-600', 'cursor-wait');
+                button.classList.add('bg-green-600');
+                button.textContent = `✅ ${portCount} ports`;
+                button.disabled = true;
+                button.dataset.scanStatus = 'completed';
+                // Save the updated state
+                saveDeepScanButtonState(ip);
+                
+                // Reset button after 3 seconds
+                setTimeout(() => {
+                    if (document.getElementById(buttonId)) {
+                        button.classList.remove('bg-green-600');
+                        button.classList.add('bg-purple-600', 'hover:bg-purple-700');
+                        button.textContent = 'Deep Scan';
+                        button.disabled = false;
+                        button.dataset.scanStatus = 'idle';
+                        // Clear the saved state since it's back to default
+                        clearDeepScanButtonState(ip);
+                    }
+                }, 3000);
+            }
+
+            if (updateCustomStatus) {
+                customStatusEl.textContent = `Scan complete for ${ip}: ${portCount} open ports found.`;
+                customStatusEl.dataset.currentIp = '';
+            }
+            
+            // Refresh network table to show updated port information
+            if (currentTab === 'network') {
+                loadNetworkData();
+            }
+            break;
+            
+        case 'deep_scan_error':
+            addConsoleMessage(`❌ Deep scan error for ${ip}: ${message}`, 'error');
+            
+            // Update button to show error
+            if (button) {
+                button.classList.remove('bg-blue-600', 'cursor-wait');
+                button.classList.add('bg-red-600');
+                button.textContent = '❌ Error';
+                button.disabled = true;
+                button.dataset.scanStatus = 'error';
+                // Save the updated state
+                saveDeepScanButtonState(ip);
+                
+                // Reset button after 3 seconds
+                setTimeout(() => {
+                    if (document.getElementById(buttonId)) {
+                        button.classList.remove('bg-red-600');
+                        button.classList.add('bg-purple-600', 'hover:bg-purple-700');
+                        button.textContent = 'Deep Scan';
+                        button.disabled = false;
+                        button.dataset.scanStatus = 'idle';
+                        // Clear the saved state since it's back to default
+                        clearDeepScanButtonState(ip);
+                    }
+                }, 3000);
+            }
+
+            if (updateCustomStatus) {
+                customStatusEl.textContent = message || `Scan error for ${ip}.`;
+                customStatusEl.dataset.currentIp = '';
+            }
+            break;
+            
+        default:
+            addConsoleMessage(`Deep scan update: ${message}`, 'info');
+            if (updateCustomStatus && message) {
+                customStatusEl.textContent = message;
+            }
+    }
+}
+
+// ============================================================================
+// ENHANCED NETWORK SCANNING WITH ARP/NMAP
+// ============================================================================
+
+// Network scanning variables for enhanced scanning
+let enhancedNetworkScanInterval = null;
+let isEnhancedRealTimeScanning = false;
+
+async function startEnhancedRealTimeScan() {
+    const startBtn = document.getElementById('start-network-scan');
+    const stopBtn = document.getElementById('stop-network-scan');
+    
+    if (!startBtn || !stopBtn) return;
+    
+    try {
+        addConsoleMessage('Starting enhanced real-time network scanning (ARP + Nmap)...', 'info');
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        isEnhancedRealTimeScanning = true;
+        
+        // Show progress section
+        document.getElementById('scan-progress').classList.remove('hidden');
+        
+        // Start immediate scan
+        await performCombinedNetworkScan();
+        
+        // Set up interval for continuous scanning
+        enhancedNetworkScanInterval = setInterval(async () => {
+            if (isEnhancedRealTimeScanning) {
+                await performCombinedNetworkScan();
+            }
+        }, 15000); // Scan every 15 seconds (ARP background scanning is every 10 seconds)
+        
+        addConsoleMessage('Enhanced real-time network scanning started', 'info');
+        
+    } catch (error) {
+        console.error('Error starting enhanced real-time scan:', error);
+        addConsoleMessage('Failed to start network scan: ' + error.message, 'error');
+        resetEnhancedScanButtons();
+    }
+}
+
+async function stopEnhancedRealTimeScan() {
+    const stopBtn = document.getElementById('stop-network-scan');
+    const startBtn = document.getElementById('start-network-scan');
+    
+    if (enhancedNetworkScanInterval) {
+        clearInterval(enhancedNetworkScanInterval);
+        enhancedNetworkScanInterval = null;
+    }
+    
+    isEnhancedRealTimeScanning = false;
+    
+    if (stopBtn && startBtn) {
+        addConsoleMessage('Stopping enhanced network scan...', 'info');
+        resetEnhancedScanButtons();
+    }
+}
+
+function resetEnhancedScanButtons() {
+    const startBtn = document.getElementById('start-network-scan');
+    const stopBtn = document.getElementById('stop-network-scan');
+    
+    if (startBtn && stopBtn) {
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        isEnhancedRealTimeScanning = false;
+        document.getElementById('scan-progress').classList.add('hidden');
+    }
+}
+
+async function performCombinedNetworkScan() {
+    try {
+        const data = await fetchAPI('/api/scan/combined-network');
+        
+        if (data.success) {
+            updateNetworkTableWithScanData(data);
+            addConsoleMessage(`Network scan found ${data.count} hosts (ARP: ${data.arp_count}, Nmap: ${data.nmap_count})`, 'success');
+        } else {
+            addConsoleMessage(`Network scan failed: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error performing network scan:', error);
+        addConsoleMessage(`Network scan error: ${error.message}`, 'error');
+    }
+}
+
+function updateNetworkTableWithScanData(data) {
+    const tableBody = document.getElementById('network-hosts-table');
+    const hostCountSpan = document.getElementById('host-count');
+    
+    if (!tableBody) return;
+    
+    tableBody.innerHTML = '';
+    
+    if (!data.hosts || Object.keys(data.hosts).length === 0) {
+        tableBody.innerHTML = `
+            <tr>
+                <td colspan="8" class="text-center py-8 text-gray-400">
+                    No hosts discovered. Check network connectivity and try again.
+                </td>
+            </tr>
+        `;
+        if (hostCountSpan) hostCountSpan.textContent = '0 hosts';
+        return;
+    }
+    
+    // Convert hosts object to array for easier processing
+    const hostArray = Object.values(data.hosts);
+    
+    // Use DocumentFragment for better performance
+    const fragment = document.createDocumentFragment();
+    
+    hostArray.forEach(host => {
+        const row = document.createElement('tr');
+        row.className = 'border-b border-slate-700 hover:bg-slate-700/50 transition-colors';
+        
+        // Determine status indicator
+        const statusIcon = host.status === 'up' ? 
+            '<span class="flex items-center"><div class="w-2 h-2 bg-green-500 rounded-full mr-2"></div>Online</span>' :
+            '<span class="flex items-center"><div class="w-2 h-2 bg-red-500 rounded-full mr-2"></div>Offline</span>';
+        
+        // Format MAC address with vendor info
+        let macDisplay = host.mac || 'Unknown';
+        if (host.vendor) {
+            macDisplay += `<br><span class="text-xs text-gray-400">${host.vendor}</span>`;
+        }
+        
+        // Get source indicator
+        const sourceIcon = {
+            'arp': '<span class="text-xs px-2 py-1 bg-blue-600 rounded">ARP</span>',
+            'nmap': '<span class="text-xs px-2 py-1 bg-purple-600 rounded">NMAP</span>',
+            'arp+nmap': '<span class="text-xs px-2 py-1 bg-green-600 rounded">ARP+NMAP</span>'
+        }[host.source] || '';
+        
+        row.innerHTML = `
+            <td class="py-3 px-4">${statusIcon}</td>
+            <td class="py-3 px-4 font-mono text-sm">${host.ip}</td>
+            <td class="py-3 px-4">${host.hostname || 'Unknown'}</td>
+            <td class="py-3 px-4 font-mono text-xs">${macDisplay}</td>
+            <td class="py-3 px-4">
+                <span class="text-xs px-2 py-1 bg-gray-600 rounded">Scanning...</span>
+            </td>
+            <td class="py-3 px-4">
+                <span class="text-xs px-2 py-1 bg-gray-600 rounded">Checking...</span>
+            </td>
+            <td class="py-3 px-4 text-sm text-gray-400">${new Date().toLocaleTimeString()}</td>
+            <td class="py-3 px-4">
+                <div class="flex space-x-2">
+                    ${sourceIcon}
+                    <button onclick="scanSingleHostEnhanced('${host.ip}')" 
+                            class="text-xs px-2 py-1 bg-Ragnar-600 hover:bg-Ragnar-700 rounded transition-colors">
+                        Scan
+                    </button>
+                </div>
+            </td>
+        `;
+        
+        tableBody.appendChild(row);
+    });
+    
+    // Update host count
+    if (hostCountSpan) {
+        hostCountSpan.textContent = `${hostArray.length} hosts`;
+    }
+}
+
+async function scanSingleHostEnhanced(ip) {
+    try {
+        addConsoleMessage(`Scanning host ${ip}...`, 'info');
+        
+        const data = await postAPI('/api/scan/host', { 
+            ip: ip,
+            scan_type: 'full'
+        });
+        
+        if (data.success) {
+            addConsoleMessage(`Host ${ip} scan completed`, 'success');
+            // Refresh the network table to show updated data
+            await performCombinedNetworkScan();
+        } else {
+            addConsoleMessage(`Host ${ip} scan failed: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error scanning host:', error);
+        addConsoleMessage(`Host scan error: ${error.message}`, 'error');
+    }
+}
+
+function updateScanProgress() {
+    const progressText = document.getElementById('scan-progress-text');
+    const progressBar = document.getElementById('scan-progress-bar');
+    const currentTarget = document.getElementById('current-scan-target');
+
+    const percentage = currentScanState.totalHosts > 0 ?
+        (currentScanState.scannedHosts / currentScanState.totalHosts) * 100 : 0;
+
+    if (progressText) {
+        progressText.textContent = `${currentScanState.scannedHosts}/${currentScanState.totalHosts} hosts`;
+    }
+
+    if (progressBar) {
+        progressBar.style.width = `${percentage}%`;
+    }
+
+    if (currentTarget) {
+        currentTarget.textContent = currentScanState.currentTarget ?
+            `Currently scanning: ${currentScanState.currentTarget}` : '';
+    }
+}
+
+function escapeSelector(value) {
+    if (window.CSS && typeof CSS.escape === 'function') {
+        return CSS.escape(value);
+    }
+    return value.replace(/([ #;?%&,.+*~\':"!^$\[\]()=>|\/])/g, '\\$1');
+}
+
+function parseCompactTimestamp(value) {
+    if (!value) {
+        return null;
+    }
+    const digits = value.replace(/[^0-9]/g, '');
+    if (digits.length < 8) {
+        return null;
+    }
+
+    const year = Number(digits.slice(0, 4));
+    const month = Number(digits.slice(4, 6)) - 1;
+    const day = Number(digits.slice(6, 8));
+    const hour = digits.length >= 10 ? Number(digits.slice(8, 10)) : 0;
+    const minute = digits.length >= 12 ? Number(digits.slice(10, 12)) : 0;
+    const second = digits.length >= 14 ? Number(digits.slice(12, 14)) : 0;
+
+    const date = new Date(year, month, day, hour, minute, second);
+    return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function buildLastScanInfo(rawStatus, isoTimestamp) {
+    const info = {
+        label: 'Never',
+        className: 'text-gray-400',
+        timestampText: '',
+        tooltip: '',
+        rawStatus: rawStatus || '',
+        rawTimestamp: isoTimestamp || ''
+    };
+
+    let statusPart = (rawStatus || '').toString().trim();
+    let timestamp = null;
+
+    if (statusPart.includes('_')) {
+        const parts = statusPart.split('_');
+        statusPart = parts[0];
+        const timestampCandidate = parts.slice(1).join('_');
+        timestamp = parseCompactTimestamp(timestampCandidate);
+    }
+
+    if (!timestamp && isoTimestamp) {
+        const parsed = new Date(isoTimestamp);
+        if (!Number.isNaN(parsed.getTime())) {
+            timestamp = parsed;
+        }
+    }
+
+    if (!timestamp && rawStatus) {
+        const digits = rawStatus.replace(/[^0-9]/g, '');
+        if (digits.length >= 8) {
+            const parsedDigits = parseCompactTimestamp(digits);
+            if (parsedDigits) {
+                timestamp = parsedDigits;
+            }
+        }
+    }
+
+    const lowerStatus = statusPart.toLowerCase();
+    if (!statusPart) {
+        if (timestamp) {
+            info.label = 'Completed';
+            info.className = 'text-blue-400';
+        } else {
+            info.label = 'Never';
+            info.className = 'text-gray-400';
+        }
+    } else if (lowerStatus.startsWith('success')) {
+        info.label = 'Success';
+        info.className = 'text-green-400';
+    } else if (lowerStatus.startsWith('failed')) {
+        info.label = 'Failed';
+        info.className = 'text-red-400';
+    } else if (['running', 'scanning', 'pending', 'inprogress', 'in_progress'].includes(lowerStatus)) {
+        info.label = statusPart.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        info.className = 'text-yellow-400';
+    } else {
+        info.label = statusPart.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        info.className = 'text-slate-300';
+    }
+
+    if (timestamp) {
+        info.timestampText = timestamp.toLocaleString();
+    }
+
+    const tooltipParts = [];
+    if (info.rawStatus) {
+        tooltipParts.push(`Status: ${info.rawStatus}`);
+    }
+    if (info.timestampText) {
+        tooltipParts.push(`Completed: ${info.timestampText}`);
+    }
+    if (info.rawTimestamp && !info.timestampText) {
+        tooltipParts.push(`Reported: ${info.rawTimestamp}`);
+    }
+    info.tooltip = tooltipParts.join('\n');
+
+    return info;
+}
+
+function normalizeHostRecord(hostData) {
+    if (!hostData) {
+        return null;
+    }
+
+    const ip = hostData.IPs || hostData.ip || hostData.address || hostData.target || '';
+    if (!ip) {
+        return null;
+    }
+
+    const hostname = hostData.Hostnames || hostData.Hostname || hostData.hostname || hostData.name || '';
+    const mac = hostData['MAC Address'] || hostData.MAC || hostData.mac || '';
+
+    const aliveValue = hostData.Alive ?? hostData.alive ?? hostData.Status ?? hostData.status ?? '';
+    const aliveString = aliveValue === undefined || aliveValue === null ? '' : String(aliveValue).trim();
+    const aliveLower = aliveString.toLowerCase();
+    const isActive = ['1', 'true', 'online', 'up', 'active', 'success'].includes(aliveLower);
+    const isInactive = ['0', 'false', 'offline', 'down', 'inactive', 'failed'].includes(aliveLower);
+
+    let statusText = 'Unknown';
+    if (isActive) {
+        statusText = 'Active';
+    } else if (isInactive) {
+        statusText = 'Inactive';
+    } else if (aliveString) {
+        statusText = aliveString.charAt(0).toUpperCase() + aliveString.slice(1);
+    }
+
+    const statusClass = isActive ? 'text-green-400' : (isInactive ? 'text-red-400' : 'text-yellow-400');
+
+    const rawPorts = hostData.Ports ?? hostData.ports ?? hostData.port_list ?? hostData.open_ports;
+    let ports = [];
+    if (Array.isArray(rawPorts)) {
+        ports = rawPorts.map(port => String(port).trim()).filter(Boolean);
+    } else if (typeof rawPorts === 'string') {
+        ports = rawPorts.split(/[,;\s]+/).map(port => port.trim()).filter(Boolean);
+    } else if (rawPorts) {
+        ports = [String(rawPorts).trim()];
+    }
+
+    const vulnObjects = Array.isArray(hostData.vulnerabilities) ? hostData.vulnerabilities : [];
+    const normalizedVulnObjects = vulnObjects.map(vuln => {
+        if (typeof vuln === 'string') {
+            return vuln;
+        }
+        if (vuln && typeof vuln === 'object') {
+            return vuln.vulnerability || vuln.raw_output || vuln.description || vuln.id || '';
+        }
+        return '';
+    }).filter(Boolean);
+
+    let vulnSummary = hostData['Nmap Vulnerabilities'] || hostData['nmap_vulnerabilities'] || hostData.vulnerability_summary || '';
+    if (!vulnSummary && typeof hostData.NmapVulnerabilities === 'string') {
+        vulnSummary = hostData.NmapVulnerabilities;
+    }
+    const summaryEntries = (typeof vulnSummary === 'string' && vulnSummary.trim())
+        ? vulnSummary.split(';').map(entry => entry.trim()).filter(Boolean)
+        : [];
+
+    const combinedVulns = [...normalizedVulnObjects, ...summaryEntries];
+    const uniqueVulns = [];
+    const seenVulns = new Set();
+    combinedVulns.forEach(entry => {
+        const key = entry.toLowerCase();
+        if (!seenVulns.has(key)) {
+            seenVulns.add(key);
+            uniqueVulns.push(entry);
+        }
+    });
+
+    const rawScanStatus = hostData['NmapVulnScanner'] || hostData['nmap_vuln_scanner'] || hostData.scan_status || '';
+    const lastScanIso = hostData.last_scan || hostData.LastScan || hostData.last_vuln_scan || '';
+    const lastScan = buildLastScanInfo(rawScanStatus, lastScanIso);
+
+    return {
+        ip: String(ip).trim(),
+        hostname: hostname || '',
+        mac: mac || '',
+        ports,
+        statusText,
+        statusClass,
+        vulnerabilityCount: uniqueVulns.length,
+        vulnerabilityPreview: uniqueVulns.slice(0, 2).join('; '),
+        vulnerabilityFull: uniqueVulns.join('; '),
+        lastScan,
+        raw: hostData
+    };
+}
+
+function formatPortsCell(ports) {
+    if (!ports || ports.length === 0) {
+        return '<span class="text-gray-400">None</span>';
+    }
+    const displayPorts = ports.slice(0, 5);
+    const displayText = escapeHtml(displayPorts.join(', '));
+    const ellipsis = ports.length > 5 ? '…' : '';
+    const tooltip = escapeHtml(ports.join(', '));
+    return `<span title="${tooltip}">${displayText}${ellipsis}</span>`;
+}
+
+function formatVulnerabilityCell(normalized) {
+    if (!normalized || normalized.vulnerabilityCount === 0) {
+        return '<span class="text-gray-400">None</span>';
+    }
+
+    const countText = `${normalized.vulnerabilityCount} ${normalized.vulnerabilityCount === 1 ? 'issue' : 'issues'}`;
+    const tooltipSource = normalized.vulnerabilityFull || normalized.vulnerabilityPreview || countText;
+    const tooltip = escapeHtml(tooltipSource);
+    const preview = normalized.vulnerabilityPreview
+        ? `<div class="text-xs text-slate-300 truncate max-w-xs" title="${tooltip}">${escapeHtml(normalized.vulnerabilityPreview)}</div>`
+        : '';
+
+    return `<span class="text-red-400 font-medium" title="${tooltip}">${countText}</span>${preview}`;
+}
+
+function formatLastScanCell(info) {
+    if (!info) {
+        return '<span class="text-gray-400">Never</span>';
+    }
+
+    const tooltip = info.tooltip ? ` title="${escapeHtml(info.tooltip)}"` : '';
+    const timestampLine = info.timestampText
+        ? `<div class="text-xs text-gray-400">${escapeHtml(info.timestampText)}</div>`
+        : '';
+
+    return `<div${tooltip}><span class="${info.className}">${escapeHtml(info.label)}</span>${timestampLine}</div>`;
+}
+
+function renderHostRow(normalized) {
+    const hostname = normalized.hostname ? escapeHtml(normalized.hostname) : 'Unknown';
+    const mac = normalized.mac ? escapeHtml(normalized.mac) : 'Unknown';
+    const ip = escapeHtml(normalized.ip);
+    
+    // Add a visual status dot indicator
+    const isActive = normalized.statusClass.includes('green');
+    const isInactive = normalized.statusClass.includes('red');
+    const dotColor = isActive ? 'bg-green-500' : (isInactive ? 'bg-red-500' : 'bg-yellow-500');
+    const statusDot = `<span class="inline-block w-2 h-2 rounded-full ${dotColor} mr-1"></span>`;
+
+    return `
+        <td class="py-3 px-4" data-label="Status">
+            <span class="px-2 py-1 rounded text-xs ${normalized.statusClass} flex items-center">
+                ${statusDot}${escapeHtml(normalized.statusText)}
+            </span>
+        </td>
+        <td class="py-3 px-4 font-mono" data-label="IP Address">${ip}</td>
+        <td class="py-3 px-4" data-label="Hostname">${hostname || 'Unknown'}</td>
+        <td class="py-3 px-4 font-mono text-sm" data-label="MAC Address">${mac || 'Unknown'}</td>
+        <td class="py-3 px-4 text-sm" data-label="Open Ports">${formatPortsCell(normalized.ports)}</td>
+        <td class="py-3 px-4 text-sm" data-label="Vulnerabilities">${formatVulnerabilityCell(normalized)}</td>
+        <td class="py-3 px-4 text-sm" data-label="Last Scan">${formatLastScanCell(normalized.lastScan)}</td>
+        <td class="py-3 px-4" data-label="Actions">
+                <button onclick="triggerDeepScan('${normalized.ip}', { mode: 'full' })"
+                    id="deep-scan-btn-${normalized.ip.replace(/\./g, '-')}"
+                    data-scan-status="idle"
+                    class="deep-scan-button bg-purple-600 hover:bg-purple-700 text-white text-xs px-3 py-1 rounded transition-all duration-300"
+                    title="Scan all 65535 ports with TCP connect (-sT). IP: ${normalized.ip}">
+                Deep Scan
+            </button>
+            <button onclick="openHostPanel('${normalized.ip}')" class="bg-slate-600 hover:bg-slate-500 text-white text-xs px-3 py-1 rounded transition-colors ml-1" title="View host details">
+                Details
+            </button>
+        </td>
+    `;
+}
+
+// ── Host Detail Panel ───────────────────────────────────────────
+function openHostPanel(ip) {
+    const panel = document.getElementById('host-detail-panel');
+    const overlay = document.getElementById('host-detail-overlay');
+    if (!panel || !overlay) return;
+
+    // Show panel immediately with loading state
+    document.getElementById('hdp-ip').textContent = ip;
+    document.getElementById('hdp-hostname').textContent = 'Loading...';
+    document.getElementById('hdp-status').textContent = '—';
+    document.getElementById('hdp-mac').textContent = '—';
+    document.getElementById('hdp-lastseen').textContent = '—';
+    document.getElementById('hdp-portcount').textContent = '—';
+    document.getElementById('hdp-ports').innerHTML = '<span class="text-gray-400 text-sm">Loading...</span>';
+    document.getElementById('hdp-creds').innerHTML = '<p class="text-gray-400 text-sm">Loading...</p>';
+    document.getElementById('hdp-attacks').innerHTML = '<p class="text-gray-400 text-sm">Loading...</p>';
+    document.getElementById('hdp-vuln-section').classList.add('hidden');
+
+    overlay.classList.remove('hidden');
+    panel.classList.remove('translate-x-full');
+
+    networkAwareFetch(`/api/host/${encodeURIComponent(ip)}`)
+        .then(r => r.json())
+        .then(data => renderHostPanel(data))
+        .catch(err => {
+            document.getElementById('hdp-hostname').textContent = 'Error loading data';
+        });
+}
+
+function closeHostPanel() {
+    const panel = document.getElementById('host-detail-panel');
+    const overlay = document.getElementById('host-detail-overlay');
+    if (panel) panel.classList.add('translate-x-full');
+    if (overlay) overlay.classList.add('hidden');
+}
+
+function renderHostPanel(data) {
+    const statusColors = { alive: 'text-green-400', degraded: 'text-yellow-400', unknown: 'text-gray-400' };
+
+    document.getElementById('hdp-ip').textContent = data.ip || '—';
+    document.getElementById('hdp-hostname').textContent = data.hostname || 'No hostname';
+    document.getElementById('hdp-status').innerHTML = `<span class="${statusColors[data.status] || 'text-gray-400'}">${data.status || 'unknown'}</span>`;
+    document.getElementById('hdp-mac').textContent = data.mac || '—';
+    document.getElementById('hdp-lastseen').textContent = data.last_seen || '—';
+    document.getElementById('hdp-portcount').textContent = `${(data.ports || []).length} port${(data.ports||[]).length !== 1 ? 's' : ''}`;
+
+    // Ports
+    const portsEl = document.getElementById('hdp-ports');
+    if (data.ports && data.ports.length > 0) {
+        portsEl.innerHTML = data.ports.map(p =>
+            `<span class="px-2 py-1 bg-slate-700 rounded text-xs font-mono">${escapeHtml(p)}</span>`
+        ).join('');
+    } else {
+        portsEl.innerHTML = '<span class="text-gray-500 text-sm">None detected</span>';
+    }
+
+    // Credentials
+    const credsEl = document.getElementById('hdp-creds');
+    if (data.credentials && data.credentials.length > 0) {
+        const svcColors = { ssh:'bg-blue-900 text-blue-300', smb:'bg-purple-900 text-purple-300', ftp:'bg-yellow-900 text-yellow-300', telnet:'bg-orange-900 text-orange-300', rdp:'bg-pink-900 text-pink-300', sql:'bg-green-900 text-green-300' };
+        credsEl.innerHTML = data.credentials.map(c => `
+            <div class="flex items-center justify-between bg-slate-800 rounded-lg px-3 py-2">
+                <div class="flex items-center gap-2">
+                    <span class="px-1.5 py-0.5 rounded text-xs font-semibold uppercase ${svcColors[c.service] || 'bg-slate-700 text-gray-300'}">${c.service}</span>
+                    <span class="font-mono text-sm">${escapeHtml(c.username || '—')}</span>
+                    <span class="text-gray-500">:</span>
+                    <span class="font-mono text-sm text-green-300">${escapeHtml(c.password || '—')}</span>
+                </div>
+            </div>`).join('');
+    } else {
+        credsEl.innerHTML = '<p class="text-gray-500 text-sm">No credentials found</p>';
+    }
+
+    // Attack logs
+    const attacksEl = document.getElementById('hdp-attacks');
+    if (data.attack_logs && data.attack_logs.length > 0) {
+        const statusC = { success:'text-green-400', failed:'text-red-400', timeout:'text-yellow-400' };
+        attacksEl.innerHTML = data.attack_logs.map(a => `
+            <div class="bg-slate-800 rounded-lg px-3 py-2 text-xs">
+                <div class="flex items-center justify-between mb-1">
+                    <span class="font-semibold ${statusC[a.status] || 'text-gray-400'}">${a.attack_type}</span>
+                    <span class="text-gray-500">${a.timestamp}</span>
+                </div>
+                ${a.message ? `<p class="text-gray-300">${escapeHtml(a.message)}</p>` : ''}
+            </div>`).join('');
+    } else {
+        attacksEl.innerHTML = '<p class="text-gray-500 text-sm">No attack history</p>';
+    }
+
+    // Vuln summary
+    const vulnSection = document.getElementById('hdp-vuln-section');
+    const vulnEl = document.getElementById('hdp-vuln');
+    if (data.vuln_summary) {
+        vulnEl.textContent = data.vuln_summary;
+        vulnSection.classList.remove('hidden');
+    } else {
+        vulnSection.classList.add('hidden');
+    }
+}
+
+function updateHostCountDisplay() {
+    const tableBody = document.getElementById('network-hosts-table');
+    const hostCount = document.getElementById('host-count');
+    if (!tableBody || !hostCount) {
+        return;
+    }
+
+    const totalHosts = tableBody.querySelectorAll('tr[data-ip]').length;
+    hostCount.textContent = `${totalHosts} host${totalHosts !== 1 ? 's' : ''}`;
+}
+
+function updateHostInTable(hostData) {
+    const tableBody = document.getElementById('network-hosts-table');
+    if (!tableBody) {
+        return;
+    }
+
+    const normalized = normalizeHostRecord(hostData);
+    if (!normalized) {
+        return;
+    }
+
+    const noDataRow = tableBody.querySelector('td[colspan="8"]');
+    if (noDataRow) {
+        noDataRow.parentElement.remove();
+    }
+
+    const selector = `tr[data-ip="${escapeSelector(normalized.ip)}"]`;
+    let row = tableBody.querySelector(selector);
+    
+    // Save deep scan button state before updating row
+    if (row) {
+        saveDeepScanButtonState(normalized.ip);
+    }
+    
+    if (!row) {
+        row = document.createElement('tr');
+        row.setAttribute('data-ip', normalized.ip);
+        row.className = 'border-b border-slate-700 hover:bg-slate-700/50 transition-colors';
+        tableBody.appendChild(row);
+    }
+
+    row.innerHTML = renderHostRow(normalized);
+    
+    // Restore deep scan button state after updating row
+    restoreDeepScanButtonState(normalized.ip);
+    
+    updateHostCountDisplay();
+}
+
+async function scanSingleHost(ip) {
+    try {
+        const response = await networkAwareFetch('/api/scan/host', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ ip: ip })
+        });
+        
+        if (response.ok) {
+            addConsoleMessage(`Started scan of ${ip}`, 'info');
+        } else {
+            throw new Error('Failed to start host scan');
+        }
+    } catch (error) {
+        console.error('Error scanning host:', error);
+        addConsoleMessage(`Failed to scan ${ip}: ${error.message}`, 'error');
+    }
+}
+
+async function loadCredentialsData() {
+    try {
+        const data = await fetchAPI('/api/credentials');
+        displayCredentialsTable(data);
+    } catch (error) {
+        console.error('Error loading credentials:', error);
+    }
+}
+
+async function loadLootData() {
+    try {
+        const data = await fetchAPI('/api/loot');
+        displayLootTable(data);
+    } catch (error) {
+        console.error('Error loading loot data:', error);
+    }
+}
+
+// Attack Logs Functions
+let currentAttackFilter = 'all';
+let attackLogsCache = null;
+let attackLogsETag = null;
+let attackLogsInFlight = null;
+
+async function loadAttackLogs(options = {}) {
+    const { force = false } = options;
+
+    if (attackLogsInFlight) {
+        return attackLogsInFlight;
+    }
+
+    const headers = {};
+    if (!force && attackLogsETag) {
+        headers['If-None-Match'] = attackLogsETag;
+    }
+
+    if (!attackLogsCache) {
+        document.getElementById('attack-logs-container').innerHTML = `
+            <div class="text-center text-gray-400 py-8">
+                <svg class="w-8 h-8 inline animate-spin mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                </svg>
+                <p>Loading attack logs...</p>
+            </div>
+        `;
+    }
+
+    attackLogsInFlight = (async () => {
+        try {
+            const response = await networkAwareFetch('/api/attack?limit=200&days=7', { headers });
+
+            if (response.status === 304) {
+                console.debug('Attack logs unchanged; skipping DOM update');
+                return attackLogsCache;
+            }
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const data = await response.json();
+            attackLogsCache = data;
+            attackLogsETag = response.headers.get('ETag') || attackLogsETag;
+            displayAttackLogs(data);
+            return data;
+        } catch (error) {
+            console.error('Error loading attack logs:', error);
+
+            if (!attackLogsCache) {
+                document.getElementById('attack-logs-container').innerHTML = `
+                    <div class="text-center text-red-400 py-8">
+                        <svg class="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        <p>Error loading attack logs</p>
+                        <p class="text-sm text-gray-500 mt-2">${error.message}</p>
+                    </div>
+                `;
+            }
+
+            return attackLogsCache;
+        } finally {
+            attackLogsInFlight = null;
+        }
+    })();
+
+    return attackLogsInFlight;
+}
+
+function filterAttackLogs(status) {
+    currentAttackFilter = status;
+    
+    // Update filter button styles
+    document.querySelectorAll('.attack-filter-btn').forEach(btn => {
+        if (btn.getAttribute('data-filter') === status) {
+            btn.classList.add('ring-2', 'ring-white');
+        } else {
+            btn.classList.remove('ring-2', 'ring-white');
+        }
+    });
+    
+    // Re-display with filter
+    if (attackLogsCache) {
+        displayAttackLogs(attackLogsCache);
+    }
+}
+
+async function refreshAttackLogs() {
+    await loadAttackLogs({ force: true });
+}
+
+function displayAttackLogs(data) {
+    if (!data || !data.attack_logs) {
+        document.getElementById('attack-logs-container').innerHTML = `
+            <div class="text-center text-gray-400 py-8">
+                <svg class="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                </svg>
+                <p>No attack logs found</p>
+            </div>
+        `;
+        return;
+    }
+    
+    // Update statistics
+    document.getElementById('attack-stat-total').textContent = data.total_count || 0;
+    document.getElementById('attack-stat-success').textContent = data.success_count || 0;
+    document.getElementById('attack-stat-failed').textContent = data.failed_count || 0;
+    
+    // Calculate timeout count
+    const timeoutCount = data.attack_logs.filter(log => log.status === 'timeout').length;
+    document.getElementById('attack-stat-timeout').textContent = timeoutCount;
+    
+    // Filter logs based on current filter
+    let logs = data.attack_logs;
+    if (currentAttackFilter !== 'all') {
+        logs = logs.filter(log => log.status === currentAttackFilter);
+    }
+    
+    if (logs.length === 0) {
+        document.getElementById('attack-logs-container').innerHTML = `
+            <div class="text-center text-gray-400 py-8">
+                <svg class="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                </svg>
+                <p>No ${currentAttackFilter === 'all' ? '' : currentAttackFilter} attacks found</p>
+            </div>
+        `;
+        return;
+    }
+    
+    // Group logs by IP address
+    const logsByIP = {};
+    logs.forEach(log => {
+        const ip = log.target_ip || 'Unknown';
+        if (!logsByIP[ip]) {
+            logsByIP[ip] = [];
+        }
+        logsByIP[ip].push(log);
+    });
+    
+    // Sort IPs
+    const sortedIPs = Object.keys(logsByIP).sort();
+    
+    // Build HTML
+    let html = '<div class="space-y-4">';
+    
+    sortedIPs.forEach(ip => {
+        const hostLogs = logsByIP[ip];
+        const successCount = hostLogs.filter(l => l.status === 'success').length;
+        const failedCount = hostLogs.filter(l => l.status === 'failed').length;
+        const timeoutCount = hostLogs.filter(l => l.status === 'timeout').length;
+        
+        html += `
+            <div class="bg-slate-800 bg-opacity-50 rounded-lg border border-slate-700 overflow-hidden">
+                <div class="px-4 py-3 bg-slate-900 bg-opacity-50 flex items-center justify-between cursor-pointer hover:bg-opacity-70 transition-colors" onclick="toggleAttackHost('${ip}')">
+                    <div class="flex items-center space-x-3">
+                        <svg class="w-5 h-5 text-Ragnar-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path>
+                        </svg>
+                        <span class="font-semibold text-lg">${ip}</span>
+                        <span class="text-sm text-gray-400">(${hostLogs.length} attacks)</span>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <span class="text-sm text-green-400">✓ ${successCount}</span>
+                        <span class="text-sm text-red-400">✗ ${failedCount}</span>
+                        <span class="text-sm text-yellow-400">⏱ ${timeoutCount}</span>
+                        <svg id="attack-chevron-${ip.replace(/\./g, '-')}" class="w-5 h-5 text-gray-400 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                        </svg>
+                    </div>
+                </div>
+                <div id="attack-host-${ip.replace(/\./g, '-')}" class="hidden px-4 py-3 space-y-2">
+        `;
+        
+        // Sort logs by timestamp (most recent first)
+        hostLogs.sort((a, b) => {
+            return new Date(b.timestamp) - new Date(a.timestamp);
+        });
+        
+        hostLogs.forEach(log => {
+            const statusColors = {
+                'success': 'bg-green-900 bg-opacity-30 border-green-500',
+                'failed': 'bg-red-900 bg-opacity-30 border-red-500',
+                'timeout': 'bg-yellow-900 bg-opacity-30 border-yellow-500'
+            };
+            
+            const statusIcons = {
+                'success': '✓',
+                'failed': '✗',
+                'timeout': '⏱'
+            };
+            
+            const statusTextColors = {
+                'success': 'text-green-400',
+                'failed': 'text-red-400',
+                'timeout': 'text-yellow-400'
+            };
+            
+            const colorClass = statusColors[log.status] || 'bg-gray-900 bg-opacity-30 border-gray-500';
+            const icon = statusIcons[log.status] || '•';
+            const textColor = statusTextColors[log.status] || 'text-gray-400';
+            
+            html += `
+                <div class="border-l-4 ${colorClass} p-3 rounded-r-lg">
+                    <div class="flex items-start justify-between">
+                        <div class="flex-1">
+                            <div class="flex items-center space-x-2 mb-1">
+                                <span class="font-semibold ${textColor}">${icon} ${log.attack_type}</span>
+                                ${log.target_port ? `<span class="text-xs text-gray-400">Port ${log.target_port}</span>` : ''}
+                                <span class="text-xs text-gray-500">${log.timestamp}</span>
+                            </div>
+                            ${log.message ? `<p class="text-sm text-gray-300 mb-2">${escapeHtml(log.message)}</p>` : ''}
+                            ${Object.keys(log.details || {}).length > 0 ? `
+                                <div class="text-xs space-y-1 mt-2">
+                                    ${Object.entries(log.details).map(([key, value]) => `
+                                        <div class="flex items-center space-x-2">
+                                            <span class="text-gray-500">${key}:</span>
+                                            <span class="text-gray-300 font-mono">${escapeHtml(String(value))}</span>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        
+        html += `
+                </div>
+            </div>
+        `;
+    });
+    
+    html += '</div>';
+    
+    document.getElementById('attack-logs-container').innerHTML = html;
+}
+
+function toggleAttackHost(ip) {
+    const containerId = `attack-host-${ip.replace(/\./g, '-')}`;
+    const chevronId = `attack-chevron-${ip.replace(/\./g, '-')}`;
+    const container = document.getElementById(containerId);
+    const chevron = document.getElementById(chevronId);
+    
+    if (container.classList.contains('hidden')) {
+        container.classList.remove('hidden');
+        chevron.classList.add('rotate-180');
+    } else {
+        container.classList.add('hidden');
+        chevron.classList.remove('rotate-180');
+    }
+}
+
+// ============================================================================
+// VULNERABILITY INTELLIGENCE FUNCTIONS
+// ============================================================================
+
+async function loadVulnerabilityIntel() {
+    try {
+        const container = document.getElementById('vulnerability-intel-container');
+        
+        // Show loading state
+        container.innerHTML = `
+            <div class="text-center text-gray-400 py-8">
+                <svg class="w-8 h-8 inline animate-spin mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                </svg>
+                <p>Loading service intelligence...</p>
+            </div>
+        `;
+        
+        const data = await fetchAPI('/api/vulnerability-intel');
+        
+        if (!data) {
+            container.innerHTML = `
+                <div class="text-center text-red-400 py-8">
+                    <p>Error loading service intelligence</p>
+                </div>
+            `;
+            return;
+        }
+        
+        // Update statistics
+        document.getElementById('intel-stat-scanned').textContent = data.statistics.total_scanned || 0;
+        document.getElementById('intel-stat-interesting').textContent = data.statistics.interesting_hosts || 0;
+        document.getElementById('intel-stat-services').textContent = data.statistics.services_with_intel || 0;
+        document.getElementById('intel-stat-scripts').textContent = data.statistics.script_outputs || 0;
+        
+        displayVulnerabilityIntel(data.scans);
+    } catch (error) {
+        console.error('Error loading vulnerability intelligence:', error);
+        const container = document.getElementById('vulnerability-intel-container');
+        container.innerHTML = `
+            <div class="text-center text-red-400 py-8">
+                <svg class="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                <p>Error loading service intelligence</p>
+                <p class="text-sm text-gray-500 mt-2">${error.message}</p>
+            </div>
+        `;
+    }
+}
+
+function displayVulnerabilityIntel(scans) {
+    const container = document.getElementById('vulnerability-intel-container');
+    
+    if (!scans || scans.length === 0) {
+        container.innerHTML = `
+            <div class="text-center text-gray-400 py-8">
+                <svg class="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+                </svg>
+                <p>No interesting intelligence found</p>
+                <p class="text-sm text-gray-500 mt-2">Scanned hosts without interesting data are filtered out</p>
+            </div>
+        `;
+        return;
+    }
+    
+    let html = '<div class="space-y-4">';
+    
+    scans.forEach(scan => {
+        const serviceCount = scan.total_services || 0;
+        const scriptCount = scan.services.reduce((sum, svc) => sum + (svc.scripts?.length || 0), 0);
+        
+        html += `
+            <div class="bg-slate-800 bg-opacity-50 rounded-lg border border-slate-700 overflow-hidden">
+                <div class="px-4 py-3 bg-slate-900 bg-opacity-50 flex items-center justify-between cursor-pointer hover:bg-opacity-70 transition-colors" onclick="toggleVulnHost('${scan.ip}')">
+                    <div class="flex items-center space-x-3">
+                        <svg class="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        <div>
+                            <div class="font-semibold text-lg">${escapeHtml(scan.hostname)}</div>
+                            <div class="text-sm text-gray-400">${escapeHtml(scan.ip)}</div>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        ${scan.download_url ? `
+                            <a href="${scan.download_url}" target="_blank" rel="noopener noreferrer"
+                               class="text-xs px-3 py-1 rounded-full bg-cyan-900/60 text-cyan-200 border border-cyan-500/40 hover:bg-cyan-800/80 transition">
+                                ${scan.scan_type === 'lynis' ? 'Download full report' : 'View full report'}
+                            </a>
+                        ` : ''}
+                        ${(scan.log_url && scan.log_url !== scan.download_url) ? `
+                            <a href="${scan.log_url}" target="_blank" rel="noopener noreferrer"
+                               class="text-xs px-3 py-1 rounded-full bg-slate-900/60 text-slate-200 border border-slate-500/40 hover:bg-slate-800/80 transition">
+                                View audit log
+                            </a>
+                        ` : ''}
+                        <span class="text-sm text-cyan-400">📡 ${serviceCount} services</span>
+                        ${scriptCount > 0 ? `<span class="text-sm text-purple-400">📜 ${scriptCount} scripts</span>` : ''}
+                        <span class="text-xs text-gray-500">${scan.scan_date}</span>
+                        <svg id="vuln-chevron-${scan.ip.replace(/\./g, '-')}" class="w-5 h-5 text-gray-400 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                        </svg>
+                    </div>
+                </div>
+                
+                <div id="vuln-host-${scan.ip.replace(/\./g, '-')}" class="hidden px-4 py-3 border-t border-slate-700">
+                    <div class="space-y-3">
+                        ${scan.services
+                            .sort((a, b) => {
+                                // Sort so Lynis pentest (system info) appears before ports
+                                const aIsSystem = a.port === 'system' || a.service === 'lynis pentest';
+                                const bIsSystem = b.port === 'system' || b.service === 'lynis pentest';
+                                
+                                if (aIsSystem && !bIsSystem) return -1;  // System first
+                                if (!aIsSystem && bIsSystem) return 1;   // System first
+                                
+                                // For non-system services, sort by port number
+                                if (!aIsSystem && !bIsSystem) {
+                                    const portA = parseInt(a.port) || 99999;
+                                    const portB = parseInt(b.port) || 99999;
+                                    return portA - portB;
+                                }
+                                
+                                return 0;  // Keep original order for same type
+                            })
+                            .map(service => {
+                            const hasScripts = service.scripts && service.scripts.length > 0;
+                            const isSystemInfo = service.port === 'system' || service.service === 'lynis pentest';
+                            
+                            return `
+                                <div class="${isSystemInfo ? 'bg-blue-900 bg-opacity-30 border border-blue-500/30' : 'bg-slate-700 bg-opacity-50'} rounded-lg p-4">
+                                    <div class="flex items-start justify-between mb-2">
+                                        <div class="flex-1">
+                                            <div class="flex items-center space-x-2 mb-1">
+                                                ${isSystemInfo ? 
+                                                    `<svg class="w-4 h-4 text-blue-400 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+                                                    </svg>
+                                                    <span class="font-semibold text-blue-200">🖥️ System Audit</span>` : 
+                                                    `<span class="font-semibold text-white">${escapeHtml(service.port)}</span>`
+                                                }
+                                                <span class="text-sm ${isSystemInfo ? 'text-blue-300' : 'text-gray-400'}">${escapeHtml(service.service)}</span>
+                                            </div>
+                                            ${service.version ? `
+                                                <div class="text-sm text-cyan-300 font-mono bg-slate-900 bg-opacity-50 px-2 py-1 rounded inline-block">
+                                                    ${escapeHtml(service.version)}
+                                                </div>
+                                            ` : ''}
+                                        </div>
+                                    </div>
+                                    
+                                    ${hasScripts ? `
+                                        <div class="mt-3 space-y-2">
+                                            ${service.scripts.map(script => `
+                                                <div class="bg-slate-900 bg-opacity-50 rounded p-3">
+                                                    <div class="text-sm font-semibold text-purple-400 mb-2">
+                                                        📜 ${escapeHtml(script.name)}
+                                                    </div>
+                                                    <pre class="text-xs text-gray-300 font-mono whitespace-pre-wrap overflow-x-auto max-h-96 scrollbar-thin">${escapeHtml(script.output)}</pre>
+                                                </div>
+                                            `).join('')}
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+    
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+function toggleVulnHost(ip) {
+    const containerId = `vuln-host-${ip.replace(/\./g, '-')}`;
+    const chevronId = `vuln-chevron-${ip.replace(/\./g, '-')}`;
+    const container = document.getElementById(containerId);
+    const chevron = document.getElementById(chevronId);
+    
+    if (container.classList.contains('hidden')) {
+        container.classList.remove('hidden');
+        chevron.classList.add('rotate-180');
+    } else {
+        container.classList.add('hidden');
+        chevron.classList.remove('rotate-180');
+    }
+}
+
+async function refreshVulnerabilityIntel() {
+    showNotification('Refreshing service intelligence...', 'info');
+    await loadVulnerabilityIntel();
+}
+
+// ============================================================================
+// CREDENTIALS AND LOOT FUNCTIONS  
+// ============================================================================
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+async function loadConfigData() {
+    try {
+        const config = await fetchAPI('/api/config');
+        displayConfigForm(config);
+
+        // Load AI configuration
+        loadAIConfiguration(config);
+
+        // Load hardware profiles
+        await loadHardwareProfiles();
+
+        // Display current profile if set
+        displayCurrentProfile(config);
+
+        // Update vulnerability count in data management card
+        updateVulnerabilityCount();
+        await refreshPwnagotchiStatus({ silent: true });
+
+        // Also check for updates when loading config tab
+        checkForUpdates();
+
+        // Load security configuration
+        await loadSecurityConfig();
+    } catch (error) {
+        console.error('Error loading config:', error);
+    }
+}
+
+// ============================================================================
+// SECURITY / AUTHENTICATION CONFIG
+// ============================================================================
+
+let _securityExpanded = false;
+
+function toggleSecuritySection() {
+    _securityExpanded = !_securityExpanded;
+    const content = document.getElementById('security-config-content');
+    const summary = document.getElementById('security-summary');
+    const chevron = document.getElementById('security-chevron');
+    if (_securityExpanded) {
+        content.classList.remove('hidden');
+        summary.classList.add('hidden');
+        chevron.style.transform = 'rotate(90deg)';
+    } else {
+        content.classList.add('hidden');
+        summary.classList.remove('hidden');
+        chevron.style.transform = 'rotate(0deg)';
+    }
+}
+
+async function loadSecurityConfig() {
+    try {
+        const status = await fetchAPI('/api/auth/status');
+        const container = document.getElementById('security-config-content');
+        const summary = document.getElementById('security-summary');
+        const badge = document.getElementById('security-badge');
+        if (!container) return;
+
+        // Show/hide logout buttons in nav (desktop + mobile)
+        const logoutBtn = document.getElementById('logout-btn');
+        if (logoutBtn) {
+            logoutBtn.classList.toggle('hidden', !status.configured);
+        }
+        const mobileLogoutBtn = document.getElementById('mobile-logout-btn');
+        if (mobileLogoutBtn) {
+            mobileLogoutBtn.classList.toggle('hidden', !status.configured);
+        }
+
+        // Update summary and badge based on status
+        if (status.configured) {
+            if (badge) { badge.classList.remove('hidden'); }
+            if (summary) {
+                summary.innerHTML = '<p class="text-sm text-green-400">Authentication is enabled. Database is encrypted and hardware-bound. Expand to manage.</p>';
+            }
+        } else {
+            if (badge) { badge.classList.add('hidden'); }
+            if (summary) {
+                summary.innerHTML = '<p class="text-sm text-red-400">Set up authentication to protect your Ragnar instance. Once enabled, all access will require login. The database will be encrypted and bound to this hardware.</p>';
+            }
+        }
+
+        if (!status.configured) {
+            // Show setup form
+            container.innerHTML = `
+                <div class="mb-4">
+                    <div class="p-3 rounded-lg bg-yellow-900/30 border border-yellow-700 text-sm text-yellow-300 mb-4">
+                        Warning: Once authentication is enabled, you will need your password or recovery codes to access Ragnar.
+                        Make sure to save your recovery codes in a safe place.
+                    </div>
+                </div>
+                <form id="auth-setup-form" onsubmit="handleAuthSetup(event)" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-2">Username</label>
+                        <input type="text" id="setup-username" required autocomplete="username"
+                               class="w-full px-4 py-2 rounded-lg bg-slate-700 border border-slate-600 text-white placeholder-gray-400 focus:ring-2 focus:ring-sky-500 focus:border-transparent outline-none"
+                               placeholder="Choose a username">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-2">Password</label>
+                        <input type="password" id="setup-password" required minlength="8" autocomplete="new-password"
+                               class="w-full px-4 py-2 rounded-lg bg-slate-700 border border-slate-600 text-white placeholder-gray-400 focus:ring-2 focus:ring-sky-500 focus:border-transparent outline-none"
+                               placeholder="Minimum 8 characters">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-2">Confirm Password</label>
+                        <input type="password" id="setup-confirm-password" required minlength="8" autocomplete="new-password"
+                               class="w-full px-4 py-2 rounded-lg bg-slate-700 border border-slate-600 text-white placeholder-gray-400 focus:ring-2 focus:ring-sky-500 focus:border-transparent outline-none"
+                               placeholder="Confirm password">
+                    </div>
+                    <div id="setup-status" class="hidden p-3 rounded-lg text-sm"></div>
+                    <button type="submit" id="setup-btn"
+                            class="w-full bg-sky-600 hover:bg-sky-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors">
+                        Enable Authentication
+                    </button>
+                </form>
+            `;
+        } else {
+            // Show management panel
+            let hwBadge = status.hw_match
+                ? '<span class="text-green-400 text-xs">Hardware matched</span>'
+                : '<span class="text-red-400 text-xs">Hardware mismatch!</span>';
+
+            container.innerHTML = `
+                <div class="space-y-4">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <span class="text-green-400 font-medium">Authentication Enabled</span>
+                            <span class="mx-2 text-gray-500">|</span>
+                            ${hwBadge}
+                            <span class="mx-2 text-gray-500">|</span>
+                            <span class="text-gray-400 text-xs">${status.recovery_codes_remaining} recovery codes remaining</span>
+                        </div>
+                    </div>
+
+                    <!-- Change Password -->
+                    <div class="glass rounded-lg p-4">
+                        <h4 class="font-medium mb-3">Change Password</h4>
+                        <form id="change-pw-form" onsubmit="handleChangePassword(event)" class="space-y-3">
+                            <input type="password" id="current-password" required autocomplete="current-password"
+                                   class="w-full px-3 py-2 rounded-lg bg-slate-700 border border-slate-600 text-white placeholder-gray-400 focus:ring-2 focus:ring-sky-500 outline-none"
+                                   placeholder="Current password">
+                            <input type="password" id="new-password" required minlength="8" autocomplete="new-password"
+                                   class="w-full px-3 py-2 rounded-lg bg-slate-700 border border-slate-600 text-white placeholder-gray-400 focus:ring-2 focus:ring-sky-500 outline-none"
+                                   placeholder="New password (min 8 chars)">
+                            <input type="password" id="confirm-new-password" required minlength="8" autocomplete="new-password"
+                                   class="w-full px-3 py-2 rounded-lg bg-slate-700 border border-slate-600 text-white placeholder-gray-400 focus:ring-2 focus:ring-sky-500 outline-none"
+                                   placeholder="Confirm new password">
+                            <div id="change-pw-status" class="hidden p-3 rounded-lg text-sm"></div>
+                            <button type="submit"
+                                    class="bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-lg transition-colors text-sm">
+                                Change Password
+                            </button>
+                        </form>
+                    </div>
+
+                    <!-- Recovery Codes -->
+                    <div class="glass rounded-lg p-4">
+                        <h4 class="font-medium mb-3">Recovery Codes</h4>
+                        <p class="text-gray-400 text-sm mb-3">
+                            ${status.recovery_codes_remaining} of 10 codes remaining.
+                            Regenerate to get 10 new codes (old codes will be invalidated).
+                        </p>
+                        <div id="regen-codes-display" class="hidden mb-3"></div>
+                        <div id="regen-status" class="hidden p-3 rounded-lg text-sm mb-3"></div>
+                        <button onclick="handleRegenRecovery()"
+                                class="bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded-lg transition-colors text-sm">
+                            Regenerate Recovery Codes
+                        </button>
+                    </div>
+
+                    <!-- Logout -->
+                    <div class="glass rounded-lg p-4">
+                        <h4 class="font-medium mb-3">Session</h4>
+                        <button onclick="handleLogout()"
+                                class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors text-sm">
+                            Logout
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('Error loading security config:', error);
+    }
+}
+
+async function handleAuthSetup(event) {
+    event.preventDefault();
+    const statusEl = document.getElementById('setup-status');
+    const btn = document.getElementById('setup-btn');
+
+    const username = document.getElementById('setup-username').value.trim();
+    const password = document.getElementById('setup-password').value;
+    const confirm = document.getElementById('setup-confirm-password').value;
+
+    if (password !== confirm) {
+        statusEl.className = 'p-3 rounded-lg text-sm bg-red-900/30 border border-red-700 text-red-300';
+        statusEl.textContent = 'Passwords do not match';
+        statusEl.classList.remove('hidden');
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Setting up...';
+
+    try {
+        const result = await postAPI('/api/auth/setup', {
+            username, password, confirm_password: confirm
+        });
+
+        if (result.success) {
+            // Show recovery codes in a prominent way
+            statusEl.className = 'p-3 rounded-lg text-sm bg-green-900/30 border border-green-700 text-green-300';
+            statusEl.innerHTML = 'Authentication enabled! Save your recovery codes below.';
+            statusEl.classList.remove('hidden');
+
+            const container = document.getElementById('security-config-content');
+            container.innerHTML = `
+                <div class="p-4 rounded-lg bg-green-900/20 border border-green-700 mb-4">
+                    <h4 class="font-bold text-green-400 mb-2">Authentication Enabled Successfully!</h4>
+                    <p class="text-sm text-gray-300 mb-3">
+                        Save these recovery codes in a safe place. Each code can only be used once.
+                        You will need them if you forget your password.
+                    </p>
+                    <p class="text-sm text-yellow-300 mb-4">
+                        The database will be encrypted automatically when you log out or when Ragnar shuts down.
+                        From the next start, a login will be required.
+                    </p>
+                    <div class="grid grid-cols-2 gap-2 mb-4">
+                        ${result.recovery_codes.map(code =>
+                            `<div class="font-mono text-sm bg-slate-800 border border-sky-700 rounded px-3 py-2 text-center text-sky-300 select-all">${code}</div>`
+                        ).join('')}
+                    </div>
+                    <button onclick="copyRecoveryCodes()" id="copy-codes-btn"
+                            class="bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-lg transition-colors text-sm mr-2">
+                        Copy All Codes
+                    </button>
+                    <button onclick="loadSecurityConfig()"
+                            class="bg-slate-600 hover:bg-slate-700 text-white px-4 py-2 rounded-lg transition-colors text-sm">
+                        Done
+                    </button>
+                </div>
+            `;
+
+            // Store codes temporarily for copy function
+            window._tempRecoveryCodes = result.recovery_codes;
+
+            addConsoleMessage('Authentication enabled - database encrypted', 'success');
+        } else {
+            statusEl.className = 'p-3 rounded-lg text-sm bg-red-900/30 border border-red-700 text-red-300';
+            statusEl.textContent = result.error || 'Setup failed';
+            statusEl.classList.remove('hidden');
+            btn.disabled = false;
+            btn.textContent = 'Enable Authentication';
+        }
+    } catch (error) {
+        statusEl.className = 'p-3 rounded-lg text-sm bg-red-900/30 border border-red-700 text-red-300';
+        statusEl.textContent = 'Setup failed: ' + (error.message || 'Unknown error');
+        statusEl.classList.remove('hidden');
+        btn.disabled = false;
+        btn.textContent = 'Enable Authentication';
+    }
+}
+
+function copyRecoveryCodes() {
+    if (window._tempRecoveryCodes) {
+        const text = window._tempRecoveryCodes.join('\n');
+        navigator.clipboard.writeText(text).then(() => {
+            const btn = document.getElementById('copy-codes-btn');
+            btn.textContent = 'Copied!';
+            setTimeout(() => { btn.textContent = 'Copy All Codes'; }, 2000);
+        }).catch(() => {
+            addConsoleMessage('Failed to copy - please select and copy manually', 'warning');
+        });
+    }
+}
+
+async function handleChangePassword(event) {
+    event.preventDefault();
+    const statusEl = document.getElementById('change-pw-status');
+
+    const currentPw = document.getElementById('current-password').value;
+    const newPw = document.getElementById('new-password').value;
+    const confirmPw = document.getElementById('confirm-new-password').value;
+
+    if (newPw !== confirmPw) {
+        statusEl.className = 'p-3 rounded-lg text-sm bg-red-900/30 border border-red-700 text-red-300';
+        statusEl.textContent = 'New passwords do not match';
+        statusEl.classList.remove('hidden');
+        return;
+    }
+
+    try {
+        const result = await postAPI('/api/auth/change-password', {
+            current_password: currentPw,
+            new_password: newPw
+        });
+        if (result.success) {
+            statusEl.className = 'p-3 rounded-lg text-sm bg-green-900/30 border border-green-700 text-green-300';
+            statusEl.textContent = 'Password changed successfully';
+            statusEl.classList.remove('hidden');
+            document.getElementById('change-pw-form').reset();
+            addConsoleMessage('Password changed successfully', 'success');
+        } else {
+            statusEl.className = 'p-3 rounded-lg text-sm bg-red-900/30 border border-red-700 text-red-300';
+            statusEl.textContent = result.error || 'Failed to change password';
+            statusEl.classList.remove('hidden');
+        }
+    } catch (error) {
+        statusEl.className = 'p-3 rounded-lg text-sm bg-red-900/30 border border-red-700 text-red-300';
+        statusEl.textContent = 'Error: ' + (error.message || 'Unknown error');
+        statusEl.classList.remove('hidden');
+    }
+}
+
+async function handleRegenRecovery() {
+    const password = prompt('Enter your current password to regenerate recovery codes:');
+    if (!password) return;
+
+    const statusEl = document.getElementById('regen-status');
+    const displayEl = document.getElementById('regen-codes-display');
+
+    try {
+        const result = await postAPI('/api/auth/regenerate-recovery', { password });
+        if (result.success) {
+            displayEl.innerHTML = `
+                <div class="p-3 rounded-lg bg-slate-800 border border-sky-700">
+                    <p class="text-sm text-gray-300 mb-2">New recovery codes (save these!):</p>
+                    <div class="grid grid-cols-2 gap-2">
+                        ${result.recovery_codes.map(code =>
+                            `<div class="font-mono text-sm bg-slate-900 rounded px-2 py-1 text-center text-sky-300 select-all">${code}</div>`
+                        ).join('')}
+                    </div>
+                </div>
+            `;
+            displayEl.classList.remove('hidden');
+
+            statusEl.className = 'p-3 rounded-lg text-sm bg-green-900/30 border border-green-700 text-green-300';
+            statusEl.textContent = 'Recovery codes regenerated. Save them securely!';
+            statusEl.classList.remove('hidden');
+
+            window._tempRecoveryCodes = result.recovery_codes;
+            addConsoleMessage('Recovery codes regenerated', 'success');
+        } else {
+            statusEl.className = 'p-3 rounded-lg text-sm bg-red-900/30 border border-red-700 text-red-300';
+            statusEl.textContent = result.error || 'Failed to regenerate codes';
+            statusEl.classList.remove('hidden');
+        }
+    } catch (error) {
+        statusEl.className = 'p-3 rounded-lg text-sm bg-red-900/30 border border-red-700 text-red-300';
+        statusEl.textContent = 'Error: ' + (error.message || 'Unknown error');
+        statusEl.classList.remove('hidden');
+    }
+}
+
+async function handleLogout() {
+    // Disconnect socket first to prevent reconnect loops
+    if (socket) socket.disconnect();
+    try {
+        await postAPI('/api/auth/logout', {});
+    } catch (e) {
+        // Ignore - we're redirecting anyway
+    }
+    // Replace so back button can't return to the dashboard
+    window.location.replace('/login');
+}
+
+
+
+function setPwnStatusPollInterval(intervalMs = PWN_STATUS_POLL_INTERVAL) {
+    const normalized = Math.max(2000, intervalMs || PWN_STATUS_POLL_INTERVAL);
+
+    if (currentPwnStatusInterval === normalized && autoRefreshIntervals.pwn) {
+        return;
+    }
+
+    if (autoRefreshIntervals.pwn) {
+        clearInterval(autoRefreshIntervals.pwn);
+    }
+
+    currentPwnStatusInterval = normalized;
+    autoRefreshIntervals.pwn = setInterval(() => {
+        if (currentTab === 'config' || currentTab === 'discovered') {
+            refreshPwnagotchiStatus({ silent: true });
+        }
+    }, normalized);
+}
+
+function initializePwnUI() {
+    const badge = document.getElementById('pwn-status-badge');
+    if (!badge) {
+        return;
+    }
+
+    const installBtn = document.getElementById('pwn-install-btn');
+    if (installBtn) {
+        installBtn.addEventListener('click', handlePwnInstallClick);
+    }
+
+    const swapToPwnBtn = document.getElementById('pwn-swap-to-pwn-btn');
+    if (swapToPwnBtn) {
+        swapToPwnBtn.addEventListener('click', () => handlePwnSwap('pwnagotchi'));
+    }
+
+    const refreshBtn = document.getElementById('pwn-refresh-btn');
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', () => refreshPwnagotchiStatus());
+    }
+
+    const logRefreshBtn = document.getElementById('pwn-log-refresh-btn');
+    if (logRefreshBtn) {
+        logRefreshBtn.addEventListener('click', () => fetchPwnLogs({ initial: pwnLogCursor === 0 }));
+    }
+
+    updatePwnButtons();
+    resetPwnLogState();
+    refreshPwnagotchiStatus({ silent: true });
+}
+
+async function refreshPwnagotchiStatus(options = {}) {
+    const silent = Boolean(options && options.silent);
+    try {
+        const response = await fetchAPI('/api/pwnagotchi/status');
+        if (response && response.success && response.status) {
+            updatePwnagotchiUI(response.status);
+            return response.status;
+        }
+        if (!silent) {
+            addConsoleMessage('Unable to load Pwnagotchi status', 'warning');
+        }
+    } catch (error) {
+        console.error('Error refreshing Pwnagotchi status:', error);
+        if (!silent) {
+            addConsoleMessage(`Pwnagotchi status error: ${error.message}`, 'error');
+        }
+    }
+    return null;
+}
+
+function updatePwnagotchiUI(status = {}) {
+    if (!status || typeof status !== 'object') {
+        return;
+    }
+
+    const wasInstalling = Boolean(pwnStatus.installing);
+
+    pwnStatus = {
+        ...pwnStatus,
+        ...status
+    };
+    pwnStatus.installing = Boolean(pwnStatus.installing);
+
+    const visuals = getPwnStateVisuals(pwnStatus);
+
+    const badge = document.getElementById('pwn-status-badge');
+    if (badge) {
+        badge.textContent = visuals.badgeText;
+        badge.className = `text-xs font-semibold uppercase tracking-wide px-3 py-1 rounded-full ${visuals.badgeClass}`;
+    }
+
+    updateElement('pwn-status-message', pwnStatus.message || 'Waiting for status...');
+
+    const modeLabel = formatPwnModeLabel(pwnStatus.mode);
+    updateElement('pwn-mode-value', modeLabel);
+    const modeElement = document.getElementById('pwn-mode-value');
+    if (modeElement) {
+        modeElement.className = `font-semibold ${pwnStatus.mode === 'pwnagotchi' ? 'text-fuchsia-300' : 'text-green-400'}`;
+    }
+
+    updateElement('pwn-target-value', formatPwnModeLabel(pwnStatus.target_mode));
+    updateElement('pwn-phase-value', formatPwnPhaseLabel(pwnStatus.phase));
+
+    updateElement('pwn-service-state', pwnStatus.service_active ? 'Running' : 'Stopped');
+    const serviceStateElement = document.getElementById('pwn-service-state');
+    if (serviceStateElement) {
+        serviceStateElement.className = `font-semibold ${pwnStatus.service_active ? 'text-green-400' : 'text-slate-200'}`;
+    }
+
+    updateElement('pwn-service-enabled', pwnStatus.service_enabled ? 'Enabled' : 'Disabled');
+    const serviceEnabledElement = document.getElementById('pwn-service-enabled');
+    if (serviceEnabledElement) {
+        serviceEnabledElement.className = `font-semibold ${pwnStatus.service_enabled ? 'text-green-300' : 'text-slate-200'}`;
+    }
+
+    updateElement('pwn-last-switch-value', pwnStatus.last_switch ? formatTimestamp(pwnStatus.last_switch) : 'Never');
+    updateElement('pwn-last-updated', pwnStatus.timestamp ? formatTimestamp(pwnStatus.timestamp) : new Date().toLocaleString());
+
+    const alertBox = document.getElementById('pwn-status-alert');
+    if (alertBox) {
+        if (pwnStatus.message) {
+            alertBox.className = `mt-4 p-4 rounded-lg border text-sm text-gray-200 ${visuals.alertClass}`;
+            alertBox.innerHTML = `
+                <div class="flex items-start gap-3">
+                    <div class="text-xl">${visuals.icon}</div>
+                    <div>
+                        <p class="font-semibold">${escapeHtml(pwnStatus.message)}</p>
+                        <p class="text-xs text-gray-300 mt-1">Phase: ${formatPwnPhaseLabel(pwnStatus.phase)} | Mode: ${modeLabel}</p>
+                    </div>
+                </div>
+            `;
+            alertBox.classList.remove('hidden');
+        } else {
+            alertBox.classList.add('hidden');
+        }
+    }
+
+    updatePwnDiscoveredCard(pwnStatus, visuals);
+    updatePwnButtons();
+    if (pwnStatus.installing && !wasInstalling) {
+        resetPwnLogState('Installer output will stream here during installation.');
+    }
+    ensurePwnLogStreamingForStatus(pwnStatus);
+    lastPwnState = pwnStatus.state;
+}
+
+function updatePwnButtons() {
+    // Show install card only when not installed, swap card only when installed
+    const installCard = document.getElementById('pwn-install-card');
+    if (installCard) {
+        installCard.style.display = pwnStatus.installed ? 'none' : '';
+    }
+    const swapCard = document.getElementById('pwn-swap-card');
+    if (swapCard) {
+        swapCard.style.display = pwnStatus.installed ? '' : 'none';
+    }
+
+    const installBtn = document.getElementById('pwn-install-btn');
+    if (installBtn) {
+        installBtn.textContent = pwnStatus.installing ? 'Installing...' : 'Install Pwnagotchi';
+        installBtn.disabled = pwnStatus.installing;
+        installBtn.classList.toggle('opacity-70', pwnStatus.installing);
+        installBtn.classList.toggle('cursor-not-allowed', pwnStatus.installing);
+    }
+
+    const swapToPwnBtn = document.getElementById('pwn-swap-to-pwn-btn');
+    if (swapToPwnBtn) {
+        const busySwitching = pwnStatus.state === 'switching' && pwnStatus.target_mode === 'pwnagotchi';
+        const pwnRunning = pwnStatus.state === 'running' && pwnStatus.target_mode === 'pwnagotchi';
+
+        if (busySwitching || pwnRunning) {
+            // Show portal link with countdown
+            const portalUrl = 'http://' + window.location.hostname + ':8080';
+            swapToPwnBtn.classList.remove('opacity-60', 'cursor-not-allowed');
+            swapToPwnBtn.classList.add('bg-green-600', 'hover:bg-green-700');
+            swapToPwnBtn.classList.remove('bg-amber-600', 'hover:bg-amber-700');
+
+            if (!swapToPwnBtn._countdownRunning && _pwnSwapRequestedThisSession) {
+                // Poll pwnagotchi portal directly - works even after Ragnar goes down.
+                // mode:'no-cors' gives an opaque response but won't throw, meaning server is up.
+                swapToPwnBtn._countdownRunning = true;
+                let elapsed = 0;
+                const MAX_WAIT = 60;
+                swapToPwnBtn.disabled = true;
+                swapToPwnBtn.textContent = `Waiting for Pwnagotchi... 0s`;
+                const poll = setInterval(async () => {
+                    elapsed++;
+                    swapToPwnBtn.textContent = `Waiting for Pwnagotchi... ${elapsed}s`;
+                    try {
+                        await fetch(portalUrl, { mode: 'no-cors', cache: 'no-store' });
+                        // Reached here = server responded (opaque ok)
+                        clearInterval(poll);
+                        swapToPwnBtn.disabled = false;
+                        swapToPwnBtn.textContent = 'Go to Pwnagotchi Portal';
+                        swapToPwnBtn.onclick = function(e) {
+                            e.preventDefault();
+                            window.open(portalUrl, '_blank');
+                        };
+                    } catch (_) {
+                        // Not up yet; fall through unless timeout
+                        if (elapsed >= MAX_WAIT) {
+                            clearInterval(poll);
+                            swapToPwnBtn.disabled = false;
+                            swapToPwnBtn.textContent = 'Open Pwnagotchi Portal';
+                            swapToPwnBtn.onclick = function(e) {
+                                e.preventDefault();
+                                window.open(portalUrl, '_blank');
+                            };
+                        }
+                    }
+                }, 1000);
+            }
+        } else {
+            // Installed - normal swap button
+            const disableSwap = pwnStatus.installing || pwnStatus.state === 'switching';
+            swapToPwnBtn.disabled = disableSwap;
+            swapToPwnBtn.textContent = 'Switch to Pwnagotchi';
+            swapToPwnBtn.classList.toggle('opacity-60', disableSwap);
+            swapToPwnBtn.classList.toggle('cursor-not-allowed', disableSwap);
+            swapToPwnBtn.classList.remove('bg-green-600', 'hover:bg-green-700');
+            swapToPwnBtn.onclick = null;
+            swapToPwnBtn._countdownRunning = false;
+            _pwnSwapRequestedThisSession = false;
+        }
+    }
+
+    const swapHint = document.getElementById('pwn-swap-hint');
+    if (swapHint) {
+        let hint = 'Ragnar UI becomes unavailable once the service stops. Plan to reboot via SSH to come back.';
+        if (pwnStatus.installing) {
+            hint = 'Installer is still running. Swapping will be available once it completes.';
+        } else if (pwnStatus.state === 'switching' && pwnStatus.target_mode === 'pwnagotchi') {
+            hint = 'Pwnagotchi is starting up. Click the button above to open its portal once ready.';
+        } else if (pwnStatus.state === 'running' && pwnStatus.target_mode === 'pwnagotchi') {
+            hint = 'Pwnagotchi is running. Ragnar will shut down shortly.';
+        } else if (pwnStatus.state === 'switching') {
+            hint = 'Switch scheduled. Wait for the service hand-off to complete.';
+        }
+        swapHint.textContent = hint;
+    }
+}
+
+function _pwnBadgesHTML(net) {
+    let badges = '';
+    if (net.has_handshake) {
+        const types = (net.handshake_types || []).join(', ');
+        badges += `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-fuchsia-900 bg-opacity-50 text-fuchsia-300" title="Handshake: ${escapeHtml(types)}">Handshake</span> `;
+    }
+    if (net.has_gps) {
+        badges += '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-emerald-900 bg-opacity-50 text-emerald-300" title="GPS coordinates available">GPS</span> ';
+    }
+    if (net.has_netjson) {
+        badges += '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-900 bg-opacity-50 text-blue-300" title="Network metadata available">NetJSON</span> ';
+    }
+    return badges || '<span class="text-gray-500 text-xs">-</span>';
+}
+
+function _pwnGpsHTML(net) {
+    if (net.has_gps && net.gps) {
+        const lat = Number(net.gps.latitude).toFixed(5);
+        const lng = Number(net.gps.longitude).toFixed(5);
+        return `<span class="font-mono text-emerald-300" title="Lat: ${lat}, Lng: ${lng}">${lat}, ${lng}</span>`;
+    }
+    return '<span class="text-gray-500">-</span>';
+}
+
+function _pwnFileSizeLabel(bytes) {
+    if (!bytes || bytes <= 0) return '';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+function _pwnFilesHTML(files) {
+    if (!Array.isArray(files) || files.length === 0) return '';
+    return '<div class="flex flex-wrap gap-2 mt-2">' + files.map(f => {
+        const name = escapeHtml(f.name || '');
+        const size = _pwnFileSizeLabel(f.size);
+        const sizeLabel = size ? ` (${size})` : '';
+        const encodedName = encodeURIComponent(f.name || '');
+        return `<a href="/api/pwnagotchi/download?file=${encodedName}" download
+                    class="inline-flex items-center gap-1 px-2 py-1 rounded text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 hover:text-white transition-colors"
+                    title="Download ${name}${sizeLabel}">
+                    <svg class="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                    <span class="truncate max-w-[10rem]">${name}</span></a>`;
+    }).join('') + '</div>';
+}
+
+function displayPwnNetworksTable(networks) {
+    const container = document.getElementById('pwn-networks-table');
+    if (!container) return;
+
+    if (!Array.isArray(networks) || networks.length === 0) {
+        container.innerHTML = '<p class="text-gray-400">No Pwnagotchi captures found yet.</p>';
+        return;
+    }
+
+    const previewCount = 10;
+    const hasMore = networks.length > previewCount;
+    const previewItems = networks.slice(0, previewCount);
+    const hiddenItems = hasMore ? networks.slice(previewCount) : [];
+
+    /* --- Mobile card layout (shown < md) --- */
+    function networkCardHTML(net) {
+        const ssid = escapeHtml(net.ssid || 'Unknown');
+        const bssid = escapeHtml(net.bssid || 'Unknown');
+        const lastSeen = net.last_seen ? formatTimestamp(net.last_seen) : 'Unknown';
+        return `
+            <div class="bg-slate-800 bg-opacity-60 rounded-lg p-4">
+                <div class="flex items-start justify-between gap-2 mb-2">
+                    <span class="text-white font-semibold text-sm break-all">${ssid}</span>
+                    <span class="text-xs text-gray-400 whitespace-nowrap">${lastSeen}</span>
+                </div>
+                <div class="text-xs text-gray-400 font-mono mb-2">${bssid}</div>
+                <div class="flex flex-wrap gap-1 mb-1">${_pwnBadgesHTML(net)}</div>
+                <div class="text-xs mt-1">${_pwnGpsHTML(net)}</div>
+                ${_pwnFilesHTML(net.files)}
+            </div>`;
+    }
+
+    /* --- Desktop table row (shown >= md) --- */
+    function networkRowHTML(net) {
+        const ssid = escapeHtml(net.ssid || 'Unknown');
+        const bssid = escapeHtml(net.bssid || 'Unknown');
+        const lastSeen = net.last_seen ? formatTimestamp(net.last_seen) : 'Unknown';
+        return `
+            <tr class="hover:bg-gray-700 transition-colors">
+                <td class="px-4 py-3 text-sm text-white font-semibold">${ssid}</td>
+                <td class="px-4 py-3 text-sm text-gray-300 font-mono">${bssid}</td>
+                <td class="px-4 py-3 text-sm">${_pwnBadgesHTML(net)}</td>
+                <td class="px-4 py-3 text-sm">${_pwnGpsHTML(net)}</td>
+                <td class="px-4 py-3 text-sm text-gray-400 whitespace-nowrap">${lastSeen}</td>
+                <td class="px-4 py-3 text-sm">${_pwnFilesHTML(net.files)}</td>
+            </tr>`;
+    }
+
+    /* --- Build mobile cards --- */
+    let mobileHTML = '<div class="md:hidden space-y-3">';
+    previewItems.forEach(net => { mobileHTML += networkCardHTML(net); });
+    if (hasMore) {
+        mobileHTML += `
+            <button onclick="togglePwnNetworksExpansion()"
+                    class="flex items-center justify-center w-full py-3 px-4 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors text-gray-300 hover:text-white">
+                <span id="pwn-networks-expand-text-m">Show ${hiddenItems.length} more</span>
+                <svg id="pwn-networks-expand-arrow-m" class="w-4 h-4 ml-2 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                </svg>
+            </button>
+            <div id="pwn-networks-hidden-m" class="hidden space-y-3">`;
+        hiddenItems.forEach(net => { mobileHTML += networkCardHTML(net); });
+        mobileHTML += '</div>';
+    }
+    mobileHTML += '</div>';
+
+    /* --- Build desktop table --- */
+    let tableHTML = `
+        <div class="hidden md:block bg-gray-800 rounded-lg p-4">
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-700">
+                    <thead>
+                        <tr>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-300 uppercase">SSID</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-300 uppercase">BSSID</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-300 uppercase">Data</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-300 uppercase">GPS</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-300 uppercase">Last Seen</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-300 uppercase">Files</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-700">`;
+    previewItems.forEach(net => { tableHTML += networkRowHTML(net); });
+    tableHTML += '</tbody></table></div>';
+
+    if (hasMore) {
+        tableHTML += `
+            <div class="mt-4">
+                <button onclick="togglePwnNetworksExpansion()"
+                        class="flex items-center justify-center w-full py-3 px-4 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors text-gray-300 hover:text-white">
+                    <span id="pwn-networks-expand-text">Show ${hiddenItems.length} more networks</span>
+                    <svg id="pwn-networks-expand-arrow" class="w-4 h-4 ml-2 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                    </svg>
+                </button>
+                <div id="pwn-networks-hidden" class="hidden mt-2">
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-700">
+                            <tbody class="divide-y divide-gray-700">`;
+        hiddenItems.forEach(net => { tableHTML += networkRowHTML(net); });
+        tableHTML += '</tbody></table></div></div></div>';
+    }
+    tableHTML += '</div>';
+
+    container.innerHTML = mobileHTML + tableHTML;
+}
+
+function togglePwnNetworksExpansion() {
+    /* Toggle both desktop and mobile overflow sections */
+    [['pwn-networks-hidden', 'pwn-networks-expand-text', 'pwn-networks-expand-arrow'],
+     ['pwn-networks-hidden-m', 'pwn-networks-expand-text-m', 'pwn-networks-expand-arrow-m']
+    ].forEach(([hiddenId, textId, arrowId]) => {
+        const hidden = document.getElementById(hiddenId);
+        const text = document.getElementById(textId);
+        const arrow = document.getElementById(arrowId);
+        if (!hidden) return;
+        const isHidden = hidden.classList.contains('hidden');
+        if (isHidden) {
+            hidden.classList.remove('hidden');
+            if (text) text.textContent = 'Show less';
+            if (arrow) arrow.style.transform = 'rotate(180deg)';
+        } else {
+            hidden.classList.add('hidden');
+            const count = hidden.querySelectorAll('tr, .bg-slate-800').length;
+            if (text) text.textContent = `Show ${count} more`;
+            if (arrow) arrow.style.transform = 'rotate(0deg)';
+        }
+    });
+}
+
+function updatePwnDiscoveredCard(status, visuals = null) {
+    if (!status || typeof status !== 'object') return;
+    const container = document.getElementById('pwn-discovered-card');
+    if (!container) return;
+
+    if (!arePwnFeaturesEnabled()) {
+        container.classList.add('hidden');
+        return;
+    }
+
+    const shouldShow = Boolean(status.installing || status.installed);
+    if (!shouldShow) {
+        container.classList.add('hidden');
+        return;
+    }
+
+    container.classList.remove('hidden');
+    const resolvedVisuals = visuals || getPwnStateVisuals(status);
+
+    const badge = document.getElementById('pwn-card-badge');
+    if (badge) {
+        const state = (status.state || '').toLowerCase();
+        if (state.includes('error') || state.includes('fail')) {
+            badge.classList.add('hidden');
+        } else {
+            badge.classList.remove('hidden');
+            badge.textContent = resolvedVisuals.badgeText;
+            badge.className = `text-xs font-semibold uppercase tracking-wide px-3 py-1 rounded-full ${resolvedVisuals.badgeClass}`;
+        }
+    }
+
+    const discoveries = status.discoveries || {};
+    updateElement('pwn-card-network-count', String(discoveries.network_count || 0));
+    updateElement('pwn-card-handshake-count', String(discoveries.networks_with_handshake || 0));
+    updateElement('pwn-card-gps-count', String(discoveries.networks_with_gps || 0));
+    updateElement('pwn-card-last-discovery', discoveries.last_discovery ? formatTimestamp(discoveries.last_discovery) : 'None');
+
+    displayPwnNetworksTable(discoveries.networks || []);
+
+    updateElement('pwn-card-updated', `Updated: ${status.timestamp ? formatTimestamp(status.timestamp) : new Date().toLocaleString()}`);
+}
+
+function resetPwnLogState(message) {
+    pwnLogCursor = 0;
+    pwnLogActiveFile = null;
+    clearPwnLogViewer(message || 'Installer output will stream here during installation.');
+    updatePwnLogPath(null);
+    setPwnLogIndicator(false);
+}
+
+function clearPwnLogViewer(message) {
+    const viewer = document.getElementById('pwn-log-viewer');
+    const placeholder = document.getElementById('pwn-log-empty');
+    if (!viewer || !placeholder) {
+        return;
+    }
+    viewer.querySelectorAll('[data-pwn-log-line="true"]').forEach(line => line.remove());
+    if (message) {
+        placeholder.textContent = message;
+    }
+    placeholder.classList.remove('hidden');
+}
+
+function setPwnLogIndicator(active) {
+    const indicator = document.getElementById('pwn-log-stream-indicator');
+    if (!indicator) {
+        return;
+    }
+    indicator.classList.toggle('hidden', !active);
+}
+
+function updatePwnLogPath(path) {
+    const pathElement = document.getElementById('pwn-log-path');
+    if (!pathElement) {
+        return;
+    }
+    if (path) {
+        pathElement.textContent = path;
+        pathElement.classList.remove('text-gray-500');
+    } else {
+        pathElement.textContent = 'Log path will appear once the installer starts.';
+        pathElement.classList.add('text-gray-500');
+    }
+}
+
+function appendPwnLogEntries(lines = []) {
+    const viewer = document.getElementById('pwn-log-viewer');
+    if (!viewer || !Array.isArray(lines) || lines.length === 0) {
+        return;
+    }
+    const placeholder = document.getElementById('pwn-log-empty');
+    if (placeholder) {
+        placeholder.classList.add('hidden');
+    }
+
+    const shouldStick = (viewer.scrollHeight - viewer.clientHeight - viewer.scrollTop) < 40;
+
+    lines.forEach(line => {
+        const row = document.createElement('div');
+        row.dataset.pwnLogLine = 'true';
+        row.className = `whitespace-pre-wrap break-words leading-snug ${getPwnLogLineClass(line)}`;
+        row.textContent = line || ' ';
+        viewer.appendChild(row);
+    });
+
+    trimPwnLogBuffer();
+
+    if (shouldStick) {
+        viewer.scrollTop = viewer.scrollHeight;
+    }
+}
+
+function trimPwnLogBuffer(limit = 600) {
+    const viewer = document.getElementById('pwn-log-viewer');
+    if (!viewer) {
+        return;
+    }
+    const lines = viewer.querySelectorAll('[data-pwn-log-line="true"]');
+    if (lines.length <= limit) {
+        return;
+    }
+    const removeCount = lines.length - limit;
+    for (let i = 0; i < removeCount; i++) {
+        lines[i].remove();
+    }
+}
+
+function getPwnLogLineClass(line = '') {
+    const normalized = line.toLowerCase();
+    if (normalized.includes('error') || normalized.includes('failed') || normalized.includes('[err')) {
+        return 'text-red-300';
+    }
+    if (normalized.includes('warn')) {
+        return 'text-yellow-200';
+    }
+    if (normalized.includes('info') || normalized.includes('[info')) {
+        return 'text-blue-200';
+    }
+    return 'text-gray-200';
+}
+
+function startPwnLogStreaming(options = {}) {
+    const viewer = document.getElementById('pwn-log-viewer');
+    if (!viewer) {
+        return;
+    }
+    if (pwnLogStreamTimer) {
+        return;
+    }
+    if (pwnLogStopTimeout) {
+        clearTimeout(pwnLogStopTimeout);
+        pwnLogStopTimeout = null;
+    }
+    pwnLogStreaming = true;
+    setPwnLogIndicator(true);
+    fetchPwnLogs({ initial: Boolean(options.initial) || pwnLogCursor === 0, silent: true });
+    pwnLogStreamTimer = setInterval(() => fetchPwnLogs({ silent: true }), PWN_LOG_POLL_INTERVAL);
+}
+
+function stopPwnLogStreaming() {
+    if (pwnLogStreamTimer) {
+        clearInterval(pwnLogStreamTimer);
+        pwnLogStreamTimer = null;
+    }
+    pwnLogStreaming = false;
+    setPwnLogIndicator(false);
+}
+
+function schedulePwnLogStop() {
+    if (pwnLogStopTimeout) {
+        return;
+    }
+    pwnLogStopTimeout = setTimeout(() => {
+        stopPwnLogStreaming();
+        pwnLogStopTimeout = null;
+    }, 12000);
+}
+
+function setPwnLogEmptyMessage(message) {
+    const placeholder = document.getElementById('pwn-log-empty');
+    if (!placeholder) {
+        return;
+    }
+    placeholder.textContent = message;
+    placeholder.classList.remove('hidden');
+}
+
+async function fetchPwnLogs(options = {}) {
+    if (pwnLogFetchInFlight) {
+        return;
+    }
+
+    const viewer = document.getElementById('pwn-log-viewer');
+    if (!viewer) {
+        return;
+    }
+
+    pwnLogFetchInFlight = true;
+
+    try {
+        const params = new URLSearchParams();
+        if (pwnLogCursor > 0 && !options.initial) {
+            params.set('cursor', pwnLogCursor.toString());
+        } else {
+            params.set('tail', '8192');
+        }
+
+        const result = await fetchAPI(`/api/pwnagotchi/logs?${params.toString()}`);
+
+        if (!result || result.success === false) {
+            if (!options.silent) {
+                setPwnLogEmptyMessage((result && result.error) ? result.error : 'Installer log not available yet');
+            }
+            if (!result || !result.installing) {
+                schedulePwnLogStop();
+            }
+            return;
+        }
+
+        if (typeof result.cursor === 'number') {
+            pwnLogCursor = result.cursor;
+        }
+
+        if (result.file && result.file !== pwnLogActiveFile) {
+            pwnLogActiveFile = result.file;
+            clearPwnLogViewer('Streaming installer output…');
+            updatePwnLogPath(result.file);
+        }
+
+        if (Array.isArray(result.entries) && result.entries.length > 0) {
+            appendPwnLogEntries(result.entries);
+        } else if (!options.silent && !pwnLogStreaming) {
+            setPwnLogEmptyMessage('No installer activity yet.');
+        }
+
+        if (!result.installing) {
+            schedulePwnLogStop();
+        }
+
+    } catch (error) {
+        console.error('Error fetching Pwnagotchi logs:', error);
+        if (!options.silent) {
+            setPwnLogEmptyMessage(`Failed to load installer log (${error.message})`);
+        }
+    } finally {
+        pwnLogFetchInFlight = false;
+    }
+}
+
+function ensurePwnLogStreamingForStatus(status) {
+    if (!status) {
+        return;
+    }
+
+    if (status.log_file && status.log_file !== pwnLogActiveFile) {
+        pwnLogActiveFile = status.log_file;
+        updatePwnLogPath(status.log_file);
+    }
+
+    if (status.installing) {
+        setPwnStatusPollInterval(PWN_STATUS_FAST_INTERVAL);
+        startPwnLogStreaming({ initial: pwnLogCursor === 0 });
+    } else {
+        setPwnStatusPollInterval(PWN_STATUS_POLL_INTERVAL);
+        if (pwnLogStreaming) {
+            schedulePwnLogStop();
+        }
+    }
+}
+
+function getPwnStateVisuals(status) {
+    const state = (status.state || 'not_installed').toLowerCase();
+    if (state.includes('fail') || state.includes('error')) {
+        return {
+            badgeText: 'Error',
+            badgeClass: 'bg-red-700 text-red-100',
+            alertClass: 'border-red-500 bg-red-900/30',
+            icon: '⚠️'
+        };
+    }
+    if (status.installing || ['preflight', 'dependencies', 'python', 'installing'].includes(state)) {
+        return {
+            badgeText: 'Installing',
+            badgeClass: 'bg-yellow-700 text-yellow-100',
+            alertClass: 'border-yellow-500 bg-yellow-900/30',
+            icon: '⏳'
+        };
+    }
+    if (state === 'switching') {
+        return {
+            badgeText: 'Switching',
+            badgeClass: 'bg-orange-700 text-orange-100',
+            alertClass: 'border-orange-500 bg-orange-900/30',
+            icon: '🔄'
+        };
+    }
+    if (state === 'running') {
+        return {
+            badgeText: 'Running',
+            badgeClass: 'bg-green-700 text-green-100',
+            alertClass: 'border-green-500 bg-green-900/30',
+            icon: '✅'
+        };
+    }
+    if (state === 'installed') {
+        return {
+            badgeText: 'Installed',
+            badgeClass: 'bg-blue-700 text-blue-100',
+            alertClass: 'border-blue-500 bg-blue-900/30',
+            icon: 'ℹ️'
+        };
+    }
+    return {
+        badgeText: 'Not Installed',
+        badgeClass: 'bg-slate-700 text-slate-200',
+        alertClass: 'border-slate-700 bg-slate-900',
+        icon: 'ℹ️'
+    };
+}
+
+function formatPwnStateLabel(state) {
+    if (!state) {
+        return 'Unknown';
+    }
+    return state.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+}
+
+function formatPwnModeLabel(mode) {
+    return mode === 'pwnagotchi' ? 'Pwnagotchi' : 'Ragnar';
+}
+
+function formatPwnPhaseLabel(phase) {
+    if (!phase) {
+        return 'Idle';
+    }
+    return phase.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+}
+
+async function handlePwnInstallClick() {
+    if (pwnStatus.installing) {
+        addConsoleMessage('Pwnagotchi installer already running', 'warning');
+        return;
+    }
+
+    const installBtn = document.getElementById('pwn-install-btn');
+    if (installBtn) {
+        installBtn.disabled = true;
+        installBtn.textContent = 'Starting installer...';
+        installBtn.classList.add('opacity-70', 'cursor-not-allowed');
+    }
+
+    resetPwnLogState('Installer requested. Waiting for output...');
+    startPwnLogStreaming({ initial: true });
+
+    try {
+        const result = await postPwnAPI('/api/pwnagotchi/install', {});
+        addConsoleMessage('Pwnagotchi installer started', 'success');
+        if (result && result.status) {
+            updatePwnagotchiUI(result.status);
+        } else {
+            refreshPwnagotchiStatus({ silent: true });
+        }
+    } catch (error) {
+        console.error('Failed to start Pwnagotchi installer:', error);
+        addConsoleMessage(`Install failed: ${error.message}`, 'error');
+        stopPwnLogStreaming();
+        setPwnLogEmptyMessage('Installer failed to start. Check Ragnar logs for details.');
+    } finally {
+        updatePwnButtons();
+    }
+}
+
+async function handlePwnSwap(targetMode) {
+    const normalized = targetMode === 'pwnagotchi' ? 'pwnagotchi' : 'ragnar';
+
+    if (normalized === 'pwnagotchi' && !pwnStatus.installed) {
+        addConsoleMessage('Install Pwnagotchi before swapping', 'warning');
+        return;
+    }
+
+    const buttonId = normalized === 'pwnagotchi' ? 'pwn-swap-to-pwn-btn' : 'pwn-swap-to-ragnar-btn';
+    const button = document.getElementById(buttonId);
+    if (button) {
+        button.disabled = true;
+        button.textContent = 'Scheduling switch...';
+        button.classList.add('opacity-60', 'cursor-not-allowed');
+    }
+
+    try {
+        const result = await postPwnAPI('/api/pwnagotchi/swap', { target: normalized });
+        if (normalized === 'pwnagotchi') _pwnSwapRequestedThisSession = true;
+        const message = (result && result.message) ? result.message : `Switch scheduled to ${formatPwnModeLabel(normalized)}`;
+        addConsoleMessage(message, 'info');
+        if (result && result.status) {
+            updatePwnagotchiUI(result.status);
+        } else {
+            refreshPwnagotchiStatus({ silent: true });
+        }
+    } catch (error) {
+        console.error('Failed to schedule Pwnagotchi swap:', error);
+        addConsoleMessage(`Swap failed: ${error.message}`, 'error');
+    } finally {
+        updatePwnButtons();
+    }
+}
+
+async function postPwnAPI(endpoint, payload = {}) {
+    const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+    });
+
+    let data = null;
+    try {
+        data = await response.json();
+    } catch (error) {
+        data = null;
+    }
+
+    if (!response.ok || (data && data.success === false)) {
+        const errorMessage = data && (data.error || data.message)
+            ? (data.error || data.message)
+            : `Request failed (${response.status})`;
+        throw new Error(errorMessage);
+    }
+
+    return data || { success: true };
+}
+
+async function loadConnectData() {
+    try {
+        // Load Wi-Fi interfaces first so dropdowns are populated before status updates
+        await loadWifiInterfaces();
+
+        // Refresh Wi-Fi and Bluetooth status in parallel to shorten the loading time
+        console.log('Loading connect tab, refreshing connectivity status...');
+        await Promise.all([
+            refreshWifiStatus(),
+            refreshEthernetStatus(),
+            refreshBluetoothStatus()
+        ]);
+    } catch (error) {
+        console.error('Error loading connect data:', error);
+    }
+}
+
+async function loadFilesData() {
+    try {
+        displayDirectoryTree();
+        loadFiles('/');
+        // Don't automatically load images - user must click "Load Images" button
+    } catch (error) {
+        console.error('Error loading files data:', error);
+    }
+}
+
+// ============================================================================
+// PWNAGOTCHI VISIBILITY MANAGEMENT
+// ============================================================================
+
+function arePwnFeaturesEnabled() {
+    return localStorage.getItem('pwnagotchi-enabled') === 'true';
+}
+
+function applyPwnVisibilityPreference(isEnabled) {
+    const pwnSection = document.getElementById('pwnagotchi-section');
+    if (pwnSection) {
+        pwnSection.style.display = isEnabled ? 'block' : 'none';
+    }
+    updatePwnDiscoveredCard(pwnStatus);
+}
+
+function togglePwnagotchiVisibility() {
+    const checkbox = document.getElementById('pwnagotchi-enabled');
+    if (!checkbox) {
+        return;
+    }
+
+     if (checkbox.disabled) {
+         checkbox.checked = false;
+         return;
+     }
+
+    const isEnabled = checkbox.checked;
+    localStorage.setItem('pwnagotchi-enabled', isEnabled ? 'true' : 'false');
+    applyPwnVisibilityPreference(isEnabled);
+}
+
+// ── Live Activity Feed ────────────────────────────────────────────────────────
+
+const ACTIVITY_ICONS = {
+    wpasec:  { svg: `<svg class="w-4 h-4 text-cyan-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"></path></svg>` },
+    ipcam:   { svg: `<svg class="w-4 h-4 text-purple-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.069A1 1 0 0121 8.878v6.244a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"></path></svg>` },
+    creds:   { svg: `<svg class="w-4 h-4 text-yellow-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path></svg>` },
+    vuln:    { svg: `<svg class="w-4 h-4 text-red-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"></path></svg>` },
+    web:     { svg: `<svg class="w-4 h-4 text-green-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"></path></svg>` },
+    default: { svg: `<svg class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>` },
+};
+
+async function loadActivityFeed() {
+    const listEl = document.getElementById('activity-feed-list');
+    const countEl = document.getElementById('activity-feed-count');
+    if (!listEl) return;
+    try {
+        const data = await fetchAPI('/api/activity/feed?limit=20');
+        const events = (data && data.events) ? data.events : [];
+        if (countEl) countEl.textContent = events.length ? `${events.length} recent events` : '';
+        if (events.length === 0) {
+            listEl.innerHTML = '<p class="text-gray-500 text-sm text-center py-6">No activity yet — events will appear here as Ragnar works.</p>';
+            return;
+        }
+        const rows = events.map(e => {
+            const iconDef = ACTIVITY_ICONS[e.type] || ACTIVITY_ICONS.default;
+            const time = e.ts ? new Date(e.ts).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
+            const detail = e.detail ? `<p class="text-xs text-gray-500 mt-0.5">${escapeHtml(e.detail)}</p>` : '';
+            return `<div class="flex items-start gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-800/50 transition-colors">
+                ${iconDef.svg}
+                <div class="min-w-0 flex-1">
+                    <p class="text-sm text-white">${escapeHtml(e.message)}</p>
+                    ${detail}
+                </div>
+                <span class="text-xs text-gray-600 flex-shrink-0 ml-2">${time}</span>
+            </div>`;
+        }).join('');
+        listEl.innerHTML = rows;
+    } catch (err) {
+        // Silent fail — don't disrupt dashboard if feed errors
+    }
+}
+
 // ── IP Camera Scanner ─────────────────────────────────────────────────────────
 
 function toggleIpCamEnabled() {
@@ -544,6 +4591,69 @@ function initializeIpCamToggle() {
         if (!data) return;
         const checkbox = document.getElementById('ipcam-enabled');
         if (checkbox) checkbox.checked = data.ipcam_enabled !== false;
+    }).catch(() => {});
+}
+
+// ── Router Scanner ────────────────────────────────────────────────────────────
+
+function toggleRouterScannerEnabled() {
+    const checkbox = document.getElementById('router-scanner-enabled');
+    if (!checkbox) return;
+    postAPI('/api/config', { router_scanner_enabled: checkbox.checked }).then(() => {
+        showNotification(
+            checkbox.checked ? 'Router Admin Scanner enabled' : 'Router Admin Scanner disabled',
+            checkbox.checked ? 'success' : 'info'
+        );
+    }).catch(() => showNotification('Failed to update Router Admin Scanner setting', 'error'));
+}
+
+function initializeRouterScannerToggle() {
+    fetchAPI('/api/config').then(data => {
+        if (!data) return;
+        const checkbox = document.getElementById('router-scanner-enabled');
+        if (checkbox) checkbox.checked = data.router_scanner_enabled !== false;
+    }).catch(() => {});
+}
+
+// ── MQTT Scanner ──────────────────────────────────────────────────────────────
+
+function toggleMQTTScannerEnabled() {
+    const checkbox = document.getElementById('mqtt-scanner-enabled');
+    if (!checkbox) return;
+    postAPI('/api/config', { mqtt_scanner_enabled: checkbox.checked }).then(() => {
+        showNotification(
+            checkbox.checked ? 'MQTT Subscriber enabled' : 'MQTT Subscriber disabled',
+            checkbox.checked ? 'success' : 'info'
+        );
+    }).catch(() => showNotification('Failed to update MQTT Subscriber setting', 'error'));
+}
+
+function initializeMQTTScannerToggle() {
+    fetchAPI('/api/config').then(data => {
+        if (!data) return;
+        const checkbox = document.getElementById('mqtt-scanner-enabled');
+        if (checkbox) checkbox.checked = data.mqtt_scanner_enabled !== false;
+    }).catch(() => {});
+}
+
+// ── SNMP Scanner ──────────────────────────────────────────────────────────────
+
+function toggleSNMPScannerEnabled() {
+    const checkbox = document.getElementById('snmp-scanner-enabled');
+    if (!checkbox) return;
+    postAPI('/api/config', { snmp_scanner_enabled: checkbox.checked }).then(() => {
+        showNotification(
+            checkbox.checked ? 'SNMP Scanner enabled' : 'SNMP Scanner disabled',
+            checkbox.checked ? 'success' : 'info'
+        );
+    }).catch(() => showNotification('Failed to update SNMP Scanner setting', 'error'));
+}
+
+function initializeSNMPScannerToggle() {
+    fetchAPI('/api/config').then(data => {
+        if (!data) return;
+        const checkbox = document.getElementById('snmp-scanner-enabled');
+        if (checkbox) checkbox.checked = data.snmp_scanner_enabled !== false;
     }).catch(() => {});
 }
 
