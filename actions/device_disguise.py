@@ -96,12 +96,21 @@ def _restart_avahi():
     return rc == 0
 
 
+def _renew_dhcp(iface):
+    """Renew DHCP lease so the router receives the updated hostname."""
+    rc, _, err = _run(["dhcpcd", "-n", iface])
+    if rc != 0:
+        logger.warning(f"  dhcpcd renewal failed on {iface}: {err}")
+    return rc == 0
+
+
 class DeviceDisguise:
+
     def __init__(self, shared_data):
         self.shared_data = shared_data
         logger.info("DeviceDisguise initialized")
 
-    def execute(self, ip, port, row, status_key):
+    def execute(self):
         """
         Called by the Ragnar orchestrator. Acts on incognito_mode_enabled flag.
         This module is stateless per-call — it applies or reverts disguise each run.
@@ -147,6 +156,10 @@ class DeviceDisguise:
         logger.info("  Setting hostname → iPhone")
         _set_hostname("iPhone")
 
+        # Renew DHCP lease so router sees new hostname
+        logger.info("  Renewing DHCP lease")
+        _renew_dhcp(iface)
+
         # Restart avahi to broadcast iPhone.local
         logger.info("  Restarting avahi-daemon")
         _restart_avahi()
@@ -166,6 +179,10 @@ class DeviceDisguise:
 
         logger.info("  Restoring hostname → ragnar")
         _set_hostname("ragnar")
+
+        # Renew DHCP lease so router sees restored hostname
+        logger.info("  Renewing DHCP lease")
+        _renew_dhcp(iface)
 
         logger.info("  Restarting avahi-daemon")
         _restart_avahi()
