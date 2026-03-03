@@ -3012,10 +3012,9 @@ def update_config():
                     'network_confirmation_scans': 1,
                     'network_change_grace': 60,
                 }
-                shared_data.update_config(aggressive_preset)
                 logger.info("Aggressive mode enabled — applied fast-scan preset")
             else:
-                conservative_preset = {
+                aggressive_preset = {
                     'scan_interval': 180,
                     'scan_vuln_interval': 300,
                     'failed_retry_delay': 180,
@@ -3024,8 +3023,10 @@ def update_config():
                     'network_confirmation_scans': 3,
                     'network_change_grace': 300,
                 }
-                shared_data.update_config(conservative_preset)
-                logger.info("Aggressive mode disabled — restored conservative preset")
+                logger.info("Aggressive mode disabled — restored conservative defaults")
+            for k, v in aggressive_preset.items():
+                shared_data.config[k] = v
+                setattr(shared_data, k, v)
 
         # Start or stop wpa-sec poller when wpasec_enabled changes
         if 'wpasec_enabled' in data:
