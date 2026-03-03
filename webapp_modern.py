@@ -3468,6 +3468,22 @@ def wpasec_poll_now():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/wpasec/imported', methods=['GET'])
+def wpasec_imported_networks():
+    """Return the list of networks imported from wpa-sec."""
+    try:
+        import json as _json
+        cache_path = os.path.join(shared_data.datadir, 'wpa_sec_imported.json')
+        if not os.path.exists(cache_path):
+            return jsonify({'imported': []})
+        with open(cache_path, 'r', encoding='utf-8') as fh:
+            data = _json.load(fh)
+        return jsonify(data)
+    except Exception as e:
+        logger.error(f"Failed to read wpa-sec imported list: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/config/apply-profile', methods=['POST'])
 def apply_hardware_profile():
     """Apply a hardware profile to the system configuration"""

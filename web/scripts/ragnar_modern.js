@@ -4749,6 +4749,7 @@ function toggleWpaSecVisibility() {
     localStorage.setItem('wpasec-section-visible', isEnabled ? 'true' : 'false');
     const section = document.getElementById('wpasec-section');
     if (section) section.style.display = isEnabled ? 'block' : 'none';
+    if (isEnabled) loadWpaSecImported();
 }
 
 function initializeWpaSecVisibility() {
@@ -4761,6 +4762,7 @@ function initializeWpaSecVisibility() {
     checkbox.checked = isVisible;
     const section = document.getElementById('wpasec-section');
     if (section) section.style.display = isVisible ? 'block' : 'none';
+    if (isVisible) loadWpaSecImported();
 
     // Populate fields from live config
     fetchAPI('/api/config').then(data => {
@@ -4829,10 +4831,51 @@ async function pollWpaSecNow() {
             if (resultEl) resultEl.textContent = `OK — ${total} cracked total`;
             if (addedEl) addedEl.textContent = `${added} new`;
             showNotification(`wpa-sec poll complete: ${added} new network(s) added`, added > 0 ? 'success' : 'info');
+            loadWpaSecImported();
         }
     } catch (e) {
         if (resultEl) resultEl.textContent = 'Request failed';
         showNotification('wpa-sec poll request failed', 'error');
+    }
+}
+
+async function loadWpaSecImported() {
+    const listEl = document.getElementById('wpasec-imported-list');
+    const countEl = document.getElementById('wpasec-import-count');
+    if (!listEl) return;
+
+    try {
+        const data = await fetchAPI('/api/wpasec/imported');
+        const entries = (data && data.imported) ? data.imported : [];
+
+        if (countEl) countEl.textContent = `${entries.length} network${entries.length !== 1 ? 's' : ''}`;
+
+        if (entries.length === 0) {
+            listEl.innerHTML = '<p class="text-gray-500 text-sm p-4 text-center">No networks imported yet — click Poll Now to fetch from wpa-sec.</p>';
+            return;
+        }
+
+        const rows = entries.map(e => {
+            const date = e.imported_at ? new Date(e.imported_at).toLocaleDateString() : '—';
+            const ssid = escapeHtml(e.ssid || 'Unknown');
+            const bssid = escapeHtml(e.bssid || '—');
+            return `<div class="flex items-center justify-between px-4 py-2.5 border-b border-slate-800/60 hover:bg-slate-800/40 transition-colors">
+                <div class="flex items-center gap-3 min-w-0">
+                    <svg class="w-4 h-4 text-cyan-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"></path>
+                    </svg>
+                    <div class="min-w-0">
+                        <p class="text-sm font-medium text-white truncate">${ssid}</p>
+                        <p class="text-xs text-gray-500 font-mono">${bssid}</p>
+                    </div>
+                </div>
+                <span class="text-xs text-gray-500 flex-shrink-0 ml-2">${date}</span>
+            </div>`;
+        }).join('');
+
+        listEl.innerHTML = rows;
+    } catch (e) {
+        listEl.innerHTML = '<p class="text-red-400 text-sm p-4 text-center">Failed to load imported networks.</p>';
     }
 }
 
