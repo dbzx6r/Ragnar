@@ -460,6 +460,8 @@ class AdvancedVulnScanner:
         self._zap_port = self.ZAP_DEFAULT_PORT
         self._zap_api_key = self._generate_api_key()
         self._zap_base_url = f"http://127.0.0.1:{self._zap_port}"
+        self._zap_watchdog_stop = threading.Event()
+        self._zap_user_stopped = False  # True when user explicitly stops ZAP
 
         # Check capabilities
         caps = get_server_capabilities(shared_data)
@@ -473,9 +475,10 @@ class AdvancedVulnScanner:
         # Recover any interrupted scans on startup
         self._recover_interrupted_scans()
 
-        # Auto-start ZAP daemon so it's always available
+        # Auto-start ZAP daemon and launch watchdog to keep it alive
         if self._tool_paths.get('zap'):
             threading.Thread(target=self._auto_start_zap, daemon=True).start()
+            threading.Thread(target=self._zap_watchdog, daemon=True).start()
 
     def _init_database(self):
         """Initialize database connection for scan persistence"""
@@ -567,7 +570,58 @@ class AdvancedVulnScanner:
                 time.sleep(delay)
 
         logger.error("ZAP daemon failed to auto-start after all retries. "
-                     "Scans requiring ZAP will attempt to start it on demand.")
+                     "Watchdog will keep trying in the background.")
+
+    def _zap_watchdog(self):
+        """Background watchdog that keeps the ZAP daemon alive.
+
+        Polls every 30 seconds.  When ZAP is found to be down (and the user
+        hasn't explicitly stopped it), the watchdog attempts a restart with
+        back-off: 30 s → 60 s → 120 s.  After a successful restart the
+        interval resets.
+        """
+        POLL_INTERVAL = 30          # seconds between health checks
+        BACKOFF_DELAYS = [30, 60, 120]  # restart back-off schedule
+        consecutive_failures = 0
+
+        # Wait for the initial auto-start attempt to finish
+        self._zap_watchdog_stop.wait(timeout=POLL_INTERVAL)
+
+        while not self._zap_watchdog_stop.is_set():
+            try:
+                if self._zap_user_stopped:
+                    # User explicitly stopped ZAP — stay idle until they
+                    # start it again (which clears the flag).
+                    self._zap_watchdog_stop.wait(timeout=POLL_INTERVAL)
+                    continue
+
+                if self._is_zap_running():
+                    consecutive_failures = 0
+                    self._zap_watchdog_stop.wait(timeout=POLL_INTERVAL)
+                    continue
+
+                # ZAP is down — attempt restart
+                consecutive_failures += 1
+                delay_idx = min(consecutive_failures - 1, len(BACKOFF_DELAYS) - 1)
+                logger.warning(
+                    f"[ZAP-WATCHDOG] ZAP daemon not responding "
+                    f"(attempt {consecutive_failures}), restarting..."
+                )
+                if self.start_zap_daemon():
+                    logger.info("[ZAP-WATCHDOG] ZAP daemon restarted successfully")
+                    consecutive_failures = 0
+                else:
+                    backoff = BACKOFF_DELAYS[delay_idx]
+                    logger.warning(
+                        f"[ZAP-WATCHDOG] Restart failed, retrying in {backoff}s"
+                    )
+                    self._zap_watchdog_stop.wait(timeout=backoff)
+                    continue
+
+            except Exception as exc:
+                logger.debug(f"[ZAP-WATCHDOG] Error during health check: {exc}")
+
+            self._zap_watchdog_stop.wait(timeout=POLL_INTERVAL)
 
     def _dict_to_finding(self, data: Dict) -> VulnerabilityFinding:
         """Convert a dictionary (from DB) back to VulnerabilityFinding"""
@@ -1825,6 +1879,8 @@ class AdvancedVulnScanner:
         Handles stale/crashed ZAP processes by cleaning up zombies and
         freeing locked ports before attempting to start a fresh instance.
         """
+        # Clear the user-stopped flag so the watchdog resumes guarding
+        self._zap_user_stopped = False
         logger.info("[ZAP-START] ═══════════════════════════════════════════")
         logger.info("[ZAP-START] Beginning ZAP daemon startup sequence")
         logger.info(f"[ZAP-START] Requested port: {port or self._zap_port}")
@@ -2081,8 +2137,15 @@ class AdvancedVulnScanner:
             logger.error(f"[ZAP-START] FAILED: Unexpected error: {type(e).__name__}: {e}")
             return False
 
-    def stop_zap_daemon(self) -> bool:
-        """Stop the ZAP daemon"""
+    def stop_zap_daemon(self, user_requested: bool = True) -> bool:
+        """Stop the ZAP daemon.
+
+        Args:
+            user_requested: If True (default), the watchdog will not
+                automatically restart ZAP until the user starts it again.
+        """
+        if user_requested:
+            self._zap_user_stopped = True
         try:
             if self._is_zap_running():
                 self._zap_api_call('JSON/core/action/shutdown')
@@ -2113,6 +2176,8 @@ class AdvancedVulnScanner:
             'hosts_accessed': 0,
             'alerts_count': 0,
             'messages_count': 0,
+            'watchdog_active': not self._zap_watchdog_stop.is_set(),
+            'watchdog_paused': self._zap_user_stopped,
         }
 
         if not self._is_zap_running():
