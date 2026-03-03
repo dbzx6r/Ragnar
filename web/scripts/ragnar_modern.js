@@ -9886,6 +9886,12 @@ function closeFilePreview() {
     if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
 }
 
+// Close preview on backdrop click or Escape key
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFilePreview(); });
+document.getElementById('file-preview-modal')?.addEventListener('click', function(e) {
+    if (e.target === this) closeFilePreview();
+});
+
 function deleteFile(filePath) {
     if (fileOperationInProgress) return;
     
