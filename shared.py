@@ -586,7 +586,14 @@ class SharedData:
             "pwnagotchi_installed": False,
             "pwnagotchi_mode": "ragnar",
             "pwnagotchi_last_switch": "",
-            "pwnagotchi_last_status": "Not installed"
+            "pwnagotchi_last_status": "Not installed",
+
+            "__title_wpasec__": "wpa-sec Integration",
+            "wpasec_enabled": False,
+            "wpasec_api_key": "",
+            "wpasec_poll_interval": 3600,
+            "wpasec_auto_connect": True,
+            "wpasec_priority": 5
         }
 
     def apply_display_profile(self, epd_type=None, set_orientation_if_missing=False, persist=False):
