@@ -3038,6 +3038,14 @@ def update_config():
                 else:
                     wpa_sec.stop()
 
+        # Apply incognito mode immediately when toggled — don't wait for orchestrator idle
+        if 'incognito_mode_enabled' in data:
+            try:
+                from actions.device_disguise import DeviceDisguise
+                DeviceDisguise(shared_data).execute()
+            except Exception as e:
+                logger.warning(f"Incognito mode apply failed: {e}")
+
         return jsonify(response)
     except Exception as e:
         logger.error(f"Error updating config: {e}")
