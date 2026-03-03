@@ -215,6 +215,8 @@
                 width: 100%;
             }
         }
+        /* Toggle switch: show green when ON, regardless of Tailwind purge state */
+        label > input[type="checkbox"]:checked + div { background-color: #16a34a !important; }
     </style>
 </head>
 
