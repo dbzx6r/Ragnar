@@ -235,7 +235,7 @@ class EPD:
         buf = [0x00] * self.height * linewidth
         for j in range(0, self.height):
             for i in range(0, linewidth):
-                buf[i + j * linewidth] = ~image[i + j * linewidth]
+                buf[i + j * linewidth] = (~image[i + j * linewidth]) & 0xFF
 
         self.send_command(0x24)
         self.send_data2(image)   
