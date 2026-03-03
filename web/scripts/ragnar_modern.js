@@ -520,6 +520,9 @@ document.addEventListener('DOMContentLoaded', function() {
     initializePwnagotchiVisibility();
     initializeWpaSecVisibility();
     initializeIpCamToggle();
+    initializeRouterScannerToggle();
+    initializeMQTTScannerToggle();
+    initializeSNMPScannerToggle();
     initializeAggressiveMode();
     handleHeadlessMode();
 
@@ -4580,6 +4583,69 @@ function initializeIpCamToggle() {
         if (!data) return;
         const checkbox = document.getElementById('ipcam-enabled');
         if (checkbox) checkbox.checked = data.ipcam_enabled !== false;
+    }).catch(() => {});
+}
+
+// ── Router Scanner ────────────────────────────────────────────────────────────
+
+function toggleRouterScannerEnabled() {
+    const checkbox = document.getElementById('router-scanner-enabled');
+    if (!checkbox) return;
+    postAPI('/api/config', { router_scanner_enabled: checkbox.checked }).then(() => {
+        showNotification(
+            checkbox.checked ? 'Router Admin Scanner enabled' : 'Router Admin Scanner disabled',
+            checkbox.checked ? 'success' : 'info'
+        );
+    }).catch(() => showNotification('Failed to update Router Admin Scanner setting', 'error'));
+}
+
+function initializeRouterScannerToggle() {
+    fetchAPI('/api/config').then(data => {
+        if (!data) return;
+        const checkbox = document.getElementById('router-scanner-enabled');
+        if (checkbox) checkbox.checked = data.router_scanner_enabled !== false;
+    }).catch(() => {});
+}
+
+// ── MQTT Scanner ──────────────────────────────────────────────────────────────
+
+function toggleMQTTScannerEnabled() {
+    const checkbox = document.getElementById('mqtt-scanner-enabled');
+    if (!checkbox) return;
+    postAPI('/api/config', { mqtt_scanner_enabled: checkbox.checked }).then(() => {
+        showNotification(
+            checkbox.checked ? 'MQTT Subscriber enabled' : 'MQTT Subscriber disabled',
+            checkbox.checked ? 'success' : 'info'
+        );
+    }).catch(() => showNotification('Failed to update MQTT Subscriber setting', 'error'));
+}
+
+function initializeMQTTScannerToggle() {
+    fetchAPI('/api/config').then(data => {
+        if (!data) return;
+        const checkbox = document.getElementById('mqtt-scanner-enabled');
+        if (checkbox) checkbox.checked = data.mqtt_scanner_enabled !== false;
+    }).catch(() => {});
+}
+
+// ── SNMP Scanner ──────────────────────────────────────────────────────────────
+
+function toggleSNMPScannerEnabled() {
+    const checkbox = document.getElementById('snmp-scanner-enabled');
+    if (!checkbox) return;
+    postAPI('/api/config', { snmp_scanner_enabled: checkbox.checked }).then(() => {
+        showNotification(
+            checkbox.checked ? 'SNMP Scanner enabled' : 'SNMP Scanner disabled',
+            checkbox.checked ? 'success' : 'info'
+        );
+    }).catch(() => showNotification('Failed to update SNMP Scanner setting', 'error'));
+}
+
+function initializeSNMPScannerToggle() {
+    fetchAPI('/api/config').then(data => {
+        if (!data) return;
+        const checkbox = document.getElementById('snmp-scanner-enabled');
+        if (checkbox) checkbox.checked = data.snmp_scanner_enabled !== false;
     }).catch(() => {});
 }
 

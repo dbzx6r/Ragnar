@@ -323,6 +323,15 @@ class IpCameraScanner:
         with open(info_file, "w", encoding="utf-8") as fh:
             json.dump(info, fh, indent=2)
 
+        # Update e-paper display when a snapshot was captured
+        if snapshot_path:
+            try:
+                ssid = getattr(self.shared_data, 'active_network_ssid', None) or "unknown"
+                self.shared_data.ragnarstatustext  = f"CAM: {ssid}"
+                self.shared_data.ragnarstatustext2 = f"{ip} ({brand})"
+            except Exception:
+                pass
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------

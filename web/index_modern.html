@@ -3572,6 +3572,54 @@
                                 Supports Hikvision, Dahua, Axis, Foscam, Amcrest, Reolink, and generic cameras
                             </div>
                         </div>
+
+                        <div class="glass rounded-lg p-4">
+                            <div class="flex items-center justify-between mb-3">
+                                <h4 class="font-medium">Router Admin Scanner</h4>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="router-scanner-enabled" class="sr-only peer" onchange="toggleRouterScannerEnabled()">
+                                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-cyan-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-600"></div>
+                                </label>
+                            </div>
+                            <div class="text-sm text-gray-400 mb-3">
+                                Target the default gateway with brand-specific default credentials (Netgear, TP-Link, Asus, Cisco, etc.). Saves admin page dump to Data Stolen.
+                            </div>
+                            <div class="text-xs text-gray-500">
+                                Runs once per network · Tries HTTP/HTTPS on common admin ports
+                            </div>
+                        </div>
+
+                        <div class="glass rounded-lg p-4">
+                            <div class="flex items-center justify-between mb-3">
+                                <h4 class="font-medium">MQTT Subscriber</h4>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="mqtt-scanner-enabled" class="sr-only peer" onchange="toggleMQTTScannerEnabled()">
+                                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-cyan-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-600"></div>
+                                </label>
+                            </div>
+                            <div class="text-sm text-gray-400 mb-3">
+                                Connect to open MQTT brokers (port 1883) and passively collect IoT messages — smart home states, sensor data, device commands.
+                            </div>
+                            <div class="text-xs text-gray-500">
+                                Records for 30s · Saves topic list and sample payloads · Requires paho-mqtt
+                            </div>
+                        </div>
+
+                        <div class="glass rounded-lg p-4">
+                            <div class="flex items-center justify-between mb-3">
+                                <h4 class="font-medium">SNMP Scanner</h4>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="snmp-scanner-enabled" class="sr-only peer" onchange="toggleSNMPScannerEnabled()">
+                                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-cyan-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-600"></div>
+                                </label>
+                            </div>
+                            <div class="text-sm text-gray-400 mb-3">
+                                Try public/private SNMP community strings on port 161. Extracts device names, interfaces, and ARP tables that reveal other devices on the LAN.
+                            </div>
+                            <div class="text-xs text-gray-500">
+                                Uses snmpwalk (pre-installed) · Saves full MIB dump to Data Stolen
+                            </div>
+                        </div>
                         
                     </div>
                 </div>
