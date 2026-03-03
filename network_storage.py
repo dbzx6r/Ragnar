@@ -73,6 +73,15 @@ class NetworkStorageManager:
             'data_stolen_dir': data_stolen_dir,
             'credentials_dir': credentials_dir,
         }
+        # Persist SSID so the file browser can display human-readable names
+        if ssid:
+            ssid_file = os.path.join(network_dir, 'ssid.txt')
+            if not os.path.exists(ssid_file):
+                try:
+                    with open(ssid_file, 'w', encoding='utf-8') as _f:
+                        _f.write(ssid)
+                except IOError:
+                    pass
         return context
 
     def _ensure_network_dirs(self, slug: str):
