@@ -201,6 +201,67 @@ class NetworkScanner:
         
         return all_hosts
 
+    def run_targeted_arp_scan(self, ip):
+        """Run arp-scan against the /24 subnet of a given IP to resolve an unknown MAC address.
+
+        Called automatically when a host is discovered but its MAC cannot be determined via
+        the standard arp-scan (e.g. the host is on a different subnet reachable via routing,
+        or was missed in the initial broadcast scan).  The result is written to the database
+        and returned as a MAC string, or ``None`` if resolution still fails.
+
+        Args:
+            ip: IPv4 address string (e.g. ``"192.168.4.229"``).
+
+        Returns:
+            MAC address string (lowercase, colon-separated) on success, or ``None``.
+        """
+        try:
+            import ipaddress
+            # Derive the /24 CIDR from the target IP so arp-scan probes the right subnet
+            network = ipaddress.IPv4Network(f"{ip}/24", strict=False)
+            cidr = str(network)
+        except Exception as e:
+            self.logger.warning(f"run_targeted_arp_scan: could not derive subnet for {ip}: {e}")
+            return None
+
+        self.logger.info(f"🔍 Targeted arp-scan: resolving MAC for {ip} via subnet {cidr}")
+        try:
+            result = subprocess.run(
+                ['sudo', 'arp-scan', f'--interface={self.arp_scan_interface}', cidr],
+                capture_output=True, text=True, timeout=30
+            )
+            hosts = self._parse_arp_scan_output(result.stdout)
+        except FileNotFoundError:
+            self.logger.error("run_targeted_arp_scan: arp-scan not found")
+            return None
+        except subprocess.TimeoutExpired as e:
+            hosts = self._parse_arp_scan_output(e.stdout or "")
+        except Exception as e:
+            self.logger.warning(f"run_targeted_arp_scan: arp-scan error for {cidr}: {e}")
+            return None
+
+        if ip not in hosts:
+            self.logger.debug(f"run_targeted_arp_scan: {ip} not found in {cidr} results")
+            return None
+
+        mac = hosts[ip].get('mac', '').lower().strip()
+        vendor = hosts[ip].get('vendor', '')
+
+        if not mac or mac == '00:00:00:00:00:00':
+            return None
+
+        self.logger.info(f"✅ Targeted arp-scan resolved {ip} → {mac} ({vendor or 'unknown vendor'})")
+
+        # Persist to database so future scans benefit from this resolution
+        try:
+            self.db.upsert_host(mac=mac, ip=ip, vendor=vendor)
+            self.db.update_ping_status(mac, success=True)
+            self.db.add_scan_history(mac, ip, 'targeted_arp_scan')
+        except Exception as e:
+            self.logger.warning(f"run_targeted_arp_scan: failed to write {mac}/{ip} to DB: {e}")
+
+        return mac
+
     def run_nmap_network_scan(self, network_cidr, portstart, portend, extra_ports):
 
         self.logger.info(f"🚀 Starting nmap network-wide scan: {network_cidr}")
@@ -1071,11 +1132,19 @@ class NetworkScanner:
                         mac = existing_host['mac']
                         self.logger.debug(f"Using existing MAC from DB: {mac} for {ip}")
                     else:
-                        # Only create pseudo-MAC if no real MAC exists in DB
-                        ip_parts = ip.split('.')
-                        if len(ip_parts) == 4:
-                            mac = f"00:00:{int(ip_parts[0]):02x}:{int(ip_parts[1]):02x}:{int(ip_parts[2]):02x}:{int(ip_parts[3]):02x}"
-                            self.logger.debug(f"Created pseudo-MAC {mac} for {ip}")
+                        # Attempt targeted arp-scan against the host's /24 subnet before
+                        # falling back to a pseudo-MAC — resolves hosts on non-local subnets
+                        # (e.g. IoT devices with their own AP subnet like 192.168.4.x)
+                        resolved = self.outer_instance.run_targeted_arp_scan(ip)
+                        if resolved:
+                            mac = resolved
+                            self.logger.info(f"✅ Targeted arp-scan resolved unknown MAC for {ip}: {mac}")
+                        else:
+                            # Only create pseudo-MAC if no real MAC exists in DB
+                            ip_parts = ip.split('.')
+                            if len(ip_parts) == 4:
+                                mac = f"00:00:{int(ip_parts[0]):02x}:{int(ip_parts[1]):02x}:{int(ip_parts[2]):02x}:{int(ip_parts[3]):02x}"
+                                self.logger.debug(f"Created pseudo-MAC {mac} for {ip}")
                 
                 mac = mac.lower() if mac else "00:00:00:00:00:00"
                 
