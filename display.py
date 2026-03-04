@@ -1144,9 +1144,27 @@ class Display:
             ]
             self._draw_stat_rows(draw, y, stats)
 
+    @staticmethod
+    def _apply_incognito_mask(img):
+        """Overlay an anonymous mask on the viking's face (28x28 animation frames)."""
+        try:
+            masked = img.convert('RGB')
+            d = ImageDraw.Draw(masked)
+            # White fill to erase existing face pixels, then black oval outline
+            d.ellipse([9, 8, 19, 15], fill='white', outline='black')
+            # Eyes: 2x2 pixel dots
+            d.rectangle([11, 10, 12, 11], fill='black')
+            d.rectangle([16, 10, 17, 11], fill='black')
+            # Smile: curved arc at bottom of mask
+            d.point([(11, 13), (12, 14), (14, 14), (16, 14), (17, 13)], fill='black')
+            return masked.convert(img.mode)
+        except Exception:
+            return img  # fallback: return original if anything goes wrong
+
     def run(self):
         """Main loop for updating the EPD display with shared data."""
         self.manual_mode_txt = ""
+        _last_page = PAGE_MAIN
         while not self.shared_data.display_should_exit:
             try:
                 self.epd_helper.init_partial_update()
@@ -1162,6 +1180,16 @@ class Display:
                 current_page = PAGE_MAIN
                 if self.button_listener and self.button_listener.available:
                     current_page = self.button_listener.current_page
+
+                # Full refresh on page change to prevent V2 ghosting
+                if current_page != _last_page:
+                    try:
+                        self.epd_helper.init_full_update()
+                        self.epd_helper.clear()
+                        self.epd_helper.init_partial_update()
+                    except Exception:
+                        pass
+                    _last_page = current_page
 
                 if current_page == PAGE_NETWORK:
                     self._render_network_page(image, draw)
@@ -1222,7 +1250,7 @@ class Display:
                 if self.shared_data.usb_active:
                     image.paste(self.shared_data.usb, (int(90 * self.scale_factor_x), int(4 * self.scale_factor_y)))
                 if self.shared_data.config.get('incognito_mode_enabled', False):
-                    draw.text((int(3 * self.scale_factor_x), int(11 * self.scale_factor_y)), "INCOG", font=self.shared_data.font_arial9, fill=0)
+                    pass  # incognito indicated via viking mask (see ragnarstatusimage below)
 
                 # Battery percentage (PiSugar) - flush right in header
                 if _pisugar_available:
@@ -1263,7 +1291,10 @@ class Display:
                     draw.text(text_pos, text, font=self.shared_data.font_arial9, fill=0)
 
                 self.shared_data.update_ragnarstatus()
-                image.paste(self.shared_data.ragnarstatusimage, (int(3 * sx), int(60 * sy * ys)))
+                status_img = self.shared_data.ragnarstatusimage
+                if self.shared_data.config.get('incognito_mode_enabled', False):
+                    status_img = self._apply_incognito_mask(status_img)
+                image.paste(status_img, (int(3 * sx), int(60 * sy * ys)))
                 draw.text((int(35 * sx), int(65 * sy * ys)), self.shared_data.ragnarstatustext, font=self.shared_data.font_arial9, fill=0)
                 draw.text((int(35 * sx), int(75 * sy * ys)), self.shared_data.ragnarstatustext2, font=self.shared_data.font_arial9, fill=0)
 
