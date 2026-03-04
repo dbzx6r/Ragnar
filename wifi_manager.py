@@ -1869,6 +1869,34 @@ class WiFiManager:
             self.logger.error(f"Error removing known network {ssid}: {e}")
             return False
 
+    def set_home_network_priority(self, ssid):
+        """Set the home network to highest priority in Ragnar's known_networks and in NetworkManager."""
+        if not ssid:
+            return
+        # Update Ragnar's internal known_networks priority
+        for net in self.known_networks:
+            net['priority'] = 100 if net['ssid'] == ssid else 0
+        self.save_wifi_config()
+        # Apply OS-level autoconnect priority via nmcli
+        try:
+            subprocess.run(
+                ['sudo', 'nmcli', 'con', 'modify', ssid, 'connection.autoconnect-priority', '100'],
+                capture_output=True, timeout=5
+            )
+        except Exception:
+            pass
+        # Reset all other known NM profiles to priority 0
+        for net in self.known_networks:
+            if net['ssid'] != ssid:
+                try:
+                    subprocess.run(
+                        ['sudo', 'nmcli', 'con', 'modify', net['ssid'], 'connection.autoconnect-priority', '0'],
+                        capture_output=True, timeout=5
+                    )
+                except Exception:
+                    pass
+        self.logger.info(f"Home network priority set: '{ssid}' → 100, all others → 0")
+
     def check_ap_clients(self):
         """Check how many clients are connected to the AP"""
         if not self.ap_mode_active:

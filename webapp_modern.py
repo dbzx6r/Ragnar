@@ -3046,6 +3046,14 @@ def update_config():
             except Exception as e:
                 logger.warning(f"Incognito mode apply failed: {e}")
 
+        if 'home_network_ssid' in data:
+            try:
+                wifi_mgr = getattr(shared_data, 'wifi_manager', None)
+                if wifi_mgr:
+                    wifi_mgr.set_home_network_priority(data['home_network_ssid'])
+            except Exception as e:
+                logger.warning(f"Home network priority apply failed: {e}")
+
         return jsonify(response)
     except Exception as e:
         logger.error(f"Error updating config: {e}")
