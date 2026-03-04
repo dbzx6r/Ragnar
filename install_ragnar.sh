@@ -774,6 +774,14 @@ except Exception as e:
         log "WARNING" "You can install it manually later with: sudo pip3 install --break-system-packages cryptography>=41.0.0"
     }
 
+    # Install PyBluez for Bluetooth WiFi control
+    log "INFO" "Installing PyBluez for Bluetooth WiFi control..."
+    sudo apt-get install -y libbluetooth-dev bluez python3-dev >/dev/null 2>&1 || true
+    sudo pip3 install --break-system-packages "PyBluez>=0.23" || {
+        log "WARNING" "Failed to install PyBluez. Bluetooth WiFi control will be disabled."
+        log "WARNING" "You can install it manually later with: sudo pip3 install --break-system-packages PyBluez"
+    }
+
     # Verify Waveshare e-Paper Python library (already installed in main())
     if [ "$HEADLESS_MODE" = true ] || [ -z "${EPD_VERSION:-}" ]; then
         log "INFO" "Headless mode or unknown E-Paper version detected - skipping driver verification"
