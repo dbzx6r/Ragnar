@@ -1286,35 +1286,35 @@ class WiFiManager:
     def get_current_ssid(self):
         """Get the current connected SSID"""
         try:
-            # Method 1: Get SSID from active connection on wlan0 device
-            result = subprocess.run(['nmcli', '-t', '-f', 'GENERAL.CONNECTION', 'dev', 'show', 'wlan0'], 
-                                  capture_output=True, text=True, timeout=10)
-            if result.returncode == 0 and result.stdout.strip():
-                # Extract connection name (which is usually the SSID for WiFi)
-                for line in result.stdout.strip().split('\n'):
-                    if line.startswith('GENERAL.CONNECTION:'):
-                        ssid = line.split(':', 1)[1].strip()
-                        if ssid and ssid != '--':
-                            return ssid
-            
-            # Method 2: Try using iwgetid as fallback
+            # Method 1: iwgetid returns the raw SSID (spaces preserved, no profile-name prefix)
             try:
-                result = subprocess.run(['iwgetid', '-r'], 
+                result = subprocess.run(['iwgetid', '-r'],
                                       capture_output=True, text=True, timeout=5)
                 if result.returncode == 0 and result.stdout.strip():
                     return result.stdout.strip()
             except FileNotFoundError:
                 pass  # iwgetid not available
-            
-            # Method 3: Parse from nmcli connection show (active connections)
-            result = subprocess.run(['nmcli', '-t', '-f', 'ACTIVE,NAME,TYPE', 'con', 'show'], 
+
+            # Method 2: nmcli active SSID field (avoids profile-name like "netplan-wlan0-…")
+            result = subprocess.run(['nmcli', '-t', '-f', 'active,ssid', 'dev', 'wifi'],
                                   capture_output=True, text=True, timeout=10)
             if result.returncode == 0:
                 for line in result.stdout.strip().split('\n'):
-                    parts = line.split(':')
-                    if len(parts) >= 3 and parts[0] == 'yes' and '802-11-wireless' in parts[2]:
-                        return parts[1]
-            
+                    if line.startswith('yes:'):
+                        ssid = line.split(':', 1)[1].strip()
+                        if ssid:
+                            return ssid
+
+            # Method 3: connection profile name as last resort
+            result = subprocess.run(['nmcli', '-t', '-f', 'GENERAL.CONNECTION', 'dev', 'show', 'wlan0'],
+                                  capture_output=True, text=True, timeout=10)
+            if result.returncode == 0 and result.stdout.strip():
+                for line in result.stdout.strip().split('\n'):
+                    if line.startswith('GENERAL.CONNECTION:'):
+                        ssid = line.split(':', 1)[1].strip()
+                        if ssid and ssid != '--':
+                            return ssid
+
             return None
         except Exception as e:
             self.logger.error(f"Error getting current SSID: {e}")
