@@ -258,6 +258,36 @@ class WiFiManager:
                 self.shared_data.set_active_network(ssid)
             except Exception as exc:
                 self.logger.warning(f"Failed to propagate network change to storage manager: {exc}")
+        self._apply_auto_incognito(ssid)
+
+    def _apply_auto_incognito(self, ssid):
+        """Auto-enable/disable incognito mode based on whether we're on the home network."""
+        try:
+            cfg = self.shared_data.config
+            if not cfg.get('auto_incognito_on_away', False):
+                return
+            home = cfg.get('home_network_ssid', '').strip()
+            if not home:
+                return
+            on_home = (ssid == home)
+            currently_incognito = cfg.get('incognito_mode_enabled', False)
+            # Only act on transitions
+            if on_home and currently_incognito:
+                self.logger.info("Auto-incognito: returned to home network — disabling incognito")
+                cfg['incognito_mode_enabled'] = False
+                setattr(self.shared_data, 'incognito_mode_enabled', False)
+                self.shared_data.save_config()
+                from actions.device_disguise import DeviceDisguise
+                DeviceDisguise(self.shared_data).execute()
+            elif not on_home and not currently_incognito:
+                self.logger.info(f"Auto-incognito: on foreign network '{ssid}' — enabling incognito")
+                cfg['incognito_mode_enabled'] = True
+                setattr(self.shared_data, 'incognito_mode_enabled', True)
+                self.shared_data.save_config()
+                from actions.device_disguise import DeviceDisguise
+                DeviceDisguise(self.shared_data).execute()
+        except Exception as exc:
+            self.logger.warning(f"Auto-incognito check failed: {exc}")
 
     def _trigger_initial_ping_sweep(self, ssid):
         """Schedule a post-connection ping sweep to refresh network data."""

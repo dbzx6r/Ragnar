@@ -521,6 +521,8 @@ class SharedData:
             "mqtt_scanner_enabled": True,
             "snmp_scanner_enabled": True,
             "incognito_mode_enabled": False,
+            "home_network_ssid": "",
+            "auto_incognito_on_away": False,
             "original_mac": "",
             "tshark_enabled": False,
             "ngrep_enabled": False,
