@@ -271,7 +271,10 @@ class WiFiManager:
             if not home:
                 self.logger.debug("Auto-incognito: no home network set")
                 return
-            on_home = (ssid == home)
+            # Normalize both sides: collapse any underscore/space differences
+            def _norm(s):
+                return s.replace('_', ' ').strip().lower() if s else ''
+            on_home = (_norm(ssid) == _norm(home))
             currently_incognito = cfg.get('incognito_mode_enabled', False)
             self.logger.info(f"Auto-incognito check: ssid='{ssid}' home='{home}' on_home={on_home} currently_incognito={currently_incognito}")
             if on_home and currently_incognito:

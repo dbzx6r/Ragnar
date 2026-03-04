@@ -1146,17 +1146,23 @@ class Display:
 
     @staticmethod
     def _apply_incognito_mask(img):
-        """Overlay an anonymous mask on the viking's face (28x28 animation frames)."""
+        """Overlay an anonymous mask on the viking's face. Scales to any image size."""
         try:
             masked = img.convert('RGB')
             d = ImageDraw.Draw(masked)
-            # White fill to erase existing face pixels, then black oval outline
-            d.ellipse([9, 8, 19, 15], fill='white', outline='black')
-            # Eyes: 2x2 pixel dots
-            d.rectangle([11, 10, 12, 11], fill='black')
-            d.rectangle([16, 10, 17, 11], fill='black')
-            # Smile: curved arc at bottom of mask
-            d.point([(11, 13), (12, 14), (14, 14), (16, 14), (17, 13)], fill='black')
+            w = masked.width
+            # All coordinates defined on a 28px reference, scaled to actual size
+            s = w / 28.0
+            def px(v): return int(v * s)
+            # Oval face mask
+            d.ellipse([px(9), px(8), px(19), px(15)], fill='white', outline='black')
+            # Eyes (2x2 pixel blocks scaled)
+            eye_sz = max(1, px(1))
+            d.rectangle([px(11), px(10), px(11)+eye_sz, px(10)+eye_sz], fill='black')
+            d.rectangle([px(16), px(10), px(16)+eye_sz, px(10)+eye_sz], fill='black')
+            # Smile points
+            for pt in [(11, 13), (12, 14), (14, 14), (16, 14), (17, 13)]:
+                d.point((px(pt[0]), px(pt[1])), fill='black')
             return masked.convert(img.mode)
         except Exception:
             return img  # fallback: return original if anything goes wrong
@@ -1312,7 +1318,10 @@ class Display:
                 y_text = int(90 * sy * ys)
 
                 if self.main_image is not None:
-                    image.paste(self.main_image, (self.shared_data.x_center1, self.shared_data.y_bottom1))
+                    main_img = self.main_image
+                    if self.shared_data.config.get('incognito_mode_enabled', False):
+                        main_img = self._apply_incognito_mask(main_img)
+                    image.paste(main_img, (self.shared_data.x_center1, self.shared_data.y_bottom1))
                 else:
                     logger.error("Main image not found in shared_data.")
 
