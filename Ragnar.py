@@ -64,6 +64,14 @@ class Ragnar:
         except ImportError:
             pass
 
+        # Bluetooth WiFi control (RFCOMM serial — advertises as common BT device)
+        self.bt_wifi = None
+        try:
+            from bt_wifi import BluetoothWiFiControl
+            self.bt_wifi = BluetoothWiFiControl(shared_data)
+        except ImportError:
+            pass
+
     def run(self):
         """Main loop for Ragnar. Waits for Wi-Fi connection and starts Orchestrator."""
         logger.info("=" * 70)
@@ -73,6 +81,10 @@ class Ragnar:
         # Start PiSugar button listener (if available)
         if self.pisugar_listener:
             self.pisugar_listener.start()
+
+        # Start Bluetooth WiFi control (if PyBluez available)
+        if self.bt_wifi:
+            self.bt_wifi.start()
 
         # Initialize Wi-Fi management system
         logger.info("Starting Wi-Fi management system...")
