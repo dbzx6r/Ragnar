@@ -13,8 +13,24 @@ Viking theme preserves the original BMP-based layout exactly.
 All other themes render entirely with PIL (no BMP file dependencies for mascots/icons).
 """
 
+import math
 import random
+import time
 from PIL import ImageDraw
+
+
+def _get_anim_frame(n_frames=4, fps=1.5):
+    """Return current animation frame index based on wall clock."""
+    return int(time.time() * fps) % n_frames
+
+
+def _status_class(status):
+    """Classify orchestrator status into idle/scanning/attacking for animation intensity."""
+    if status in ("IDLE", "LogStandalone", "LogStandalone2"):
+        return "idle"
+    if status in ("NetworkScanner", "NmapVulnScanner"):
+        return "scanning"
+    return "attacking"
 
 
 # ---------------------------------------------------------------------------
@@ -84,7 +100,7 @@ def _draw_comment_lines(draw, sx, sy, ys, sd):
 def _draw_stat_label_value(draw, x, y, label, value, font):
     """Draw a themed stat as two stacked lines: label (top) + value (bottom)."""
     draw.text((x, y), label, font=font, fill=0)
-    draw.text((x, y + 9), value, font=font, fill=0)
+    draw.text((x, y + 8), value, font=font, fill=0)
 
 
 def _draw_corner_chars(draw, sd, corner_char, font):
@@ -200,7 +216,36 @@ def _draw_penguin_small(draw, x, y):
     draw.line([(cx+3, cy+10), (cx+6, cy+14)], fill=0, width=1)
 
 
-def _draw_ice_band(draw, sx, sy, ys, sd):
+def _draw_snow_scene(draw, zone_x, zone_y, zone_w, zone_h, status, frame):
+    """Animated snow scene for penguin main zone.
+
+    Draws a snowdrift hill at bottom + falling snowflakes that shift per frame.
+    Flake count and speed depend on status class.
+    """
+    sc = _status_class(status)
+    n_flakes = {"idle": 10, "scanning": 16, "attacking": 24}[sc]
+    # Snowdrift hill at bottom: two overlapping filled ellipses
+    bx = zone_x + zone_w // 2
+    by = zone_y + zone_h - 5
+    draw.ellipse([bx - 28, by - 14, bx + 28, by + 10], fill=255, outline=0)
+    draw.ellipse([bx - 18, by - 20, bx + 18, by + 8], fill=255, outline=0)
+    # Draw snowflakes using seeded RNG shifted by frame
+    rng = random.Random(frame * 97 + 11)
+    for _ in range(n_flakes):
+        fx = rng.randint(zone_x + 2, zone_x + zone_w - 4)
+        fy = rng.randint(zone_y + 2, zone_y + zone_h - 18)
+        # diagonal offset for blizzard effect
+        if sc == "attacking":
+            fx = min(zone_x + zone_w - 4, fx + frame * 3)
+        arm = 3 if sc == "idle" else 4
+        draw.line([(fx - arm, fy), (fx + arm, fy)], fill=0, width=1)
+        draw.line([(fx, fy - arm), (fx, fy + arm)], fill=0, width=1)
+        if sc != "idle":
+            draw.line([(fx - arm + 1, fy - arm + 1), (fx + arm - 1, fy + arm - 1)], fill=0, width=1)
+            draw.line([(fx + arm - 1, fy - arm + 1), (fx - arm + 1, fy + arm - 1)], fill=0, width=1)
+
+
+
     """Draw a dotted ice-crystal decorative band (replaces frise for penguin theme)."""
     if ys != 1.0:
         return
@@ -229,9 +274,9 @@ def _render_penguin_main(loop, draw, image, sx, sy, ys):
         ("Fish", int(86*sx), int(22*sy), str(sd.vulnnbr)),
     ]
     row2 = [
-        ("Eggs", int(8*sx),  int(41*sy), str(sd.crednbr)),
-        ("Coln", int(47*sx), int(41*sy), str(sd.zombiesnbr)),
-        ("Intl", int(86*sx), int(41*sy), str(sd.datanbr)),
+        ("Eggs", int(8*sx),  int(40*sy), str(sd.crednbr)),
+        ("Coln", int(47*sx), int(40*sy), str(sd.zombiesnbr)),
+        ("Intl", int(86*sx), int(40*sy), str(sd.datanbr)),
     ]
     for label, x, y, val in row1 + row2:
         _draw_stat_label_value(draw, x, y, label, val, font)
@@ -271,10 +316,15 @@ def _render_penguin_main(loop, draw, image, sx, sy, ys):
     _draw_corner_chars(draw, sd, "*", font)
     _draw_comment_lines(draw, sx, sy, ys, sd)
 
-    # Large penguin mascot in main zone
-    cx = int((sd.x_center1 + sd.x_center1 + 78) // 2)
-    cy = int(sd.y_bottom1 + 38)
-    _draw_penguin_large(draw, cx, cy, scale=1)
+    # Snow scene in main zone (animated)
+    sc = _status_class(sd.ragnarorch_status)
+    fps_map = {"idle": 1.0, "scanning": 2.0, "attacking": 3.0}
+    frame = _get_anim_frame(8, fps_map[sc])
+    zone_x = int(sd.x_center1)
+    zone_y = int(sd.y_bottom1)
+    zone_w = 78
+    zone_h = sd.height - zone_y - 2
+    _draw_snow_scene(draw, zone_x, zone_y, zone_w, zone_h, sd.ragnarorch_status, frame)
 
 
 # ---------------------------------------------------------------------------
@@ -321,7 +371,35 @@ def _draw_car_small(draw, x, y):
     draw.ellipse([cx+5,  cy+3, cx+11, cy+9], fill=255, outline=0)
 
 
-def _draw_road_band(draw, sx, sy, ys, sd):
+def _draw_steering_wheel(draw, cx, cy, radius, angle_deg):
+    """Draw a steering wheel centered at (cx,cy) with spokes rotated by angle_deg."""
+    # Outer ring
+    draw.ellipse([cx - radius, cy - radius, cx + radius, cy + radius], outline=0, width=2)
+    # 3 spokes at 0°, 120°, 240° offset by angle_deg
+    hub_r = max(4, radius // 5)
+    for spoke_off in (0, 120, 240):
+        a = math.radians(angle_deg + spoke_off)
+        x1 = cx + int(hub_r * math.cos(a))
+        y1 = cy + int(hub_r * math.sin(a))
+        x2 = cx + int((radius - 2) * math.cos(a))
+        y2 = cy + int((radius - 2) * math.sin(a))
+        draw.line([(x1, y1), (x2, y2)], fill=0, width=2)
+    # Hub
+    draw.ellipse([cx - hub_r, cy - hub_r, cx + hub_r, cy + hub_r], fill=0)
+
+
+def _draw_traffic_cone(draw, x, y):
+    """Draw a small traffic cone (triangle + base) top-left at (x,y), ~14px wide, 20px tall."""
+    # Cone body
+    draw.polygon([(x + 7, y), (x, y + 16), (x + 14, y + 16)], fill=0)
+    # White stripe near top (drawn as lighter lines)
+    draw.line([(x + 4, y + 6), (x + 10, y + 6)], fill=255, width=1)
+    draw.line([(x + 3, y + 9), (x + 11, y + 9)], fill=255, width=1)
+    # Base
+    draw.rectangle([x - 2, y + 16, x + 16, y + 20], fill=0)
+
+
+
     """Draw a dashed road-line decoration band."""
     if ys != 1.0:
         return
@@ -344,9 +422,9 @@ def _render_car_main(loop, draw, image, sx, sy, ys):
         ("Dent", int(86*sx), int(22*sy), str(sd.vulnnbr)),
     ]
     row2 = [
-        ("Fuel", int(8*sx),  int(41*sy), str(sd.crednbr)),
-        ("Gear", int(47*sx), int(41*sy), str(sd.zombiesnbr)),
-        ("Rute", int(86*sx), int(41*sy), str(sd.datanbr)),
+        ("Fuel", int(8*sx),  int(40*sy), str(sd.crednbr)),
+        ("Gear", int(47*sx), int(40*sy), str(sd.zombiesnbr)),
+        ("Rute", int(86*sx), int(40*sy), str(sd.datanbr)),
     ]
     for label, x, y, val in row1 + row2:
         _draw_stat_label_value(draw, x, y, label, val, font)
@@ -383,9 +461,21 @@ def _render_car_main(loop, draw, image, sx, sy, ys):
     _draw_corner_chars(draw, sd, "o", font)
     _draw_comment_lines(draw, sx, sy, ys, sd)
 
-    cx = int((sd.x_center1 + sd.x_center1 + 78) // 2)
-    cy = int(sd.y_bottom1 + 25)
-    _draw_car_large(draw, cx, cy)
+    # Steering wheel in main zone (animated by status)
+    sc = _status_class(sd.ragnarorch_status)
+    fps_map = {"idle": 0.5, "scanning": 1.5, "attacking": 3.0}
+    max_angle_map = {"idle": 10, "scanning": 22, "attacking": 38}
+    n_frames = 16
+    frame = _get_anim_frame(n_frames, fps_map[sc])
+    # Swing angle: triangle wave over frames
+    half = n_frames // 2
+    t = frame if frame < half else n_frames - frame
+    angle = int(max_angle_map[sc] * (t / half)) - 90  # -90 puts top spoke pointing up
+    cx = int(sd.x_center1 + 39)
+    cy = int(sd.y_bottom1 + 33)
+    _draw_steering_wheel(draw, cx, cy, 26, angle)
+    # Traffic cone lower-right of the wheel
+    _draw_traffic_cone(draw, cx + 22, cy + 18)
 
 
 # ---------------------------------------------------------------------------
@@ -450,9 +540,9 @@ def _render_matrix_main(loop, draw, image, sx, sy, ys):
         ("[VLN]", int(86*sx), int(22*sy), str(sd.vulnnbr)),
     ]
     row2 = [
-        ("[CRD]", int(8*sx),  int(41*sy), str(sd.crednbr)),
-        ("[ZMB]", int(47*sx), int(41*sy), str(sd.zombiesnbr)),
-        ("[DAT]", int(86*sx), int(41*sy), str(sd.datanbr)),
+        ("[CRD]", int(8*sx),  int(40*sy), str(sd.crednbr)),
+        ("[ZMB]", int(47*sx), int(40*sy), str(sd.zombiesnbr)),
+        ("[DAT]", int(86*sx), int(40*sy), str(sd.datanbr)),
     ]
     for label, x, y, val in row1 + row2:
         _draw_stat_label_value(draw, x, y, label, val, font)
@@ -492,18 +582,20 @@ def _render_matrix_main(loop, draw, image, sx, sy, ys):
     _draw_corner_chars(draw, sd, "1", font)
     _draw_comment_lines(draw, sx, sy, ys, sd)
 
-    # Large matrix rain block in main zone
+    # Large matrix rain block in main zone (time-based seed for animation)
     mx = sd.x_center1 + 2
     my = sd.y_bottom1 + 2
-    _draw_matrix_rain(draw, mx, my, 74, 74, font, seed=int(sd.targetnbr + sd.vulnnbr) % 100)
+    _draw_matrix_rain(draw, mx, my, 74, 74, font, seed=int(time.time() * 2) % 100)
 
 
 # ---------------------------------------------------------------------------
 # Space theme helpers
 # ---------------------------------------------------------------------------
 
-def _draw_rocket_large(draw, cx, cy):
-    """Draw a large PIL rocket centered at (cx, cy). ~65px tall."""
+def _draw_rocket_large(draw, cx, cy, frame=0):
+    """Draw a large PIL rocket centered at (cx, cy). ~65px tall.
+    frame 0=small flame, 1=medium, 2=large, 3=medium (loops for animation).
+    """
     # Nose cone (triangle)
     draw.polygon([(cx, cy - 32), (cx - 11, cy - 6), (cx + 11, cy - 6)], fill=0)
     # Body
@@ -517,9 +609,12 @@ def _draw_rocket_large(draw, cx, cy):
     draw.polygon([(cx + 11, cy + 8), (cx + 20, cy + 22), (cx + 11, cy + 20)], fill=0)
     # Bottom nozzle
     draw.rectangle([cx - 6, cy + 20, cx + 6, cy + 25], fill=0)
-    # Flame
-    draw.polygon([(cx - 6, cy + 25), (cx, cy + 36), (cx + 6, cy + 25)], fill=0)
-    draw.polygon([(cx - 3, cy + 25), (cx, cy + 30), (cx + 3, cy + 25)], fill=255)
+    # Animated flame: 3 sizes cycling by frame
+    flame_ext = [8, 13, 20, 13][frame % 4]
+    draw.polygon([(cx - 6, cy + 25), (cx, cy + 25 + flame_ext), (cx + 6, cy + 25)], fill=0)
+    # Inner lighter flame
+    inner_ext = max(2, flame_ext - 6)
+    draw.polygon([(cx - 3, cy + 25), (cx, cy + 25 + inner_ext), (cx + 3, cy + 25)], fill=255)
     # Stars around
     for sx2, sy2 in [(-28, -25), (22, -18), (28, 5), (-24, 10), (18, 22)]:
         draw.point((cx + sx2, cy + sy2), fill=0)
@@ -562,9 +657,9 @@ def _render_space_main(loop, draw, image, sx, sy, ys):
         ("Thrt", int(86*sx), int(22*sy), str(sd.vulnnbr)),
     ]
     row2 = [
-        ("Life", int(8*sx),  int(41*sy), str(sd.crednbr)),
-        ("Moon", int(47*sx), int(41*sy), str(sd.zombiesnbr)),
-        ("Prbe", int(86*sx), int(41*sy), str(sd.datanbr)),
+        ("Life", int(8*sx),  int(40*sy), str(sd.crednbr)),
+        ("Moon", int(47*sx), int(40*sy), str(sd.zombiesnbr)),
+        ("Prbe", int(86*sx), int(40*sy), str(sd.datanbr)),
     ]
     for label, x, y, val in row1 + row2:
         _draw_stat_label_value(draw, x, y, label, val, font)
@@ -601,52 +696,86 @@ def _render_space_main(loop, draw, image, sx, sy, ys):
     _draw_corner_chars(draw, sd, ".", font)
     _draw_comment_lines(draw, sx, sy, ys, sd)
 
+    # Animated rocket in main zone
+    sc = _status_class(sd.ragnarorch_status)
+    fps_map = {"idle": 0.8, "scanning": 1.5, "attacking": 2.5}
+    frame = _get_anim_frame(4, fps_map[sc])
     cx = int((sd.x_center1 + sd.x_center1 + 78) // 2)
     cy = int(sd.y_bottom1 + 30)
-    _draw_rocket_large(draw, cx, cy)
+    _draw_rocket_large(draw, cx, cy, frame=frame)
 
 
 # ---------------------------------------------------------------------------
 # Ghost theme helpers
 # ---------------------------------------------------------------------------
 
-def _draw_ghost_large(draw, cx, cy):
-    """Draw a large PIL Pac-Man ghost centered at (cx, cy). ~65px tall."""
-    # Dome head
-    draw.ellipse([cx - 20, cy - 32, cx + 20, cy + 5], fill=0)
-    # Body rectangle
-    draw.rectangle([cx - 20, cy - 5, cx + 20, cy + 28], fill=0)
-    # Wavy bottom (3 scallops)
-    draw.polygon([
-        (cx - 20, cy + 28),
-        (cx - 13, cy + 20),
-        (cx - 6,  cy + 28),
-        (cx + 1,  cy + 20),
-        (cx + 8,  cy + 28),
-        (cx + 15, cy + 20),
-        (cx + 20, cy + 28),
-    ], fill=255)
-    # Eyes (whites)
-    draw.ellipse([cx - 14, cy - 24, cx - 4, cy - 12], fill=255)
-    draw.ellipse([cx + 4,  cy - 24, cx + 14, cy - 12], fill=255)
-    # Pupils
-    draw.ellipse([cx - 11, cy - 21, cx - 7, cy - 16], fill=0)
-    draw.ellipse([cx + 7,  cy - 21, cx + 11, cy - 16], fill=0)
-    # Hands (side bumps)
-    draw.ellipse([cx - 26, cy - 4, cx - 16, cy + 8], fill=0)
-    draw.ellipse([cx + 16,  cy - 4, cx + 26, cy + 8], fill=0)
+def _draw_ghost_large(draw, cx, cy, frame=0, attacking=False):
+    """Draw a Snapchat-style ghost centered at (cx, cy). ~60px tall.
+
+    White rounded oval body, 4 scalloped bottom bumps, solid dot eyes, gentle smile.
+    Bobs ±3px by frame. Attacking: angry slanted brows.
+    """
+    # Bob offset
+    bob = 3 if (frame % 2 == 1) else 0
+    cy = cy + bob
+
+    # Body: filled white oval with black outline
+    bw, bh = 38, 44
+    draw.ellipse([cx - bw, cy - bh, cx + bw, cy + 10], fill=255, outline=0, width=2)
+
+    # Cover bottom of ellipse to attach scallops cleanly
+    draw.rectangle([cx - bw, cy, cx + bw, cy + 12], fill=255)
+    draw.line([(cx - bw, cy), (cx + bw, cy)], fill=0, width=2)  # waist line
+
+    # 4 scalloped bumps at bottom (white semi-circles over black baseline)
+    bump_r = 9
+    bump_y_top = cy + 4
+    bump_centers_x = [cx - 27, cx - 9, cx + 9, cx + 27]
+    # Black baseline rectangle to give scallops their background
+    draw.rectangle([cx - bw - 1, bump_y_top, cx + bw + 1, cy + 14], fill=0)
+    for bcx in bump_centers_x:
+        draw.ellipse([bcx - bump_r, bump_y_top, bcx + bump_r, bump_y_top + bump_r * 2],
+                     fill=255, outline=0, width=2)
+    # Redraw outline arcs to clean up
+    draw.line([(cx - bw, bump_y_top), (cx - bw, cy)], fill=0, width=2)
+    draw.line([(cx + bw, bump_y_top), (cx + bw, cy)], fill=0, width=2)
+
+    # Solid dot eyes (Snapchat style — no whites, just dark dots)
+    eye_y = cy - bh + 22
+    draw.ellipse([cx - 16, eye_y - 7, cx - 6, eye_y + 3], fill=0)
+    draw.ellipse([cx + 6,  eye_y - 7, cx + 16, eye_y + 3], fill=0)
+    # Tiny white glint on each eye
+    draw.point((cx - 13, eye_y - 5), fill=255)
+    draw.point((cx + 9, eye_y - 5), fill=255)
+
+    # Angry brows when attacking
+    if attacking:
+        draw.line([(cx - 17, eye_y - 11), (cx - 5, eye_y - 8)], fill=0, width=2)
+        draw.line([(cx + 5, eye_y - 8), (cx + 17, eye_y - 11)], fill=0, width=2)
+
+    # Gentle smile arc (3 segments)
+    smile_y = cy - bh + 35
+    draw.arc([cx - 12, smile_y - 4, cx + 12, smile_y + 4], start=10, end=170, fill=0, width=2)
 
 
 def _draw_ghost_small(draw, x, y):
-    """Small ghost ~20px for status zone."""
-    cx, cy = x + 10, y + 12
-    draw.ellipse([cx - 8, cy - 12, cx + 8, cy + 2], fill=0)
-    draw.rectangle([cx - 8, cy - 2, cx + 8, cy + 8], fill=0)
-    draw.polygon([(cx-8, cy+8), (cx-5, cy+4), (cx-1, cy+8), (cx+3, cy+4), (cx+8, cy+8)], fill=255)
-    draw.ellipse([cx - 6, cy - 10, cx - 2, cy - 5], fill=255)
-    draw.ellipse([cx + 2,  cy - 10, cx + 6, cy - 5], fill=255)
-    draw.ellipse([cx - 5, cy - 9, cx - 3, cy - 6], fill=0)
-    draw.ellipse([cx + 3,  cy - 9, cx + 5, cy - 6], fill=0)
+    """Small Snapchat-style ghost ~20px for status zone."""
+    cx, cy = x + 10, y + 11
+    # Body
+    draw.ellipse([cx - 8, cy - 12, cx + 8, cy + 2], fill=255, outline=0)
+    draw.rectangle([cx - 8, cy - 2, cx + 8, cy + 5], fill=255)
+    draw.line([(cx - 8, cy - 2), (cx + 8, cy - 2)], fill=0, width=1)
+    # Scallop bumps (2 bumps for small size)
+    for bx in (cx - 4, cx + 4):
+        draw.ellipse([bx - 4, cy + 2, bx + 4, cy + 10], fill=255, outline=0)
+    draw.rectangle([cx - 8, cy + 2, cx + 8, cy + 6], fill=0)
+    for bx in (cx - 4, cx + 4):
+        draw.ellipse([bx - 4, cy + 2, bx + 4, cy + 10], fill=255, outline=0)
+    # Eyes
+    draw.ellipse([cx - 6, cy - 9, cx - 2, cy - 5], fill=0)
+    draw.ellipse([cx + 2, cy - 9, cx + 6, cy - 5], fill=0)
+
+
 
 
 def _draw_wavy_band(draw, sx, sy, ys, sd):
@@ -674,9 +803,9 @@ def _render_ghost_main(loop, draw, image, sx, sy, ys):
         ("Curs", int(86*sx), int(22*sy), str(sd.vulnnbr)),
     ]
     row2 = [
-        ("Skll", int(8*sx),  int(41*sy), str(sd.crednbr)),
-        ("Eyes", int(47*sx), int(41*sy), str(sd.zombiesnbr)),
-        ("Bats", int(86*sx), int(41*sy), str(sd.datanbr)),
+        ("Skll", int(8*sx),  int(40*sy), str(sd.crednbr)),
+        ("Eyes", int(47*sx), int(40*sy), str(sd.zombiesnbr)),
+        ("Bats", int(86*sx), int(40*sy), str(sd.datanbr)),
     ]
     for label, x, y, val in row1 + row2:
         _draw_stat_label_value(draw, x, y, label, val, font)
@@ -713,9 +842,14 @@ def _render_ghost_main(loop, draw, image, sx, sy, ys):
     _draw_corner_chars(draw, sd, "~", font)
     _draw_comment_lines(draw, sx, sy, ys, sd)
 
+    # Animated Snapchat-style ghost in main zone
+    sc = _status_class(sd.ragnarorch_status)
+    fps_map = {"idle": 1.0, "scanning": 1.5, "attacking": 2.5}
+    frame = _get_anim_frame(4, fps_map[sc])
+    attacking = (sc == "attacking")
     cx = int((sd.x_center1 + sd.x_center1 + 78) // 2)
     cy = int(sd.y_bottom1 + 33)
-    _draw_ghost_large(draw, cx, cy)
+    _draw_ghost_large(draw, cx, cy, frame=frame, attacking=attacking)
 
 
 # ---------------------------------------------------------------------------
