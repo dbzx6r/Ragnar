@@ -136,7 +136,15 @@ class WiFiManager:
             self.max_connection_attempts = config.get('wifi_max_attempts', 3)
             
             self.logger.info(f"Wi-Fi config loaded: {len(self.known_networks)} known networks")
-            
+
+            # Re-apply home network priority on every startup so NM always prefers home
+            home_ssid = config.get('home_network_ssid', '').strip()
+            if home_ssid:
+                try:
+                    self.set_home_network_priority(home_ssid)
+                except Exception as e:
+                    self.logger.warning(f"Startup home network priority apply failed: {e}")
+
         except Exception as e:
             self.logger.error(f"Error loading Wi-Fi config: {e}")
 
