@@ -22,6 +22,11 @@ from logger import Logger
 from db_manager import get_db
 from wifi_interfaces import gather_wifi_interfaces, get_active_ethernet_interface
 
+try:
+    import captive_portal as _captive_portal_module
+except ImportError:
+    _captive_portal_module = None
+
 
 class WiFiManager:
     """Manages Wi-Fi connections, AP mode, and configuration for Ragnar"""
@@ -259,6 +264,8 @@ class WiFiManager:
             except Exception as exc:
                 self.logger.warning(f"Failed to propagate network change to storage manager: {exc}")
         self._apply_auto_incognito(ssid)
+        # Check for captive portal in background so we don't block the connection flow
+        threading.Thread(target=self._check_captive_portal, daemon=True).start()
 
     def _apply_auto_incognito(self, ssid):
         """Auto-enable/disable incognito mode based on whether we're on the home network."""
@@ -268,8 +275,12 @@ class WiFiManager:
                 self.logger.debug("Auto-incognito: disabled (auto_incognito_on_away=False)")
                 return
             home = cfg.get('home_network_ssid', '').strip()
+            # Require an explicitly configured home network — never trigger on unconfigured device
             if not home:
-                self.logger.debug("Auto-incognito: no home network set")
+                self.logger.debug("Auto-incognito: skipped (home_network_ssid not configured)")
+                return
+            if not ssid:
+                self.logger.debug("Auto-incognito: skipped (no current SSID)")
                 return
             # Normalize both sides: collapse any underscore/space differences
             def _norm(s):
@@ -295,6 +306,57 @@ class WiFiManager:
                 self.logger.info(f"Auto-incognito: no transition needed (on_home={on_home}, incognito={currently_incognito})")
         except Exception as exc:
             self.logger.warning(f"Auto-incognito check failed: {exc}")
+
+    def _check_captive_portal(self):
+        """Probe for a captive portal after connecting to a new network.
+
+        Runs in a background daemon thread so it never blocks the connection
+        flow.  Updates shared_data with the detection result and, if
+        auto-auth is enabled, attempts to authenticate through simple
+        click-through portals.
+        """
+        if _captive_portal_module is None:
+            self.logger.debug("Captive portal module not available — skipping check")
+            return
+
+        # Give the OS a moment to finish bringing the interface up before probing
+        time.sleep(3)
+
+        try:
+            self.logger.info("Captive portal: probing connectivity...")
+            result = _captive_portal_module.detect()
+
+            self.shared_data.captive_portal_detected = result["detected"]
+            self.shared_data.captive_portal_url = result.get("portal_url")
+            self.shared_data.captive_portal_authenticated = False
+
+            if not result["detected"]:
+                self.logger.info("Captive portal: no portal detected — network is open")
+                return
+
+            portal_url = result.get("portal_url", "")
+            self.logger.info(f"Captive portal: detected at {portal_url}")
+
+            # Attempt auto-auth only if enabled in config
+            cfg = self.shared_data.config
+            if cfg.get("captive_portal_auto_auth", True) and portal_url:
+                self.logger.info("Captive portal: attempting auto-authentication...")
+                auth_result = _captive_portal_module.try_auto_auth(portal_url)
+                self.logger.info(
+                    f"Captive portal auto-auth: success={auth_result['success']} "
+                    f"method={auth_result['method']} — {auth_result['message']}"
+                )
+                if auth_result["success"]:
+                    self.shared_data.captive_portal_authenticated = True
+                    self.shared_data.captive_portal_detected = False
+            else:
+                self.logger.info(
+                    "Captive portal: auto-auth disabled or no portal URL — "
+                    "manual authentication required"
+                )
+
+        except Exception as exc:
+            self.logger.warning(f"Captive portal check failed: {exc}")
 
     def _trigger_initial_ping_sweep(self, ssid):
         """Schedule a post-connection ping sweep to refresh network data."""

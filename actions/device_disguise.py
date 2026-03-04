@@ -190,3 +190,54 @@ class DeviceDisguise:
         # Clear stored original MAC
         self.shared_data.original_mac = ""
         logger.info("✅ Incognito Mode disabled — identity restored")
+
+
+def restore_on_startup(shared_data):
+    """
+    Called once at Ragnar startup to repair any hostname/MAC state left over
+    from a previous run where incognito was active but the device was powered off
+    before incognito could be cleanly disabled.
+
+    Checks if the current hostname is 'iPhone' or the current MAC matches an Apple
+    OUI, while config says incognito_mode_enabled=False. If so, restores hostname
+    to 'ragnar' and attempts MAC restore from original_mac (if stored in config).
+    """
+    try:
+        cfg = getattr(shared_data, 'config', {})
+        if cfg.get('incognito_mode_enabled', False):
+            # Incognito is intentionally on — do not restore
+            return
+
+        iface = getattr(shared_data, 'default_wifi_interface', 'wlan0')
+
+        # Check hostname
+        rc, hostname, _ = _run(["hostname"])
+        hostname_dirty = rc == 0 and hostname.strip().lower() in ('iphone', 'iphone.local')
+
+        # Check if current MAC is an Apple OUI
+        current_mac = _get_current_mac(iface)
+        apple_ouis_lower = [oui.lower() for oui in APPLE_OUIS]
+        mac_dirty = current_mac and any(current_mac.lower().startswith(oui.lower()) for oui in apple_ouis_lower)
+
+        if not hostname_dirty and not mac_dirty:
+            return  # Nothing to restore
+
+        logger.info("⚠️  Detected stale incognito state from previous run — restoring identity")
+
+        # Restore MAC if possible
+        original_mac = cfg.get('original_mac', '') or getattr(shared_data, 'original_mac', '')
+        if mac_dirty and original_mac:
+            logger.info(f"  Restoring MAC → {original_mac}")
+            _set_mac(iface, original_mac)
+            shared_data.original_mac = ''
+
+        # Restore hostname
+        if hostname_dirty:
+            logger.info("  Restoring hostname → ragnar")
+            _set_hostname("ragnar")
+            _restart_avahi()
+
+        logger.info("✅ Stale incognito state cleaned up")
+
+    except Exception as exc:
+        logger.warning(f"restore_on_startup: failed ({exc})")

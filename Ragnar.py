@@ -34,8 +34,12 @@ from webapp_modern import run_server, handle_exit as handle_exit_web
 from orchestrator import Orchestrator
 from logger import Logger
 from wifi_manager import WiFiManager
-from wpa_sec_integration import WpaSecIntegration
 from env_manager import load_env
+
+try:
+    from wpa_sec_integration import WpaSecIntegration
+except Exception:
+    WpaSecIntegration = None
 
 logger = Logger(name="Ragnar.py", level=logging.DEBUG)
 
@@ -47,7 +51,14 @@ class Ragnar:
         self.orchestrator_thread = None
         self.orchestrator = None
         self.wifi_manager = WiFiManager(shared_data)
-        self.wpa_sec = WpaSecIntegration(shared_data)
+        self.wpa_sec = WpaSecIntegration(shared_data) if WpaSecIntegration else None
+
+        # Restore any stale incognito hostname/MAC state from previous run
+        try:
+            from actions.device_disguise import restore_on_startup
+            restore_on_startup(shared_data)
+        except Exception as _e:
+            logger.warning(f"restore_on_startup skipped: {_e}")
 
         # Set reference to this instance in shared_data for other modules
         self.shared_data.ragnar_instance = self
@@ -92,7 +103,8 @@ class Ragnar:
         logger.info("Wi-Fi management system started")
 
         # Start wpa-sec integration (polls for cracked WiFi passwords)
-        self.wpa_sec.start()
+        if self.wpa_sec:
+            self.wpa_sec.start()
         
         # Main loop to keep Ragnar running
         logger.info("Entering main Ragnar loop...")
@@ -176,7 +188,7 @@ class Ragnar:
             self.wifi_manager.stop()
 
         # Stop wpa-sec poller
-        if hasattr(self, 'wpa_sec'):
+        if hasattr(self, 'wpa_sec') and self.wpa_sec:
             self.wpa_sec.stop()
         
         # Set exit flags

@@ -1004,8 +1004,9 @@ EOF
 
     if [ -n "$wipe_exec" ]; then
         # Prefix with - so wipe_epd failure does not block service start
+        # Use timeout to prevent a hung SPI/GPIO call from stalling boot indefinitely
         cat >> /etc/systemd/system/ragnar.service << EOF
-ExecStartPre=-/usr/bin/python3 -OO /home/ragnar/Ragnar/wipe_epd.py
+ExecStartPre=-/usr/bin/timeout 20 /usr/bin/python3 -OO /home/ragnar/Ragnar/wipe_epd.py
 EOF
     fi
 
@@ -1017,6 +1018,7 @@ StandardError=inherit
 Restart=always
 RestartSec=3
 User=root
+TimeoutStartSec=60
 TimeoutStopSec=10
 KillMode=mixed
 

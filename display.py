@@ -59,13 +59,10 @@ class Display:
 
         try:
             self.epd_helper = self.shared_data.epd_helper
-            self.epd_helper.init_full_update()
-            self.epd_helper.clear()
             self.epd_helper.init_partial_update()
             logger.info("Display initialization complete.")
         except Exception as e:
             logger.error(f"Error during display initialization: {e}")
-            raise
 
         self.main_image_thread = threading.Thread(target=self.update_main_image)
         self.main_image_thread.daemon = True
@@ -1257,6 +1254,15 @@ class Display:
                     image.paste(self.shared_data.usb, (int(90 * self.scale_factor_x), int(4 * self.scale_factor_y)))
                 if self.shared_data.config.get('incognito_mode_enabled', False):
                     pass  # incognito indicated via viking mask (see ragnarstatusimage below)
+                if (getattr(self.shared_data, 'captive_portal_detected', False)
+                        and not getattr(self.shared_data, 'captive_portal_authenticated', False)):
+                    # Show "PORTAL" in the header when behind an unauthenticated captive portal
+                    draw.text(
+                        (int(3 * self.scale_factor_x), int(14 * self.scale_factor_y)),
+                        "PORTAL",
+                        font=self.shared_data.font_arial9,
+                        fill=0,
+                    )
 
                 # Battery percentage (PiSugar) - flush right in header
                 if _pisugar_available:
