@@ -245,7 +245,7 @@ def _draw_snow_scene(draw, zone_x, zone_y, zone_w, zone_h, status, frame):
             draw.line([(fx + arm - 1, fy - arm + 1), (fx - arm + 1, fy + arm - 1)], fill=0, width=1)
 
 
-
+def _draw_ice_band(draw, sx, sy, ys, sd):
     """Draw a dotted ice-crystal decorative band (replaces frise for penguin theme)."""
     if ys != 1.0:
         return
@@ -399,7 +399,7 @@ def _draw_traffic_cone(draw, x, y):
     draw.rectangle([x - 2, y + 16, x + 16, y + 20], fill=0)
 
 
-
+def _draw_road_band(draw, sx, sy, ys, sd):
     """Draw a dashed road-line decoration band."""
     if ys != 1.0:
         return
@@ -710,70 +710,87 @@ def _render_space_main(loop, draw, image, sx, sy, ys):
 # ---------------------------------------------------------------------------
 
 def _draw_ghost_large(draw, cx, cy, frame=0, attacking=False):
-    """Draw a Snapchat-style ghost centered at (cx, cy). ~60px tall.
+    """Draw a Snapchat-style ghost centered at (cx, cy). ~55px tall.
 
-    White rounded oval body, 4 scalloped bottom bumps, solid dot eyes, gentle smile.
-    Bobs ±3px by frame. Attacking: angry slanted brows.
+    Single filled-white polygon: dome top, straight sides, connected wavy
+    downward bumps at bottom. Solid dot eyes, smile. Bobs by frame.
     """
-    # Bob offset
-    bob = 3 if (frame % 2 == 1) else 0
-    cy = cy + bob
+    bob = 3 if (frame % 2 == 0) else 0
+    cy -= bob
 
-    # Body: filled white oval with black outline
-    bw, bh = 38, 44
-    draw.ellipse([cx - bw, cy - bh, cx + bw, cy + 10], fill=255, outline=0, width=2)
+    r = 26           # half-width of body
+    dome_cy = cy - 14  # y-center of the dome circle (radius r above equator)
+    side_bot = cy + 8  # y where sides end and bumpy bottom begins
+    n_bumps = 4
+    bump_r = r // n_bumps  # 6px each, 4 bumps span full 2r width exactly
 
-    # Cover bottom of ellipse to attach scallops cleanly
-    draw.rectangle([cx - bw, cy, cx + bw, cy + 12], fill=255)
-    draw.line([(cx - bw, cy), (cx + bw, cy)], fill=0, width=2)  # waist line
+    pts = []
 
-    # 4 scalloped bumps at bottom (white semi-circles over black baseline)
-    bump_r = 9
-    bump_y_top = cy + 4
-    bump_centers_x = [cx - 27, cx - 9, cx + 9, cx + 27]
-    # Black baseline rectangle to give scallops their background
-    draw.rectangle([cx - bw - 1, bump_y_top, cx + bw + 1, cy + 14], fill=0)
-    for bcx in bump_centers_x:
-        draw.ellipse([bcx - bump_r, bump_y_top, bcx + bump_r, bump_y_top + bump_r * 2],
-                     fill=255, outline=0, width=2)
-    # Redraw outline arcs to clean up
-    draw.line([(cx - bw, bump_y_top), (cx - bw, cy)], fill=0, width=2)
-    draw.line([(cx + bw, bump_y_top), (cx + bw, cy)], fill=0, width=2)
+    # 1. Dome arc: right (cx+r, dome_cy) → top → left (cx-r, dome_cy)
+    #    y = dome_cy - r*sin(a),  x = cx + r*cos(a),  a = 0° → 180°
+    for i in range(24):
+        a = math.radians(i * (180 / 23))
+        pts.append((cx + int(r * math.cos(a)), dome_cy - int(r * math.sin(a))))
 
-    # Solid dot eyes (Snapchat style — no whites, just dark dots)
-    eye_y = cy - bh + 22
-    draw.ellipse([cx - 16, eye_y - 7, cx - 6, eye_y + 3], fill=0)
-    draw.ellipse([cx + 6,  eye_y - 7, cx + 16, eye_y + 3], fill=0)
-    # Tiny white glint on each eye
-    draw.point((cx - 13, eye_y - 5), fill=255)
-    draw.point((cx + 9, eye_y - 5), fill=255)
+    # 2. Left side down
+    pts.append((cx - r, side_bot))
 
-    # Angry brows when attacking
+    # 3. Wavy bottom: n_bumps half-circles curving DOWN, left → right
+    for i in range(n_bumps):
+        bcx = cx - r + (2 * i + 1) * bump_r
+        for j in range(14):
+            a = math.radians(180 - j * (180 / 13))
+            pts.append((bcx + int(bump_r * math.cos(a)),
+                        side_bot + int(bump_r * math.sin(a))))
+
+    # 4. Right side back up to dome equator
+    pts.append((cx + r, dome_cy))
+
+    draw.polygon(pts, fill=255, outline=0)
+
+    # Eyes: solid black dots, placed in upper-middle of body
+    eye_y = dome_cy + 10
+    eye_r = 5
+    draw.ellipse([cx - 13 - eye_r, eye_y - eye_r, cx - 13 + eye_r, eye_y + eye_r], fill=0)
+    draw.ellipse([cx + 13 - eye_r, eye_y - eye_r, cx + 13 + eye_r, eye_y + eye_r], fill=0)
+
+    # Attacking: angry inward-slanting brows
     if attacking:
-        draw.line([(cx - 17, eye_y - 11), (cx - 5, eye_y - 8)], fill=0, width=2)
-        draw.line([(cx + 5, eye_y - 8), (cx + 17, eye_y - 11)], fill=0, width=2)
+        draw.line([(cx - 18, eye_y - 9), (cx - 8, eye_y - 6)], fill=0, width=2)
+        draw.line([(cx + 8, eye_y - 6), (cx + 18, eye_y - 9)], fill=0, width=2)
 
-    # Gentle smile arc (3 segments)
-    smile_y = cy - bh + 35
-    draw.arc([cx - 12, smile_y - 4, cx + 12, smile_y + 4], start=10, end=170, fill=0, width=2)
+    # Gentle smile
+    smile_cy = eye_y + 10
+    draw.arc([cx - 10, smile_cy - 3, cx + 10, smile_cy + 5], start=15, end=165, fill=0, width=2)
 
 
 def _draw_ghost_small(draw, x, y):
     """Small Snapchat-style ghost ~20px for status zone."""
-    cx, cy = x + 10, y + 11
-    # Body
-    draw.ellipse([cx - 8, cy - 12, cx + 8, cy + 2], fill=255, outline=0)
-    draw.rectangle([cx - 8, cy - 2, cx + 8, cy + 5], fill=255)
-    draw.line([(cx - 8, cy - 2), (cx + 8, cy - 2)], fill=0, width=1)
-    # Scallop bumps (2 bumps for small size)
-    for bx in (cx - 4, cx + 4):
-        draw.ellipse([bx - 4, cy + 2, bx + 4, cy + 10], fill=255, outline=0)
-    draw.rectangle([cx - 8, cy + 2, cx + 8, cy + 6], fill=0)
-    for bx in (cx - 4, cx + 4):
-        draw.ellipse([bx - 4, cy + 2, bx + 4, cy + 10], fill=255, outline=0)
-    # Eyes
-    draw.ellipse([cx - 6, cy - 9, cx - 2, cy - 5], fill=0)
-    draw.ellipse([cx + 2, cy - 9, cx + 6, cy - 5], fill=0)
+    cx, cy = x + 10, y + 10
+    r = 9
+    dome_cy = cy - 5
+    side_bot = cy + 2
+    n_bumps = 3
+    bump_r = r // n_bumps  # 3px each — 3 bumps span width 18 = 2*r
+
+    pts = []
+    for i in range(13):
+        a = math.radians(i * (180 / 12))
+        pts.append((cx + int(r * math.cos(a)), dome_cy - int(r * math.sin(a))))
+    pts.append((cx - r, side_bot))
+    for i in range(n_bumps):
+        bcx = cx - r + (2 * i + 1) * bump_r
+        for j in range(7):
+            a = math.radians(180 - j * (180 / 6))
+            pts.append((bcx + int(bump_r * math.cos(a)),
+                        side_bot + int(bump_r * math.sin(a))))
+    pts.append((cx + r, dome_cy))
+    draw.polygon(pts, fill=0, outline=0)
+    # White dot eyes
+    draw.point((cx - 4, dome_cy + 4), fill=255)
+    draw.point((cx + 4, dome_cy + 4), fill=255)
+
+
 
 
 
