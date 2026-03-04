@@ -218,6 +218,7 @@
         /* Toggle switch: show green when ON, regardless of Tailwind purge state */
         label > input[type="checkbox"]:checked + div { background-color: #16a34a !important; }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 </head>
 
 <body class="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white min-h-screen">
@@ -248,6 +249,9 @@
                     </button>
                     <button onclick="showTab('network')" class="nav-btn px-4 py-2 rounded-lg hover:bg-slate-700 transition-colors" data-tab="network">
                         Network
+                    </button>
+                    <button onclick="showTab('network-map')" class="nav-btn px-4 py-2 rounded-lg hover:bg-slate-700 transition-colors" data-tab="network-map">
+                        Map
                     </button>
                     <button onclick="showTab('discovered')" class="nav-btn px-4 py-2 rounded-lg hover:bg-slate-700 transition-colors" data-tab="discovered">
                         Discovered
@@ -318,6 +322,7 @@
             <div class="px-2 pt-2 pb-3 space-y-1">
                 <button onclick="showTab('dashboard')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Dashboard</button>
                 <button onclick="showTab('network')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Network</button>
+                <button onclick="showTab('network-map')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Network Map</button>
                 <button onclick="showTab('discovered')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Discovered</button>
                 <button onclick="showTab('credentials')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Credentials</button>
                 <button onclick="showTab('pentest')"
@@ -849,6 +854,23 @@
             </div>
         </div>
         
+        <!-- Network Map Tab -->
+        <div id="network-map-tab" class="tab-content hidden">
+            <div class="glass rounded-xl p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <h2 class="text-2xl font-bold">Network Map</h2>
+                        <p class="text-sm text-gray-400">Interactive force-directed graph of discovered hosts</p>
+                    </div>
+                    <div class="flex items-center gap-4">
+                        <!-- Legend -->
+                        <div class="flex items-center gap-3 text-xs text-gray-400">
+                            <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-full bg-slate-500"></span> No data</span>
+                            <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-full bg-green-500"></span> Low</span>
+                            <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-full bg-amber-500"></span> Medium</span>
+                            <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-full bg-red-500"></span> High</span>
+                        </div>
+                        <button onclick="refreshNetworkMap()" class="bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-4 py-2 rounded-lg transition-colors text-sm">
         <!-- Credentials Tab -->
         <div id="credentials-tab" class="tab-content hidden">
             <div class="glass rounded-xl p-6">
@@ -866,6 +888,16 @@
                         </button>
                     </div>
                 </div>
+                <!-- Tooltip -->
+                <div id="map-tooltip" class="absolute z-50 bg-slate-800 border border-slate-600 rounded-lg p-3 text-sm pointer-events-none hidden max-w-xs"></div>
+                <!-- SVG canvas -->
+                <div id="network-map-container" class="w-full rounded-lg bg-slate-950 border border-slate-700" style="height:600px;position:relative;">
+                    <div id="network-map-loading" class="flex items-center justify-center h-full text-gray-400">
+                        <p>Loading network map...</p>
+                    </div>
+                    <svg id="network-map-svg" class="w-full h-full" style="display:none;"></svg>
+                </div>
+                <p class="text-xs text-gray-500 mt-2">Click a node to open host details. Scroll to zoom. Drag to pan.</p>
 
                 <!-- Stats row -->
                 <div id="cred-stats" class="grid grid-cols-3 sm:grid-cols-7 gap-3 mb-6"></div>

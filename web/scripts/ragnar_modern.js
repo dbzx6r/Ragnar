@@ -1080,6 +1080,8 @@ async function loadTabData(tabName) {
         case 'adv-vuln':
             loadAdvancedVulnData(); // Non-blocking - tab shows immediately, data fills in
             break;
+        case 'network-map':
+            if (!_mapInitialized) { _mapInitialized = true; loadNetworkMap(); }
         case 'credentials':
             loadCredentials();
             break;
@@ -15220,6 +15222,167 @@ async function deleteTargetCredential(targetHost) {
     }
 }
 
+// ── Network Map (D3 force graph) ────────────────────────────────
+let _mapSimulation = null;
+let _mapInitialized = false;
+
+function riskScore(host, credIPs) {
+    const ports = host.ports ? host.ports.length : 0;
+    const hasCreds = credIPs.has(host.ip) ? 5 : 0;
+    const degraded = host.status === 'degraded' ? 3 : 0;
+    return ports + hasCreds + degraded;
+}
+
+function riskColor(score) {
+    if (score === 0) return '#64748b';
+    if (score <= 3) return '#22c55e';
+    if (score <= 8) return '#f59e0b';
+    return '#ef4444';
+}
+
+async function loadNetworkMap() {
+    if (typeof d3 === 'undefined') {
+        document.getElementById('network-map-loading').innerHTML = '<p class="text-red-400">D3.js failed to load. Check your internet connection.</p>';
+        return;
+    }
+
+    document.getElementById('network-map-loading').style.display = 'flex';
+    document.getElementById('network-map-svg').style.display = 'none';
+
+    try {
+        const [netResp, credResp] = await Promise.all([
+            networkAwareFetch('/api/network'),
+            networkAwareFetch('/api/credentials')
+        ]);
+        const hosts = await netResp.json();
+        const creds = await credResp.json();
+
+        // Build set of IPs that have credentials
+        const credIPs = new Set();
+        Object.values(creds).forEach(arr => arr.forEach(c => { if (c.ip) credIPs.add(c.ip); }));
+
+        // Build graph nodes + links
+        // Central "Ragnar" node + one node per host
+        const nodes = [{ id: '__ragnar__', label: 'Ragnar', isCenter: true, score: -1 }];
+        hosts.forEach(h => {
+            nodes.push({
+                id: h.ip,
+                label: h.hostname || h.ip,
+                ip: h.ip,
+                status: h.status,
+                ports: h.ports || [],
+                score: riskScore(h, credIPs),
+                isCenter: false
+            });
+        });
+
+        const links = hosts.map(h => ({ source: '__ragnar__', target: h.ip }));
+
+        renderNetworkMap(nodes, links);
+    } catch(err) {
+        document.getElementById('network-map-loading').innerHTML = `<p class="text-red-400">Error loading map: ${escapeHtml(err.message)}</p>`;
+    }
+}
+
+function renderNetworkMap(nodes, links) {
+    const container = document.getElementById('network-map-container');
+    const svgEl = document.getElementById('network-map-svg');
+    const loading = document.getElementById('network-map-loading');
+    const tooltip = document.getElementById('map-tooltip');
+
+    if (!container || !svgEl) return;
+
+    const W = container.clientWidth || 800;
+    const H = container.clientHeight || 600;
+
+    // Stop old simulation
+    if (_mapSimulation) _mapSimulation.stop();
+
+    // Clear old SVG
+    d3.select(svgEl).selectAll('*').remove();
+    svgEl.setAttribute('viewBox', `0 0 ${W} ${H}`);
+
+    const svg = d3.select(svgEl);
+
+    // Zoom
+    const g = svg.append('g');
+    svg.call(d3.zoom().scaleExtent([0.2, 4]).on('zoom', e => g.attr('transform', e.transform)));
+
+    // Links
+    const link = g.append('g')
+        .selectAll('line')
+        .data(links)
+        .join('line')
+        .attr('stroke', '#334155')
+        .attr('stroke-width', 1.5)
+        .attr('stroke-opacity', 0.6);
+
+    // Node groups
+    const node = g.append('g')
+        .selectAll('g')
+        .data(nodes)
+        .join('g')
+        .attr('cursor', d => d.isCenter ? 'default' : 'pointer')
+        .call(d3.drag()
+            .on('start', (event, d) => { if (!event.active) _mapSimulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+            .on('drag',  (event, d) => { d.fx = event.x; d.fy = event.y; })
+            .on('end',   (event, d) => { if (!event.active) _mapSimulation.alphaTarget(0); d.fx = null; d.fy = null; }))
+        .on('click', (event, d) => { if (!d.isCenter && d.ip) openHostPanel(d.ip); })
+        .on('mouseover', (event, d) => {
+            if (d.isCenter) return;
+            tooltip.classList.remove('hidden');
+            tooltip.innerHTML = `<div class="font-semibold font-mono mb-1">${escapeHtml(d.ip)}</div>
+                ${d.label !== d.ip ? `<div class="text-gray-400 text-xs mb-1">${escapeHtml(d.label)}</div>` : ''}
+                <div class="text-xs">Status: <span class="${d.status === 'alive' ? 'text-green-400' : 'text-yellow-400'}">${escapeHtml(d.status || 'unknown')}</span></div>
+                <div class="text-xs">Ports: ${d.ports.length}</div>
+                <div class="text-xs">Risk score: ${d.score}</div>
+                <div class="text-xs text-blue-400 mt-1">Click to view details</div>`;
+        })
+        .on('mousemove', (event) => {
+            const rect = container.getBoundingClientRect();
+            tooltip.style.left = (event.clientX - rect.left + 12) + 'px';
+            tooltip.style.top  = (event.clientY - rect.top  - 10) + 'px';
+        })
+        .on('mouseout', () => tooltip.classList.add('hidden'));
+
+    // Circles
+    node.append('circle')
+        .attr('r', d => d.isCenter ? 18 : Math.max(10, Math.min(22, 10 + d.score)))
+        .attr('fill', d => d.isCenter ? '#6366f1' : riskColor(d.score))
+        .attr('stroke', '#0f172a')
+        .attr('stroke-width', 2)
+        .attr('fill-opacity', 0.9);
+
+    // Labels
+    node.append('text')
+        .attr('dy', d => (d.isCenter ? 18 : Math.max(10, Math.min(22, 10 + d.score))) + 12)
+        .attr('text-anchor', 'middle')
+        .attr('fill', '#94a3b8')
+        .attr('font-size', '10px')
+        .text(d => d.isCenter ? 'Ragnar' : (d.label || d.ip));
+
+    // Force simulation
+    _mapSimulation = d3.forceSimulation(nodes)
+        .force('link', d3.forceLink(links).id(d => d.id).distance(100))
+        .force('charge', d3.forceManyBody().strength(-300))
+        .force('center', d3.forceCenter(W / 2, H / 2))
+        .force('collision', d3.forceCollide(35))
+        .on('tick', () => {
+            link
+                .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+                .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+            node.attr('transform', d => `translate(${d.x},${d.y})`);
+        });
+
+    loading.style.display = 'none';
+    svgEl.style.display = 'block';
+}
+
+function refreshNetworkMap() {
+    _mapInitialized = false;
+    loadNetworkMap();
+}
+
 // Helper function to escape HTML
 function escapeHtml(text) {
     if (!text) return '';
@@ -15267,3 +15430,5 @@ window.clearCredentialForm = clearCredentialForm;
 window.loadSavedCredentialsList = loadSavedCredentialsList;
 window.editTargetCredential = editTargetCredential;
 window.deleteTargetCredential = deleteTargetCredential;
+window.loadNetworkMap = loadNetworkMap;
+window.refreshNetworkMap = refreshNetworkMap;
