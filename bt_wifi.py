@@ -21,7 +21,7 @@ import threading
 logger = logging.getLogger(__name__)
 
 # Stealth BT device name — common enough to blend in on any BT scan
-BT_DEVICE_NAME = "JBL Flip 6"
+BT_DEVICE_NAME = "ragnar"
 
 # RFCOMM channel for serial port profile
 RFCOMM_CHANNEL = 1
