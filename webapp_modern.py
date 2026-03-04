@@ -3612,6 +3612,177 @@ def get_network():
             return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/network/topology')
+def get_network_topology():
+    """Build a topology graph with gateway as center, device types classified, and links inferred."""
+    with _network_context_from_request():
+        try:
+            from device_classifier import classify_device, DEVICE_ICONS, DEVICE_TYPE_LABELS, DEVICE_TYPE_COLORS
+
+            hosts = shared_data.db.get_all_hosts()
+            gw = getattr(shared_data, 'gateway_info', {}) or {}
+            gateway_ip = gw.get('gateway_ip')
+            ragnar_ip = gw.get('ragnar_ip')
+            subnet = gw.get('subnet')
+            interface = gw.get('interface')
+
+            # If no gateway info yet, try to detect from netifaces directly
+            if not gateway_ip:
+                try:
+                    import netifaces
+                    gws = netifaces.gateways()
+                    gw_tuple = gws.get('default', {}).get(netifaces.AF_INET)
+                    if gw_tuple:
+                        gateway_ip = gw_tuple[0]
+                        interface = gw_tuple[1]
+                        iface_addrs = netifaces.ifaddresses(gw_tuple[1]).get(netifaces.AF_INET)
+                        if iface_addrs:
+                            ragnar_ip = iface_addrs[0]['addr']
+                except Exception:
+                    pass
+
+            # Build credentials set for risk scoring
+            cred_ips = set()
+            try:
+                cred_data = shared_data.db.get_all_credentials() if hasattr(shared_data.db, 'get_all_credentials') else []
+                for c in cred_data:
+                    ip_val = c.get('ip', '')
+                    if ip_val:
+                        cred_ips.add(ip_val)
+            except Exception:
+                pass
+
+            nodes = []
+            node_ids = set()
+            potential_aps = []  # Devices that might be access points
+
+            for host in hosts:
+                ip = host.get('ip', '')
+                if not ip:
+                    continue
+
+                ports_str = host.get('ports', '')
+                ports = [p.strip() for p in ports_str.split(',') if p.strip()] if ports_str else []
+                vendor = host.get('vendor', '') or ''
+                status = host.get('status', 'unknown')
+
+                classification = classify_device(vendor, ports, gateway_ip=gateway_ip, device_ip=ip)
+
+                # Risk scoring (same as existing)
+                port_count = len(ports)
+                has_creds = 5 if ip in cred_ips else 0
+                degraded = 3 if status == 'degraded' else 0
+                risk = port_count + has_creds + degraded
+
+                node = {
+                    'id': ip,
+                    'ip': ip,
+                    'mac': host.get('mac', ''),
+                    'hostname': host.get('hostname', ''),
+                    'vendor': vendor,
+                    'type': classification['device_type'],
+                    'type_label': classification['label'],
+                    'confidence': classification['confidence'],
+                    'ports': ports,
+                    'status': status,
+                    'risk': risk,
+                    'last_seen': host.get('last_seen', ''),
+                    'is_gateway': ip == gateway_ip,
+                    'is_ragnar': ip == ragnar_ip,
+                }
+                nodes.append(node)
+                node_ids.add(ip)
+
+                # Track potential APs: devices with router-like ports that aren't the gateway
+                if classification['device_type'] in ('router', 'access_point') and ip != gateway_ip:
+                    potential_aps.append(node)
+
+            # Ensure gateway is in node list even if not in hosts table
+            if gateway_ip and gateway_ip not in node_ids:
+                gw_vendor = gw.get('gateway_vendor', '')
+                gw_class = classify_device(gw_vendor, ['53', '80', '443'], gateway_ip=gateway_ip, device_ip=gateway_ip)
+                nodes.append({
+                    'id': gateway_ip,
+                    'ip': gateway_ip,
+                    'mac': gw.get('gateway_mac', ''),
+                    'hostname': 'Gateway',
+                    'vendor': gw_vendor,
+                    'type': 'router',
+                    'type_label': 'Router/Gateway',
+                    'confidence': 1.0,
+                    'ports': [],
+                    'status': 'alive',
+                    'risk': 0,
+                    'last_seen': '',
+                    'is_gateway': True,
+                    'is_ragnar': False,
+                })
+                node_ids.add(gateway_ip)
+
+            # Build links — default: everything connects to gateway
+            links = []
+            ap_macs_prefix = {}
+            for ap in potential_aps:
+                mac = ap.get('mac', '')
+                if mac and len(mac) >= 8:
+                    prefix = mac[:8].lower()
+                    ap_macs_prefix[prefix] = ap['ip']
+
+            for node in nodes:
+                if node['is_gateway']:
+                    continue
+                target = gateway_ip or (nodes[0]['ip'] if nodes else None)
+                link_type = 'default'
+
+                # Check if this device should connect to an AP instead
+                mac = node.get('mac', '')
+                if mac and len(mac) >= 8 and not node.get('type') in ('router', 'access_point'):
+                    prefix = mac[:8].lower()
+                    if prefix in ap_macs_prefix and ap_macs_prefix[prefix] != node['ip']:
+                        target = ap_macs_prefix[prefix]
+                        link_type = 'ap_inferred'
+
+                if target:
+                    links.append({
+                        'source': node['ip'],
+                        'target': target,
+                        'type': link_type,
+                    })
+
+            # APs connect to gateway
+            for ap in potential_aps:
+                if gateway_ip:
+                    links.append({
+                        'source': ap['ip'],
+                        'target': gateway_ip,
+                        'type': 'ap_uplink',
+                    })
+
+            result = {
+                'gateway': {
+                    'ip': gateway_ip,
+                    'mac': gw.get('gateway_mac', ''),
+                    'vendor': gw.get('gateway_vendor', ''),
+                },
+                'ragnar': {
+                    'ip': ragnar_ip,
+                    'interface': interface,
+                },
+                'subnet': subnet,
+                'nodes': nodes,
+                'links': links,
+                'device_icons': DEVICE_ICONS,
+                'device_labels': DEVICE_TYPE_LABELS,
+                'device_colors': DEVICE_TYPE_COLORS,
+            }
+            return jsonify(result)
+
+        except Exception as e:
+            logger.error(f"Error building topology: {e}")
+            logger.debug(traceback.format_exc())
+            return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/host/<path:ip>')
 def get_host_detail(ip):
     """Get all aggregated data for a single host"""

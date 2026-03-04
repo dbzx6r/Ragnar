@@ -887,6 +887,7 @@ class SharedData:
         self.orchestrator_should_exit = False
         self.webapp_should_exit = False 
         self.ragnar_instance = None
+        self.gateway_info = {}  # Populated by NetworkScanner.get_gateway_info()
         self.wifichanged = False
         self.bluetooth_active = False
         self.bluetooth_scan_active = False

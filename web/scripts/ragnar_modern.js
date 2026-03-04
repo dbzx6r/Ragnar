@@ -15223,22 +15223,31 @@ async function deleteTargetCredential(targetHost) {
     }
 }
 
-// ── Network Map (D3 force graph) ────────────────────────────────
+// ── Network Map (D3 force graph with topology API) ──────────────
 let _mapSimulation = null;
 let _mapInitialized = false;
-
-function riskScore(host, credIPs) {
-    const ports = host.ports ? host.ports.length : 0;
-    const hasCreds = credIPs.has(host.ip) ? 5 : 0;
-    const degraded = host.status === 'degraded' ? 3 : 0;
-    return ports + hasCreds + degraded;
-}
 
 function riskColor(score) {
     if (score === 0) return '#64748b';
     if (score <= 3) return '#22c55e';
     if (score <= 8) return '#f59e0b';
     return '#ef4444';
+}
+
+function _buildMapLegend(deviceColors, deviceLabels) {
+    const el = document.getElementById('map-legend');
+    if (!el) return;
+    el.innerHTML = '';
+    const order = ['router', 'access_point', 'ragnar', 'workstation', 'server', 'phone', 'printer', 'iot', 'media', 'gaming', 'unknown'];
+    order.forEach(t => {
+        const color = deviceColors[t];
+        const label = deviceLabels[t];
+        if (!color || !label) return;
+        const span = document.createElement('span');
+        span.className = 'flex items-center gap-1';
+        span.innerHTML = `<span class="inline-block w-3 h-3 rounded-full" style="background:${color}"></span> ${escapeHtml(label)}`;
+        el.appendChild(span);
+    });
 }
 
 async function loadNetworkMap() {
@@ -15251,41 +15260,44 @@ async function loadNetworkMap() {
     document.getElementById('network-map-svg').style.display = 'none';
 
     try {
-        const [netResp, credResp] = await Promise.all([
-            networkAwareFetch('/api/network'),
-            networkAwareFetch('/api/credentials')
-        ]);
-        const hosts = await netResp.json();
-        const creds = await credResp.json();
+        const resp = await networkAwareFetch('/api/network/topology');
+        const topo = await resp.json();
+        if (topo.error) throw new Error(topo.error);
 
-        // Build set of IPs that have credentials
-        const credIPs = new Set();
-        Object.values(creds).forEach(arr => arr.forEach(c => { if (c.ip) credIPs.add(c.ip); }));
+        // Build legend
+        _buildMapLegend(topo.device_colors || {}, topo.device_labels || {});
 
-        // Build graph nodes + links
-        // Central "Ragnar" node + one node per host
-        const nodes = [{ id: '__ragnar__', label: 'Ragnar', isCenter: true, score: -1 }];
-        hosts.forEach(h => {
-            nodes.push({
-                id: h.ip,
-                label: h.hostname || h.ip,
-                ip: h.ip,
-                status: h.status,
-                ports: h.ports || [],
-                score: riskScore(h, credIPs),
-                isCenter: false
-            });
-        });
+        // Build D3-compatible nodes (topology API already provides structured data)
+        const nodes = topo.nodes.map(n => ({
+            id: n.ip,
+            ip: n.ip,
+            label: n.hostname || n.ip,
+            mac: n.mac,
+            vendor: n.vendor,
+            type: n.type,
+            type_label: n.type_label,
+            confidence: n.confidence,
+            ports: n.ports || [],
+            status: n.status,
+            risk: n.risk || 0,
+            last_seen: n.last_seen,
+            is_gateway: n.is_gateway,
+            is_ragnar: n.is_ragnar,
+        }));
 
-        const links = hosts.map(h => ({ source: '__ragnar__', target: h.ip }));
+        const links = topo.links.map(l => ({
+            source: l.source,
+            target: l.target,
+            type: l.type,
+        }));
 
-        renderNetworkMap(nodes, links);
+        renderNetworkMap(nodes, links, topo.device_colors || {}, topo.device_icons || {});
     } catch(err) {
         document.getElementById('network-map-loading').innerHTML = `<p class="text-red-400">Error loading map: ${escapeHtml(err.message)}</p>`;
     }
 }
 
-function renderNetworkMap(nodes, links) {
+function renderNetworkMap(nodes, links, deviceColors, deviceIcons) {
     const container = document.getElementById('network-map-container');
     const svgEl = document.getElementById('network-map-svg');
     const loading = document.getElementById('network-map-loading');
@@ -15309,34 +15321,64 @@ function renderNetworkMap(nodes, links) {
     const g = svg.append('g');
     svg.call(d3.zoom().scaleExtent([0.2, 4]).on('zoom', e => g.attr('transform', e.transform)));
 
+    // Link stroke styles by type
+    function linkStroke(d) {
+        if (d.type === 'ap_uplink') return '#8b5cf6';
+        if (d.type === 'ap_inferred') return '#6366f1';
+        return '#334155';
+    }
+    function linkDash(d) {
+        if (d.type === 'ap_inferred') return '4,3';
+        return null;
+    }
+
     // Links
     const link = g.append('g')
         .selectAll('line')
         .data(links)
         .join('line')
-        .attr('stroke', '#334155')
-        .attr('stroke-width', 1.5)
-        .attr('stroke-opacity', 0.6);
+        .attr('stroke', linkStroke)
+        .attr('stroke-width', d => d.type === 'ap_uplink' ? 2 : 1.5)
+        .attr('stroke-opacity', 0.6)
+        .attr('stroke-dasharray', linkDash);
+
+    // Node radius based on type
+    function nodeRadius(d) {
+        if (d.is_gateway) return 22;
+        if (d.is_ragnar) return 20;
+        if (d.type === 'access_point') return 16;
+        if (d.type === 'server') return 15;
+        return 13;
+    }
+
+    // Node color from device type
+    function nodeColor(d) {
+        return deviceColors[d.type] || deviceColors['unknown'] || '#64748b';
+    }
 
     // Node groups
     const node = g.append('g')
         .selectAll('g')
         .data(nodes)
         .join('g')
-        .attr('cursor', d => d.isCenter ? 'default' : 'pointer')
+        .attr('cursor', 'pointer')
         .call(d3.drag()
             .on('start', (event, d) => { if (!event.active) _mapSimulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
             .on('drag',  (event, d) => { d.fx = event.x; d.fy = event.y; })
             .on('end',   (event, d) => { if (!event.active) _mapSimulation.alphaTarget(0); d.fx = null; d.fy = null; }))
-        .on('click', (event, d) => { if (!d.isCenter && d.ip) openHostPanel(d.ip); })
+        .on('click', (event, d) => { if (d.ip) openHostPanel(d.ip); })
         .on('mouseover', (event, d) => {
-            if (d.isCenter) return;
             tooltip.classList.remove('hidden');
+            const riskBadge = d.risk > 8 ? 'text-red-400' : d.risk > 3 ? 'text-amber-400' : d.risk > 0 ? 'text-green-400' : 'text-gray-400';
             tooltip.innerHTML = `<div class="font-semibold font-mono mb-1">${escapeHtml(d.ip)}</div>
                 ${d.label !== d.ip ? `<div class="text-gray-400 text-xs mb-1">${escapeHtml(d.label)}</div>` : ''}
+                ${d.vendor ? `<div class="text-xs text-gray-500">${escapeHtml(d.vendor)}</div>` : ''}
+                <div class="text-xs mt-1"><span style="color:${nodeColor(d)}">${escapeHtml(d.type_label)}</span>${d.confidence < 0.7 ? ' <span class="text-gray-600">(low conf.)</span>' : ''}</div>
                 <div class="text-xs">Status: <span class="${d.status === 'alive' ? 'text-green-400' : 'text-yellow-400'}">${escapeHtml(d.status || 'unknown')}</span></div>
-                <div class="text-xs">Ports: ${d.ports.length}</div>
-                <div class="text-xs">Risk score: ${d.score}</div>
+                <div class="text-xs">Ports: ${d.ports.length}${d.ports.length > 0 && d.ports.length <= 8 ? ' (' + d.ports.join(', ') + ')' : ''}</div>
+                <div class="text-xs">Risk: <span class="${riskBadge}">${d.risk}</span></div>
+                ${d.is_gateway ? '<div class="text-xs text-amber-400 mt-1">Default Gateway</div>' : ''}
+                ${d.is_ragnar ? '<div class="text-xs text-sky-400 mt-1">Ragnar Scanner</div>' : ''}
                 <div class="text-xs text-blue-400 mt-1">Click to view details</div>`;
         })
         .on('mousemove', (event) => {
@@ -15346,28 +15388,62 @@ function renderNetworkMap(nodes, links) {
         })
         .on('mouseout', () => tooltip.classList.add('hidden'));
 
-    // Circles
+    // Outer ring (risk indicator)
     node.append('circle')
-        .attr('r', d => d.isCenter ? 18 : Math.max(10, Math.min(22, 10 + d.score)))
-        .attr('fill', d => d.isCenter ? '#6366f1' : riskColor(d.score))
+        .attr('r', d => nodeRadius(d) + 3)
+        .attr('fill', 'none')
+        .attr('stroke', d => d.risk > 8 ? '#ef4444' : d.risk > 3 ? '#f59e0b' : 'none')
+        .attr('stroke-width', 2)
+        .attr('stroke-opacity', 0.5);
+
+    // Main circle
+    node.append('circle')
+        .attr('r', nodeRadius)
+        .attr('fill', nodeColor)
         .attr('stroke', '#0f172a')
         .attr('stroke-width', 2)
         .attr('fill-opacity', 0.9);
 
+    // Device icon (SVG path inside each node)
+    node.each(function(d) {
+        const iconPath = deviceIcons[d.is_ragnar ? 'ragnar' : d.type] || deviceIcons['unknown'];
+        if (!iconPath) return;
+        const r = nodeRadius(d);
+        const iconScale = r / 16; // icons are 24x24, scale to fit in radius
+        d3.select(this).append('path')
+            .attr('d', iconPath)
+            .attr('fill', '#0f172a')
+            .attr('fill-opacity', 0.6)
+            .attr('transform', `translate(${-12 * iconScale},${-12 * iconScale}) scale(${iconScale})`);
+    });
+
     // Labels
     node.append('text')
-        .attr('dy', d => (d.isCenter ? 18 : Math.max(10, Math.min(22, 10 + d.score))) + 12)
+        .attr('dy', d => nodeRadius(d) + 14)
         .attr('text-anchor', 'middle')
         .attr('fill', '#94a3b8')
         .attr('font-size', '10px')
-        .text(d => d.isCenter ? 'Ragnar' : (d.label || d.ip));
+        .text(d => {
+            if (d.is_gateway) return 'Gateway';
+            if (d.is_ragnar) return 'Ragnar';
+            return d.label || d.ip;
+        });
 
-    // Force simulation
+    // Force simulation — gateway (or first node) pinned at center
+    const gatewayNode = nodes.find(n => n.is_gateway);
+    if (gatewayNode) {
+        gatewayNode.fx = W / 2;
+        gatewayNode.fy = H / 2;
+    }
+
     _mapSimulation = d3.forceSimulation(nodes)
-        .force('link', d3.forceLink(links).id(d => d.id).distance(100))
-        .force('charge', d3.forceManyBody().strength(-300))
+        .force('link', d3.forceLink(links).id(d => d.id).distance(d => {
+            if (d.type === 'ap_uplink') return 80;
+            return 120;
+        }))
+        .force('charge', d3.forceManyBody().strength(-350))
         .force('center', d3.forceCenter(W / 2, H / 2))
-        .force('collision', d3.forceCollide(35))
+        .force('collision', d3.forceCollide(d => nodeRadius(d) + 15))
         .on('tick', () => {
             link
                 .attr('x1', d => d.source.x).attr('y1', d => d.source.y)

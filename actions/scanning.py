@@ -796,6 +796,65 @@ class NetworkScanner:
         except Exception as e:
             self.logger.error(f"Error in get_network: {e}")
 
+    def get_gateway_info(self):
+        """Collect gateway IP, MAC, vendor, interface, and subnet CIDR.
+
+        Stores the result on shared_data.gateway_info so the topology API
+        can place the router at the center of the network map.
+        """
+        info = {"gateway_ip": None, "gateway_mac": None, "gateway_vendor": None,
+                "interface": None, "subnet": None, "ragnar_ip": None}
+        try:
+            if netifaces is None:
+                return info
+            gws = netifaces.gateways()
+            gw_tuple = gws.get("default", {}).get(netifaces.AF_INET)
+            if not gw_tuple:
+                return info
+            info["gateway_ip"] = gw_tuple[0]
+            info["interface"] = gw_tuple[1]
+
+            iface_addrs = netifaces.ifaddresses(gw_tuple[1]).get(netifaces.AF_INET)
+            if iface_addrs:
+                my_ip = iface_addrs[0]["addr"]
+                netmask = iface_addrs[0]["netmask"]
+                cidr = sum(bin(int(x)).count("1") for x in netmask.split("."))
+                info["ragnar_ip"] = my_ip
+                info["subnet"] = str(ipaddress.IPv4Network(f"{my_ip}/{cidr}", strict=False))
+
+            # Resolve gateway MAC from kernel ARP cache
+            try:
+                result = subprocess.run(
+                    ["ip", "neigh", "show", info["gateway_ip"]],
+                    capture_output=True, text=True, timeout=5
+                )
+                for line in result.stdout.strip().splitlines():
+                    parts = line.split()
+                    # Format: 192.168.1.1 dev wlan0 lladdr aa:bb:cc:dd:ee:ff ...
+                    if "lladdr" in parts:
+                        idx = parts.index("lladdr")
+                        if idx + 1 < len(parts):
+                            info["gateway_mac"] = parts[idx + 1]
+                            break
+            except Exception:
+                pass
+
+            # Look up vendor from DB if we have the MAC
+            if info["gateway_mac"]:
+                try:
+                    db = get_db()
+                    host = db.get_host(info["gateway_mac"])
+                    if host:
+                        info["gateway_vendor"] = host.get("vendor", "")
+                except Exception:
+                    pass
+
+            self.shared_data.gateway_info = info
+            self.logger.info(f"Gateway info: {info['gateway_ip']} (MAC={info['gateway_mac']}) via {info['interface']}")
+        except Exception as e:
+            self.logger.debug(f"Could not collect gateway info: {e}")
+        return info
+
     def get_mac_address(self, ip, hostname):
         """
         Retrieves the MAC address for the given IP address and hostname.
@@ -1359,6 +1418,7 @@ class NetworkScanner:
                 job_descriptor = f" for {job.ssid} ({self.arp_scan_interface})"
             self.logger.info(f"Starting Network Scanner{job_descriptor}")
             network = self.get_network()
+            self.get_gateway_info()
             self.shared_data.bjornstatustext2 = str(network)
             portstart = self.shared_data.portstart
             portend = self.shared_data.portend
