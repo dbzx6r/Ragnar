@@ -84,20 +84,29 @@ class EPD:
         epdconfig.digital_write(self.cs_pin, 1)
         
     def ReadBusy(self):
-        while(epdconfig.digital_read(self.busy_pin) == 1):      # 0: idle, 1: busy
-            epdconfig.delay_ms(100)    
+        waited = False
+        for _ in range(500):  # up to 5 seconds
+            if epdconfig.digital_read(self.busy_pin) == 0:  # 0: idle, 1: busy
+                break
+            epdconfig.delay_ms(10)
+            waited = True
+        if not waited:
+            # BUSY pin never asserted (Pi 5 / lgpio) — use fixed fallback delay
+            epdconfig.delay_ms(200)
 
     def TurnOnDisplay(self):
         self.send_command(0x22)
         self.send_data(0xC7)
-        self.send_command(0x20)        
+        self.send_command(0x20)
         self.ReadBusy()
-        
+        epdconfig.delay_ms(100)  # stabilization for Pi 5 when BUSY doesn't assert
+
     def TurnOnDisplayPart(self):
         self.send_command(0x22)
         self.send_data(0x0c)
-        self.send_command(0x20)        
+        self.send_command(0x20)
         self.ReadBusy()
+        epdconfig.delay_ms(100)  # stabilization for Pi 5 when BUSY doesn't assert
         
     def init(self, update):
         if not self.is_initialized:  # Avoid repeated initialization and accumulation of File descriptors #INFINITION
@@ -235,7 +244,7 @@ class EPD:
         buf = [0x00] * self.height * linewidth
         for j in range(0, self.height):
             for i in range(0, linewidth):
-                buf[i + j * linewidth] = ~image[i + j * linewidth]
+        buf[i + j * linewidth] = ~image[i + j * linewidth] & 0xFF
 
         self.send_command(0x24)
         self.send_data2(image)   
