@@ -333,13 +333,25 @@ class Display:
                 logger.error(f"Error updating shared data: {e}")
 
     def display_comment(self, status):
-        """Display the comment based on the status of the ragnarorch."""
+        """Display the comment based on the status of the ragnarorch.
+        
+        If the active display theme has a themed comment pool, use a random
+        phrase from it instead of the default commentaire_ia."""
+        try:
+            _theme = get_theme(self.shared_data.config)
+            _pool = _theme.get("comments", {})
+            if _pool:
+                _phrases = _pool.get(status) or _pool.get("IDLE")
+                if _phrases:
+                    self.shared_data.ragnarsays = random.choice(_phrases)
+                    self.shared_data.ragnarstatustext = self.shared_data.ragnarorch_status
+                    return
+        except Exception:
+            pass
         comment = self.commentaire_ia.get_commentaire(status)
         if comment:
             self.shared_data.ragnarsays = comment
             self.shared_data.ragnarstatustext = self.shared_data.ragnarorch_status
-        else:
-            pass
 
     # # # def is_bluetooth_connected(self):
     # # #     """
@@ -1225,132 +1237,23 @@ class Display:
                     self._sleep_interruptible(current_page)
                     continue
 
-                # === PAGE_MAIN: Default Ragnar display ===
-                # Check PiSugar once per frame for title sizing + battery text
-                _pisugar_available = False
+                # === PAGE_MAIN: Delegate to active theme renderer ===
+                # PiSugar info is needed by the theme header helper
+                self._pisugar_available = False
+                self._ps = None
                 try:
                     _ri = getattr(self.shared_data, 'ragnar_instance', None)
                     _ps = getattr(_ri, 'pisugar_listener', None) if _ri else None
-                    _pisugar_available = _ps and _ps.available
+                    self._pisugar_available = bool(_ps and _ps.available)
+                    self._ps = _ps if self._pisugar_available else None
                 except Exception:
                     pass
+
                 _theme = get_theme(self.shared_data.config)
-                _theme_title = _theme["title"]
-                if _pisugar_available:
-                    draw.text((int(40 * self.scale_factor_x), int(6 * self.scale_factor_y)), _theme_title, font=self.shared_data.font_viking_sm, fill=0)
-                else:
-                    draw.text((int(37 * self.scale_factor_x), int(5 * self.scale_factor_y)), _theme_title, font=self.shared_data.font_viking, fill=0)
-                draw.text((int(110 * self.scale_factor_x), int(170 * self.scale_factor_y)), self.manual_mode_txt, font=self.shared_data.font_arial14, fill=0)
-                
-                # Show AP status or WiFi status in the top-left corner
-                if hasattr(self.shared_data, 'ap_mode_active') and self.shared_data.ap_mode_active:
-                    # Show AP status with client count
-                    ap_text = f"AP"
-                    if hasattr(self.shared_data, 'ap_client_count') and self.shared_data.ap_client_count > 0:
-                        ap_text = f"AP:{self.shared_data.ap_client_count}"
-                    draw.text((int(3 * self.scale_factor_x), int(3 * self.scale_factor_y)), ap_text, font=self.shared_data.font_arial9, fill=0)
-                elif self.shared_data.wifi_connected:
-                    self.render_wifi_wave_indicator(image, draw)
-                # # # if self.shared_data.bluetooth_active:
-                # # #     image.paste(self.shared_data.bluetooth, (int(23 * self.scale_factor_x), int(4 * self.scale_factor_y)))
-                if self.shared_data.pan_connected:
-                    image.paste(self.shared_data.connected, (int(104 * self.scale_factor_x), int(3 * self.scale_factor_y)))
-                if self.shared_data.usb_active:
-                    image.paste(self.shared_data.usb, (int(90 * self.scale_factor_x), int(4 * self.scale_factor_y)))
-                if self.shared_data.config.get('incognito_mode_enabled', False):
-                    pass  # incognito indicated via viking mask (see ragnarstatusimage below)
-                if (getattr(self.shared_data, 'captive_portal_detected', False)
-                        and not getattr(self.shared_data, 'captive_portal_authenticated', False)):
-                    # Show "PORTAL" in the header when behind an unauthenticated captive portal
-                    draw.text(
-                        (int(3 * self.scale_factor_x), int(14 * self.scale_factor_y)),
-                        "PORTAL",
-                        font=self.shared_data.font_arial9,
-                        fill=0,
-                    )
-
-                # Battery percentage (PiSugar) - flush right in header
-                if _pisugar_available:
-                    try:
-                        bat_level = _ps.get_battery_level()
-                        if bat_level is not None:
-                            bat_level = int(round(bat_level))
-                            charging = _ps.is_charging()
-                            bat_text = f"{bat_level}%+" if charging else f"{bat_level}%"
-                            bbox = self.shared_data.font_arial9.getbbox(bat_text)
-                            text_w = bbox[2] - bbox[0]
-                            tx = self.shared_data.width - text_w - 1
-                            draw.text((tx, int(10 * self.scale_factor_y)),
-                                      bat_text, font=self.shared_data.font_arial9, fill=0)
-                    except Exception:
-                        pass
-
-                # ys stretches the status/comment section down on wider displays
-                # Stats rows stay at normal scale, only dividers and status below get stretched
-                ys = self.y_stretch
-                sx = self.scale_factor_x
-                sy = self.scale_factor_y
-                stats = [
-                    (self.shared_data.target, (int(8 * sx), int(22 * sy)), (int(28 * sx), int(22 * sy)), str(self.shared_data.targetnbr)),
-                    (self.shared_data.port, (int(47 * sx), int(22 * sy)), (int(67 * sx), int(22 * sy)), str(self.shared_data.portnbr)),
-                    (self.shared_data.vuln, (int(86 * sx), int(22 * sy)), (int(106 * sx), int(22 * sy)), str(self.shared_data.vulnnbr)),
-                    (self.shared_data.cred, (int(8 * sx), int(41 * sy)), (int(28 * sx), int(41 * sy)), str(self.shared_data.crednbr)),
-                    (self.shared_data.money, (int(3 * sx), int(172 * sy)), (int(3 * sx), int(192 * sy)), str(self.shared_data.coinnbr)),
-                    (self.shared_data.level, (int(2 * sx), int(217 * sy)), (int(4 * sx), int(237 * sy)), str(self.shared_data.levelnbr)),
-                    (self.shared_data.zombie, (int(47 * sx), int(41 * sy)), (int(67 * sx), int(41 * sy)), str(self.shared_data.zombiesnbr)),
-                    (self.shared_data.networkkb, (int(102 * sx), int(190 * sy)), (int(102 * sx), int(208 * sy)), str(self.shared_data.networkkbnbr)),
-                    (self.shared_data.data, (int(86 * sx), int(41 * sy)), (int(106 * sx), int(41 * sy)), str(self.shared_data.datanbr)),
-                    (self.shared_data.attacks, (int(100 * sx), int(218 * sy)), (int(102 * sx), int(237 * sy)), str(self.shared_data.attacksnbr)),
-                ]
-
-                for img, img_pos, text_pos, text in stats:
-                    image.paste(img, img_pos)
-                    draw.text(text_pos, text, font=self.shared_data.font_arial9, fill=0)
-
-                self.shared_data.update_ragnarstatus()
-                status_img = self.shared_data.ragnarstatusimage
-                if self.shared_data.config.get('incognito_mode_enabled', False):
-                    status_img = self._apply_incognito_mask(status_img)
-                image.paste(status_img, (int(3 * sx), int(60 * sy * ys)))
-                draw.text((int(35 * sx), int(65 * sy * ys)), self.shared_data.ragnarstatustext, font=self.shared_data.font_arial9, fill=0)
-                draw.text((int(35 * sx), int(75 * sy * ys)), self.shared_data.ragnarstatustext2, font=self.shared_data.font_arial9, fill=0)
-
-                # Frise ribbon - hide on wide displays to save vertical space
-                if ys == 1.0:
-                    frise_x, frise_y = self.get_frise_position()
-                    image.paste(self.shared_data.frise, (frise_x, frise_y))
-
-                draw.rectangle((1, 1, self.shared_data.width - 1, self.shared_data.height - 1), outline=0)
-                draw.line((1, int(20 * sy), self.shared_data.width - 1, int(20 * sy)), fill=0)
-                draw.line((1, int(59 * sy * ys), self.shared_data.width - 1, int(59 * sy * ys)), fill=0)
-                draw.line((1, int(87 * sy * ys), self.shared_data.width - 1, int(87 * sy * ys)), fill=0)
-
-                # Theme corner decorations
-                _corner = _theme.get("corner_char")
-                if _corner:
-                    _cf = self.shared_data.font_arial9
-                    draw.text((2, 2), _corner, font=_cf, fill=0)
-                    draw.text((self.shared_data.width - 8, 2), _corner, font=_cf, fill=0)
-
-                # Theme accent drawing (mascot / decoration beside status)
-                _accent_fn = _theme.get("draw_accent")
-                if _accent_fn:
-                    _accent_fn(draw, image, sx, sy, ys, self.shared_data)
-
-                lines = self.shared_data.wrap_text(self.shared_data.ragnarsays, self.shared_data.font_arialbold, self.shared_data.width - 4)
-                y_text = int(90 * sy * ys)
-
-                if self.main_image is not None:
-                    main_img = self.main_image
-                    if self.shared_data.config.get('incognito_mode_enabled', False):
-                        main_img = self._apply_incognito_mask(main_img)
-                    image.paste(main_img, (self.shared_data.x_center1, self.shared_data.y_bottom1))
-                else:
-                    logger.error("Main image not found in shared_data.")
-
-                for line in lines:
-                    draw.text((int(4 * self.scale_factor_x), y_text), line, font=self.shared_data.font_arialbold, fill=0)
-                    y_text += (self.shared_data.font_arialbold.getbbox(line)[3] - self.shared_data.font_arialbold.getbbox(line)[1]) + 3
+                _sx = self.scale_factor_x
+                _sy = self.scale_factor_y
+                _ys = self.y_stretch
+                _theme["render_main_page"](self, draw, image, _sx, _sy, _ys)
 
                 if self.screen_reversed:
                     image = image.transpose(Image.Transpose.ROTATE_180)
