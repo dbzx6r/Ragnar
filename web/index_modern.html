@@ -2383,6 +2383,45 @@
                     </div>
                 </div>
                 
+                <!-- Display Theme Selector -->
+                <div class="glass rounded-xl p-6 mb-6">
+                    <h3 class="text-lg font-semibold mb-4 text-Ragnar-400">🎨 Display Theme</h3>
+                    <p class="text-gray-400 text-sm mb-4">Choose a theme for the e-ink display. Changes take effect on the next display refresh.</p>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3" id="theme-selector-grid">
+                        <button onclick="setDisplayTheme('viking')"   data-theme="viking"   class="theme-btn glass rounded-lg p-3 text-center hover:bg-slate-700 transition-colors border-2 border-transparent">
+                            <div class="text-2xl mb-1">⚔️</div>
+                            <div class="text-xs text-white font-semibold">Viking</div>
+                            <div class="text-xs text-gray-400">Classic</div>
+                        </button>
+                        <button onclick="setDisplayTheme('penguin')"  data-theme="penguin"  class="theme-btn glass rounded-lg p-3 text-center hover:bg-slate-700 transition-colors border-2 border-transparent">
+                            <div class="text-2xl mb-1">🐧</div>
+                            <div class="text-xs text-white font-semibold">Penguin</div>
+                            <div class="text-xs text-gray-400">Antarctica</div>
+                        </button>
+                        <button onclick="setDisplayTheme('car')"      data-theme="car"      class="theme-btn glass rounded-lg p-3 text-center hover:bg-slate-700 transition-colors border-2 border-transparent">
+                            <div class="text-2xl mb-1">🚗</div>
+                            <div class="text-xs text-white font-semibold">Car</div>
+                            <div class="text-xs text-gray-400">Road Trip</div>
+                        </button>
+                        <button onclick="setDisplayTheme('matrix')"   data-theme="matrix"   class="theme-btn glass rounded-lg p-3 text-center hover:bg-slate-700 transition-colors border-2 border-transparent">
+                            <div class="text-2xl mb-1">💊</div>
+                            <div class="text-xs text-white font-semibold">Matrix</div>
+                            <div class="text-xs text-gray-400">Hacker</div>
+                        </button>
+                        <button onclick="setDisplayTheme('space')"    data-theme="space"    class="theme-btn glass rounded-lg p-3 text-center hover:bg-slate-700 transition-colors border-2 border-transparent">
+                            <div class="text-2xl mb-1">🚀</div>
+                            <div class="text-xs text-white font-semibold">Space</div>
+                            <div class="text-xs text-gray-400">Cosmic</div>
+                        </button>
+                        <button onclick="setDisplayTheme('ghost')"    data-theme="ghost"    class="theme-btn glass rounded-lg p-3 text-center hover:bg-slate-700 transition-colors border-2 border-transparent">
+                            <div class="text-2xl mb-1">👻</div>
+                            <div class="text-xs text-white font-semibold">Ghost</div>
+                            <div class="text-xs text-gray-400">Spooky</div>
+                        </button>
+                    </div>
+                    <p class="text-gray-500 text-xs mt-3" id="theme-active-label">Active theme: <span id="theme-active-name" class="text-Ragnar-400 font-semibold">Viking ⚔️</span></p>
+                </div>
+
                 <!-- E-Paper Display Image -->
                 <div class="glass rounded-xl p-6">
                     <div class="flex items-center justify-between mb-4">

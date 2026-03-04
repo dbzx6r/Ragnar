@@ -505,6 +505,7 @@ class SharedData:
             "ref_height": default_profile["ref_height"],
             "epd_type": DEFAULT_EPD_TYPE,
             "screen_reversed": default_profile.get("default_flip", False),
+            "display_theme": "viking",
             
             
             "__title_lists__": "List Settings",
@@ -523,6 +524,7 @@ class SharedData:
             "incognito_mode_enabled": False,
             "home_network_ssid": "",
             "auto_incognito_on_away": False,
+            "captive_portal_auto_auth": True,
             "original_mac": "",
             "tshark_enabled": False,
             "ngrep_enabled": False,
@@ -892,6 +894,10 @@ class SharedData:
         self.wifi_signal_dbm = None  # Latest RSSI value for display
         self.wifi_signal_quality = None  # Normalized 0-100 quality percentage
         self.pan_connected = False
+        # Captive portal state (updated by wifi_manager after each connection)
+        self.captive_portal_detected = False
+        self.captive_portal_url = None
+        self.captive_portal_authenticated = False
         self.usb_active = False
         self.ragnarsays = "Hacking away..."
         self.ragnarorch_status = "IDLE"

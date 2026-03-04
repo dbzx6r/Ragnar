@@ -9985,6 +9985,11 @@ async function loadEpaperDisplay() {
             const date = new Date(data.timestamp * 1000);
             updateElement('epaper-timestamp', date.toLocaleString());
         }
+
+        // Sync theme UI from config
+        fetchAPI('/api/config').then(cfg => {
+            if (cfg && cfg.display_theme) updateDisplayThemeUI(cfg.display_theme);
+        }).catch(() => {});
         
         // Update display image
         const imgElement = document.getElementById('epaper-display-image');
@@ -10063,7 +10068,39 @@ function toggleEpaperSize() {
     }
 }
 
-// Add e-paper display to auto-refresh
+// ── Display Theme Switcher ─────────────────────────────────────────────────
+const DISPLAY_THEME_LABELS = {
+    viking:  'Viking ⚔️',
+    penguin: 'Penguin 🐧',
+    car:     'Car 🚗',
+    matrix:  'Matrix 💊',
+    space:   'Space 🚀',
+    ghost:   'Ghost 👻',
+};
+
+function setDisplayTheme(theme) {
+    postAPI('/api/config', { display_theme: theme })
+        .then(() => {
+            updateDisplayThemeUI(theme);
+            addConsoleMessage(`Display theme changed to: ${DISPLAY_THEME_LABELS[theme] || theme}`, 'success');
+        })
+        .catch(() => addConsoleMessage('Failed to set display theme', 'error'));
+}
+
+function updateDisplayThemeUI(theme) {
+    // Highlight active theme button
+    document.querySelectorAll('.theme-btn').forEach(btn => {
+        const isActive = btn.getAttribute('data-theme') === theme;
+        btn.classList.toggle('border-Ragnar-400', isActive);
+        btn.classList.toggle('bg-slate-700', isActive);
+        btn.classList.toggle('border-transparent', !isActive);
+    });
+    // Update label
+    const label = document.getElementById('theme-active-name');
+    if (label) label.textContent = DISPLAY_THEME_LABELS[theme] || theme;
+}
+
+// ── E-Paper display auto-refresh ───────────────────────────────────────────
 function setupEpaperAutoRefresh() {
     setInterval(() => {
         if (currentTab === 'epaper') {

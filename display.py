@@ -26,6 +26,7 @@ from PIL import Image, ImageDraw
 from init_shared import shared_data  
 from comment import Commentaireia
 from logger import Logger
+from display_themes import get_theme
 import subprocess  
 
 logger = Logger(name="display.py", level=logging.DEBUG)
@@ -724,8 +725,10 @@ class Display:
         self._page_cache[key] = (now, data)
         return data
 
-    def _draw_page_frame(self, draw, title):
-        """Draw standard page frame: border, title, divider, footer."""
+    def _draw_page_frame(self, draw, page_key):
+        """Draw standard page frame using the active theme's page title."""
+        theme = get_theme(self.shared_data.config)
+        title = theme["page_titles"].get(page_key, page_key.upper())
         w = self.shared_data.width
         h = self.shared_data.height
         font = self.shared_data.font_arial9
@@ -899,7 +902,7 @@ class Display:
 
     def _render_network_page(self, image, draw):
         """Render Page 2: Network Scanner - real host data from database."""
-        self._draw_page_frame(draw, "NETWORK SCAN")
+        self._draw_page_frame(draw, "network")
         w = self.shared_data.width
         h = self.shared_data.height
         font = self.shared_data.font_arial9
@@ -948,7 +951,7 @@ class Display:
 
     def _render_vuln_page(self, image, draw):
         """Render Page 3: Vulnerability Scanner - real scan intel from files."""
-        self._draw_page_frame(draw, "VULN INTEL")
+        self._draw_page_frame(draw, "vuln")
         w = self.shared_data.width
         h = self.shared_data.height
         font = self.shared_data.font_arial9
@@ -991,7 +994,7 @@ class Display:
 
     def _render_discovered_page(self, image, draw):
         """Render Page 4: Discovered - real credentials, loot, and attack data."""
-        self._draw_page_frame(draw, "DISCOVERED")
+        self._draw_page_frame(draw, "discovered")
         w = self.shared_data.width
         h = self.shared_data.height
         font = self.shared_data.font_arial9
@@ -1029,7 +1032,7 @@ class Display:
 
     def _render_advanced_page(self, image, draw):
         """Render Page 5: Advanced Vuln Scanner - real scanner status and findings."""
-        self._draw_page_frame(draw, "ADV SCANNER")
+        self._draw_page_frame(draw, "advanced")
         w = self.shared_data.width
         h = self.shared_data.height
         font = self.shared_data.font_arial9
@@ -1101,7 +1104,7 @@ class Display:
 
     def _render_traffic_page(self, image, draw):
         """Render Page 6: Traffic Analysis - real capture data."""
-        self._draw_page_frame(draw, "TRAFFIC")
+        self._draw_page_frame(draw, "traffic")
         w = self.shared_data.width
         h = self.shared_data.height
         font = self.shared_data.font_arial9
@@ -1231,10 +1234,12 @@ class Display:
                     _pisugar_available = _ps and _ps.available
                 except Exception:
                     pass
+                _theme = get_theme(self.shared_data.config)
+                _theme_title = _theme["title"]
                 if _pisugar_available:
-                    draw.text((int(40 * self.scale_factor_x), int(6 * self.scale_factor_y)), "RAGNAR", font=self.shared_data.font_viking_sm, fill=0)
+                    draw.text((int(40 * self.scale_factor_x), int(6 * self.scale_factor_y)), _theme_title, font=self.shared_data.font_viking_sm, fill=0)
                 else:
-                    draw.text((int(37 * self.scale_factor_x), int(5 * self.scale_factor_y)), "RAGNAR", font=self.shared_data.font_viking, fill=0)
+                    draw.text((int(37 * self.scale_factor_x), int(5 * self.scale_factor_y)), _theme_title, font=self.shared_data.font_viking, fill=0)
                 draw.text((int(110 * self.scale_factor_x), int(170 * self.scale_factor_y)), self.manual_mode_txt, font=self.shared_data.font_arial14, fill=0)
                 
                 # Show AP status or WiFi status in the top-left corner
@@ -1319,6 +1324,18 @@ class Display:
                 draw.line((1, int(20 * sy), self.shared_data.width - 1, int(20 * sy)), fill=0)
                 draw.line((1, int(59 * sy * ys), self.shared_data.width - 1, int(59 * sy * ys)), fill=0)
                 draw.line((1, int(87 * sy * ys), self.shared_data.width - 1, int(87 * sy * ys)), fill=0)
+
+                # Theme corner decorations
+                _corner = _theme.get("corner_char")
+                if _corner:
+                    _cf = self.shared_data.font_arial9
+                    draw.text((2, 2), _corner, font=_cf, fill=0)
+                    draw.text((self.shared_data.width - 8, 2), _corner, font=_cf, fill=0)
+
+                # Theme accent drawing (mascot / decoration beside status)
+                _accent_fn = _theme.get("draw_accent")
+                if _accent_fn:
+                    _accent_fn(draw, image, sx, sy, ys, self.shared_data)
 
                 lines = self.shared_data.wrap_text(self.shared_data.ragnarsays, self.shared_data.font_arialbold, self.shared_data.width - 4)
                 y_text = int(90 * sy * ys)
