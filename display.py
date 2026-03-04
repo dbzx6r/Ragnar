@@ -1221,6 +1221,8 @@ class Display:
                     image.paste(self.shared_data.connected, (int(104 * self.scale_factor_x), int(3 * self.scale_factor_y)))
                 if self.shared_data.usb_active:
                     image.paste(self.shared_data.usb, (int(90 * self.scale_factor_x), int(4 * self.scale_factor_y)))
+                if self.shared_data.config.get('incognito_mode_enabled', False):
+                    draw.text((int(3 * self.scale_factor_x), int(11 * self.scale_factor_y)), "INCOG", font=self.shared_data.font_arial9, fill=0)
 
                 # Battery percentage (PiSugar) - flush right in header
                 if _pisugar_available:
