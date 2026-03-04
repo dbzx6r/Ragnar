@@ -995,7 +995,8 @@ EOF
     cat > /etc/systemd/system/ragnar.service << EOF
 [Unit]
 Description=ragnar Service
-After=multi-user.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 ExecStartPre=-/home/ragnar/Ragnar/kill_port_8000.sh
