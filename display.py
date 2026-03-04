@@ -899,7 +899,7 @@ class Display:
 
     def _render_network_page(self, image, draw):
         """Render Page 2: Network Scanner - real host data from database."""
-        self._draw_page_frame(draw, "NETWORK SCAN")
+        self._draw_page_frame(draw, "ICE SCAN")
         w = self.shared_data.width
         h = self.shared_data.height
         font = self.shared_data.font_arial9
@@ -948,7 +948,7 @@ class Display:
 
     def _render_vuln_page(self, image, draw):
         """Render Page 3: Vulnerability Scanner - real scan intel from files."""
-        self._draw_page_frame(draw, "VULN INTEL")
+        self._draw_page_frame(draw, "BLIZZARD")
         w = self.shared_data.width
         h = self.shared_data.height
         font = self.shared_data.font_arial9
@@ -991,7 +991,7 @@ class Display:
 
     def _render_discovered_page(self, image, draw):
         """Render Page 4: Discovered - real credentials, loot, and attack data."""
-        self._draw_page_frame(draw, "DISCOVERED")
+        self._draw_page_frame(draw, "GLACIER")
         w = self.shared_data.width
         h = self.shared_data.height
         font = self.shared_data.font_arial9
@@ -1029,7 +1029,7 @@ class Display:
 
     def _render_advanced_page(self, image, draw):
         """Render Page 5: Advanced Vuln Scanner - real scanner status and findings."""
-        self._draw_page_frame(draw, "ADV SCANNER")
+        self._draw_page_frame(draw, "DEEP ICE")
         w = self.shared_data.width
         h = self.shared_data.height
         font = self.shared_data.font_arial9
@@ -1101,7 +1101,7 @@ class Display:
 
     def _render_traffic_page(self, image, draw):
         """Render Page 6: Traffic Analysis - real capture data."""
-        self._draw_page_frame(draw, "TRAFFIC")
+        self._draw_page_frame(draw, "CURRENT")
         w = self.shared_data.width
         h = self.shared_data.height
         font = self.shared_data.font_arial9
@@ -1232,9 +1232,9 @@ class Display:
                 except Exception:
                     pass
                 if _pisugar_available:
-                    draw.text((int(40 * self.scale_factor_x), int(6 * self.scale_factor_y)), "RAGNAR", font=self.shared_data.font_viking_sm, fill=0)
+                    draw.text((int(40 * self.scale_factor_x), int(6 * self.scale_factor_y)), "TUXNET", font=self.shared_data.font_viking_sm, fill=0)
                 else:
-                    draw.text((int(37 * self.scale_factor_x), int(5 * self.scale_factor_y)), "RAGNAR", font=self.shared_data.font_viking, fill=0)
+                    draw.text((int(37 * self.scale_factor_x), int(5 * self.scale_factor_y)), "TUXNET", font=self.shared_data.font_viking, fill=0)
                 draw.text((int(110 * self.scale_factor_x), int(170 * self.scale_factor_y)), self.manual_mode_txt, font=self.shared_data.font_arial14, fill=0)
                 
                 # Show AP status or WiFi status in the top-left corner
@@ -1307,6 +1307,25 @@ class Display:
                 if self.shared_data.config.get('incognito_mode_enabled', False):
                     status_img = self._apply_incognito_mask(status_img)
                 image.paste(status_img, (int(3 * sx), int(60 * sy * ys)))
+                # Tiny pixel penguin next to status
+                try:
+                    _px = int(118 * sx)
+                    _py = int(62 * sy * ys)
+                    _bk = 0   # black
+                    # Body (white oval center — skip, use outline)
+                    draw.ellipse([_px+2, _py+6, _px+13, _py+19], fill=255, outline=0)  # white belly
+                    draw.rectangle([_px, _py+3, _px+15, _py+18], fill=0)               # black body
+                    draw.ellipse([_px+2, _py+6, _px+13, _py+17], fill=255, outline=0)  # white belly
+                    # Head
+                    draw.ellipse([_px+2, _py, _px+13, _py+9], fill=0)                  # black head
+                    # Eyes
+                    draw.point((_px+5, _py+3), fill=255)
+                    draw.point((_px+10, _py+3), fill=255)
+                    # Feet
+                    draw.line([_px+4, _py+19, _px+2, _py+21], fill=0, width=1)
+                    draw.line([_px+11, _py+19, _px+13, _py+21], fill=0, width=1)
+                except Exception:
+                    pass  # never crash the display loop
                 draw.text((int(35 * sx), int(65 * sy * ys)), self.shared_data.ragnarstatustext, font=self.shared_data.font_arial9, fill=0)
                 draw.text((int(35 * sx), int(75 * sy * ys)), self.shared_data.ragnarstatustext2, font=self.shared_data.font_arial9, fill=0)
 
@@ -1316,6 +1335,10 @@ class Display:
                     image.paste(self.shared_data.frise, (frise_x, frise_y))
 
                 draw.rectangle((1, 1, self.shared_data.width - 1, self.shared_data.height - 1), outline=0)
+                # Snowflake corner decorations
+                _sf = "*"
+                draw.text((2, 2), _sf, font=self.shared_data.font_arial9, fill=0)
+                draw.text((self.shared_data.width - 8, 2), _sf, font=self.shared_data.font_arial9, fill=0)
                 draw.line((1, int(20 * sy), self.shared_data.width - 1, int(20 * sy)), fill=0)
                 draw.line((1, int(59 * sy * ys), self.shared_data.width - 1, int(59 * sy * ys)), fill=0)
                 draw.line((1, int(87 * sy * ys), self.shared_data.width - 1, int(87 * sy * ys)), fill=0)

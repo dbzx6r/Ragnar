@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ragnar Cyberviking - Modern Dashboard</title>
+    <title>TUXNET - Antarctic Operations</title>
     <link rel="icon" href="/web/images/ragnar.ico" type="image/x-icon">
     
     <!-- Tailwind CSS (local build) -->
@@ -217,22 +217,79 @@
         }
         /* Toggle switch: show green when ON, regardless of Tailwind purge state */
         label > input[type="checkbox"]:checked + div { background-color: #16a34a !important; }
+
+        /* ===== ANTARCTICA THEME ===== */
+        @keyframes snowfall {
+            0%   { transform: translateY(-20px) translateX(0px) rotate(0deg); opacity: 1; }
+            100% { transform: translateY(110vh) translateX(30px) rotate(360deg); opacity: 0.3; }
+        }
+        @keyframes waddle {
+            0%, 100% { transform: translateX(0px) rotate(-3deg); }
+            50%       { transform: translateX(4px) rotate(3deg); }
+        }
+        @keyframes ice-sparkle {
+            0%, 100% { opacity: 0.6; text-shadow: 0 0 4px rgba(148,210,255,0.4); }
+            50%       { opacity: 1;   text-shadow: 0 0 12px rgba(148,210,255,0.9); }
+        }
+        @keyframes penguin-blink {
+            0%, 90%, 100% { transform: scaleY(1); }
+            95%           { transform: scaleY(0.1); }
+        }
+        .snow-container {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; z-index: 0; overflow: hidden;
+        }
+        .snowflake {
+            position: absolute; top: -20px; color: #94d2ff;
+            font-size: 1rem; animation: snowfall linear infinite; opacity: 0.7;
+            user-select: none;
+        }
+        .penguin-icon { animation: waddle 1.2s ease-in-out infinite; display: inline-block; }
+        .ice-sparkle  { animation: ice-sparkle 2s ease-in-out infinite; }
+        .rank-progress-track {
+            background: rgba(148,210,255,0.15); border-radius: 9999px;
+            height: 6px; margin-top: 6px; overflow: hidden;
+        }
+        .rank-progress-fill {
+            height: 100%; border-radius: 9999px;
+            background: linear-gradient(90deg, #38bdf8, #818cf8);
+            transition: width 0.5s ease;
+            width: 0%;
+        }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 </head>
 
-<body class="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white min-h-screen">
-    
+<body class="bg-gradient-to-br from-[#060f23] via-[#0a1a3a] to-[#060f23] text-white min-h-screen">
+<!-- Snowfall -->
+<div class="snow-container" aria-hidden="true">
+  <span class="snowflake" style="left:5%;animation-duration:8s;animation-delay:0s;font-size:0.8rem">❄</span>
+  <span class="snowflake" style="left:12%;animation-duration:11s;animation-delay:1s">❄</span>
+  <span class="snowflake" style="left:20%;animation-duration:9s;animation-delay:2s;font-size:0.7rem">❄</span>
+  <span class="snowflake" style="left:28%;animation-duration:13s;animation-delay:0.5s">❄</span>
+  <span class="snowflake" style="left:36%;animation-duration:10s;animation-delay:3s;font-size:1.2rem">❄</span>
+  <span class="snowflake" style="left:44%;animation-duration:8.5s;animation-delay:1.5s">❄</span>
+  <span class="snowflake" style="left:52%;animation-duration:12s;animation-delay:0.8s;font-size:0.6rem">❄</span>
+  <span class="snowflake" style="left:60%;animation-duration:9.5s;animation-delay:2.5s">❄</span>
+  <span class="snowflake" style="left:68%;animation-duration:11s;animation-delay:0.3s;font-size:1.1rem">❄</span>
+  <span class="snowflake" style="left:76%;animation-duration:10.5s;animation-delay:4s">❄</span>
+  <span class="snowflake" style="left:84%;animation-duration:8s;animation-delay:1.2s;font-size:0.75rem">❄</span>
+  <span class="snowflake" style="left:92%;animation-duration:13s;animation-delay:0.7s">❄</span>
+  <span class="snowflake" style="left:8%;animation-duration:15s;animation-delay:5s;font-size:0.5rem">❄</span>
+  <span class="snowflake" style="left:48%;animation-duration:14s;animation-delay:3.5s;font-size:1.3rem">❄</span>
+  <span class="snowflake" style="left:88%;animation-duration:16s;animation-delay:2s;font-size:0.65rem">❄</span>
+</div>
+
     <!-- Navigation -->
     <nav class="glass sticky top-0 z-50 border-b border-slate-700">
         <div class="max-w-7xl 2xl:max-w-[1664px] mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex items-center justify-between h-16">
                 <!-- Logo -->
                 <div class="flex items-center space-x-3">
-                    <a href="/web/index_modern.html" aria-label="Go to main dashboard" class="flex items-center space-x-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-Ragnar-400">
+                    <a href="/web/index_modern.html" aria-label="Go to main dashboard" class="flex items-center space-x-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-400">
                         <img src="/web/images/ragnar.ico" alt="Ragnar" class="h-12 w-9">
-                        <span class="text-2xl font-bold bg-gradient-to-r from-Ragnar-400 to-Ragnar-600 bg-clip-text text-transparent">
-                            Ragnar
+                        <span class="text-2xl font-bold bg-gradient-to-r from-sky-400 to-blue-400 bg-clip-text text-transparent flex items-center gap-2">
+                            <span class="penguin-icon">🐧</span>TUXNET
                         </span>
                     </a>
                     <span id="connection-status" class="flex items-center space-x-2">
@@ -245,19 +302,19 @@
                 <!-- Navigation Links -->
                 <div class="hidden nav:flex space-x-1">
                     <button onclick="showTab('dashboard')" class="nav-btn px-4 py-2 rounded-lg hover:bg-slate-700 transition-colors" data-tab="dashboard">
-                        Dashboard
+                        Ice Sheet
                     </button>
                     <button onclick="showTab('network')" class="nav-btn px-4 py-2 rounded-lg hover:bg-slate-700 transition-colors" data-tab="network">
-                        Network
+                        Glacier Map
                     </button>
                     <button onclick="showTab('network-map')" class="nav-btn px-4 py-2 rounded-lg hover:bg-slate-700 transition-colors" data-tab="network-map">
-                        Map
+                        Floe Chart
                     </button>
                     <button onclick="showTab('discovered')" class="nav-btn px-4 py-2 rounded-lg hover:bg-slate-700 transition-colors" data-tab="discovered">
                         Discovered
                     </button>
                     <button onclick="showTab('credentials')" class="nav-btn px-4 py-2 rounded-lg hover:bg-slate-700 transition-colors" data-tab="credentials">
-                        Credentials
+                        Fish Haul
                     </button>
                     <button id="pentest-nav-btn" onclick="showTab('pentest')"
                             class="nav-btn px-4 py-2 rounded-lg transition-colors pentest-nav-btn hidden"
@@ -301,7 +358,7 @@
                         Connect
                     </button>
                     <button onclick="showTab('config')" class="nav-btn px-4 py-2 rounded-lg hover:bg-slate-700 transition-colors" data-tab="config">
-                        Config
+                        Igloo Settings
                     </button>
                     <button id="logout-btn" onclick="handleLogout()" class="hidden nav-btn px-4 py-2 rounded-lg hover:bg-red-700 bg-red-600/50 transition-colors text-red-200">
                         Logout
@@ -320,11 +377,11 @@
         <!-- Mobile Menu -->
         <div id="mobile-menu" class="hidden nav:hidden border-t border-slate-700">
             <div class="px-2 pt-2 pb-3 space-y-1">
-                <button onclick="showTab('dashboard')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Dashboard</button>
-                <button onclick="showTab('network')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Network</button>
-                <button onclick="showTab('network-map')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Network Map</button>
+                <button onclick="showTab('dashboard')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Ice Sheet</button>
+                <button onclick="showTab('network')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Glacier Map</button>
+                <button onclick="showTab('network-map')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Floe Chart</button>
                 <button onclick="showTab('discovered')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Discovered</button>
-                <button onclick="showTab('credentials')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Credentials</button>
+                <button onclick="showTab('credentials')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Fish Haul</button>
                 <button onclick="showTab('pentest')"
                         id="mobile-pentest-nav"
                         class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700 pentest-nav-btn hidden"
@@ -338,7 +395,7 @@
                 <button onclick="showTab('files')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Files</button>
                 <button onclick="showTab('system')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">System</button>
                 <button onclick="showTab('connect')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Connect</button>
-                <button onclick="showTab('config')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Config</button>
+                <button onclick="showTab('config')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Igloo Settings</button>
                 <button id="mobile-logout-btn" onclick="handleLogout()" class="hidden block w-full text-left px-3 py-2 rounded-lg hover:bg-red-700 bg-red-600/30 text-red-300">Logout</button>
             </div>
         </div>
@@ -371,7 +428,7 @@
                         <div>
                             <p class="text-gray-400 text-sm">Targets</p>
                             <div class="flex items-baseline space-x-2">
-                                <p id="target-count" class="text-3xl font-bold text-Ragnar-400">0</p>
+                                <p id="target-count" class="text-3xl font-bold text-sky-400">0</p>
                                 <span class="text-sm text-gray-400 whitespace-nowrap"></span>
                             </div>
                                 <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-gray-300">
@@ -393,8 +450,8 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="w-12 aspect-square bg-Ragnar-500 bg-opacity-20 rounded-full flex items-center justify-center">
-                            <svg class="w-6 h-6 text-Ragnar-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <div class="w-12 aspect-square bg-sky-500 bg-opacity-20 rounded-full flex items-center justify-center">
+                            <svg class="w-6 h-6 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"></path>
                             </svg>
                         </div>
@@ -420,7 +477,7 @@
                 <div class="glass rounded-xl p-6 sm:hover:scale-105 transition-transform cursor-pointer" onclick="showTab('threat-intel')">
                     <div class="flex items-start justify-between">
                         <div>
-                            <p class="text-gray-400 text-sm">Vulnerabilities</p>
+                            <p class="text-gray-400 text-sm">Ice Cracks ❄</p>
                             <p id="vuln-count" class="text-3xl font-bold text-red-400">0</p>
                             <p class="text-gray-500 text-xs mt-1">Vulnerable Hosts <span id="dashboard-vulnerable-hosts-count" class="text-red-300 font-semibold">0</span></p>
                         </div>
@@ -436,7 +493,7 @@
                 <div class="glass rounded-xl p-6 sm:hover:scale-105 transition-transform cursor-pointer" onclick="showTab('discovered')">
                     <div class="flex items-center justify-between">
                         <div>
-                            <p class="text-gray-400 text-sm">Credentials</p>
+                            <p class="text-gray-400 text-sm">Fish Stolen 🐟</p>
                             <p id="cred-count" class="text-3xl font-bold text-yellow-400">0</p>
                         </div>
                         <div class="w-12 h-12 bg-yellow-500 bg-opacity-20 rounded-full flex items-center justify-center">
@@ -451,9 +508,13 @@
                 <div class="glass rounded-xl p-6 sm:hover:scale-105 transition-transform">
                     <div class="flex items-start justify-between">
                         <div>
-                            <p class="text-gray-400 text-sm">Level</p>
+                            <p class="text-gray-400 text-sm">Penguin Rank</p>
                             <p id="level-count" class="text-3xl font-bold text-purple-400">0</p>
-                            <p class="text-gray-500 text-xs mt-1">Points <span id="points-count" class="text-purple-300 font-semibold">0</span></p>
+                            <p class="text-gray-500 text-xs mt-1">Fish Points 🐟 <span id="points-count" class="text-purple-300 font-semibold">0</span></p>
+                            <p id="rank-name" class="text-sky-300 text-xs font-semibold mt-1 ice-sparkle">Hatchling 🐣</p>
+                            <div class="rank-progress-track">
+                              <div id="rank-progress-fill" class="rank-progress-fill" style="width:0%"></div>
+                            </div>
                         </div>
                         <div class="w-12 h-12 bg-purple-500 bg-opacity-20 rounded-full flex items-center justify-center">
                             <svg class="w-6 h-6 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -467,7 +528,7 @@
                 <div class="glass rounded-xl p-6 sm:hover:scale-105 transition-transform cursor-pointer" onclick="showTab('network')">
                     <div class="flex items-start justify-between">
                         <div>
-                            <p class="text-gray-400 text-sm">Scanned Networks</p>
+                            <p class="text-gray-400 text-sm">Glaciers Mapped 🗺</p>
                             <p id="dashboard-scanned-network-count" class="text-3xl font-bold text-cyan-400">0</p>
                         </div>
                         <div class="w-12 aspect-square bg-cyan-500 bg-opacity-20 rounded-full flex items-center justify-center">
@@ -505,7 +566,7 @@
                 <!-- Current Status -->
                 <div class="glass rounded-xl p-6">
                     <h2 class="text-xl font-bold mb-4 flex items-center">
-                        <svg class="w-6 h-6 mr-2 text-Ragnar-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg class="w-6 h-6 mr-2 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
                         </svg>
                         Current Status
@@ -513,7 +574,7 @@
                     <div class="space-y-3">
                         <div class="flex items-center justify-between p-3 bg-slate-800 bg-opacity-50 rounded-lg">
                             <span class="text-gray-400">Status</span>
-                            <span id="Ragnar-status" class="text-Ragnar-400 font-semibold">IDLE</span>
+                            <span id="Ragnar-status" class="text-sky-400 font-semibold">Waddling...</span>
                         </div>
                         <div class="flex items-center justify-between p-3 bg-slate-800 bg-opacity-50 rounded-lg">
                             <span class="text-gray-400">Mode</span>
@@ -531,8 +592,8 @@
                             </div>
                         </div>
                         <div class="p-3 bg-slate-800 bg-opacity-50 rounded-lg">
-                            <p class="text-gray-400 text-sm mb-2">Ragnar Says:</p>
-                            <p id="Ragnar-says" class="text-white font-mono text-sm">Hacking away...</p>
+                            <p class="text-gray-400 text-sm mb-2">Waddles Mumbles: 🐟</p>
+                            <p id="Ragnar-says" class="text-white font-mono text-sm">...brrrp...</p>
                         </div>
                     </div>
                 </div>
@@ -540,7 +601,7 @@
                 <!-- Connection Status -->
                 <div class="glass rounded-xl p-6">
                     <h2 class="text-xl font-bold mb-4 flex items-center">
-                        <svg class="w-6 h-6 mr-2 text-Ragnar-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg class="w-6 h-6 mr-2 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"></path>
                         </svg>
                         Connectivity
@@ -735,13 +796,13 @@
             <div class="glass rounded-xl p-6">
                 <h2 class="text-xl font-bold mb-4 stackable-row">
                     <span class="flex items-center">
-                        <svg class="w-6 h-6 mr-2 text-Ragnar-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg class="w-6 h-6 mr-2 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
                         </svg>
-                        Console
+                        Penguin Terminal
                     </span>
                     <div class="flex space-x-2">
-                        <button onclick="loadConsoleLogs()" class="text-sm text-white bg-Ragnar-600 hover:bg-Ragnar-700 px-3 py-1 rounded transition-colors">
+                        <button onclick="loadConsoleLogs()" class="text-sm text-white bg-sky-600 hover:bg-sky-700 px-3 py-1 rounded transition-colors">
                             Refresh
                         </button>
                         <button onclick="clearConsole()" class="text-sm text-gray-400 hover:text-white transition-colors">
@@ -769,7 +830,7 @@
                             <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                             <span class="text-sm text-gray-300">Auto-scanning active</span>
                         </div>
-                        <button onclick="refreshCurrentTab()" class="refresh-btn bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-4 py-2 rounded-lg transition-colors">
+                        <button onclick="refreshCurrentTab()" class="refresh-btn bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-lg transition-colors">
                             <svg class="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
                             </svg>
@@ -807,7 +868,7 @@
                                    inputmode="decimal"
                                    autocomplete="off"
                                    placeholder="192.168.1.192"
-                                   class="w-full bg-slate-900/70 border border-slate-700 focus:border-Ragnar-500 rounded px-3 py-2 text-sm" />
+                                   class="w-full bg-slate-900/70 border border-slate-700 focus:border-sky-500 rounded px-3 py-2 text-sm" />
                             <button id="custom-deep-scan-btn"
                                     class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap">
                                 Scan
@@ -882,7 +943,7 @@
                         <button onclick="exportCredentialsCSV()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-colors text-sm">
                             Export CSV
                         </button>
-                        <button onclick="loadCredentials(true)" class="bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-4 py-2 rounded-lg transition-colors text-sm">
+                        <button onclick="loadCredentials(true)" class="bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-lg transition-colors text-sm">
                             Refresh
                         </button>
                     </div>
@@ -898,10 +959,10 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 1 0 5 11a6 6 0 0 0 12 0z"></path>
                         </svg>
                         <input id="cred-ip-search" type="text" placeholder="Filter by IP..." oninput="onCredSearch(this.value)"
-                            class="w-full bg-slate-800 border border-slate-600 rounded-lg py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-Ragnar-500" style="padding-left:0.75rem;padding-right:2.5rem;">
+                            class="w-full bg-slate-800 border border-slate-600 rounded-lg py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-sky-500" style="padding-left:0.75rem;padding-right:2.5rem;">
                     </div>
                     <div class="flex flex-wrap gap-2">
-                        <button onclick="filterCredsByService('all')" data-svc="all" class="cred-svc-btn bg-Ragnar-600 text-white px-3 py-2 rounded-lg text-sm transition-colors">All</button>
+                        <button onclick="filterCredsByService('all')" data-svc="all" class="cred-svc-btn bg-sky-600 text-white px-3 py-2 rounded-lg text-sm transition-colors">All</button>
                         <button onclick="filterCredsByService('ssh')" data-svc="ssh" class="cred-svc-btn bg-slate-700 hover:bg-slate-600 text-white px-3 py-2 rounded-lg text-sm transition-colors">SSH</button>
                         <button onclick="filterCredsByService('smb')" data-svc="smb" class="cred-svc-btn bg-slate-700 hover:bg-slate-600 text-white px-3 py-2 rounded-lg text-sm transition-colors">SMB</button>
                         <button onclick="filterCredsByService('ftp')" data-svc="ftp" class="cred-svc-btn bg-slate-700 hover:bg-slate-600 text-white px-3 py-2 rounded-lg text-sm transition-colors">FTP</button>
@@ -955,7 +1016,7 @@
                             <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-full bg-amber-500"></span> Medium</span>
                             <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-full bg-red-500"></span> High</span>
                         </div>
-                        <button onclick="refreshNetworkMap()" class="bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-4 py-2 rounded-lg transition-colors text-sm">
+                        <button onclick="refreshNetworkMap()" class="bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-lg transition-colors text-sm">
                             Refresh
                         </button>
                     </div>
@@ -978,7 +1039,7 @@
             <div class="glass rounded-xl p-6">
                 <div class="stackable-row mb-6">
                     <h2 class="text-2xl font-bold">Network Connection</h2>
-                    <button onclick="refreshCurrentTab()" class="refresh-btn bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-4 py-2 rounded-lg transition-colors">
+                    <button onclick="refreshCurrentTab()" class="refresh-btn bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-lg transition-colors">
                         <svg class="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
                         </svg>
@@ -988,7 +1049,7 @@
                 
                 <!-- Wi-Fi Management Section -->
                 <div class="mb-8">
-                    <h3 class="text-xl font-semibold mb-4 text-Ragnar-400">Wi-Fi Management</h3>
+                    <h3 class="text-xl font-semibold mb-4 text-sky-400">Wi-Fi Management</h3>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         
                         <!-- Wi-Fi Status Card -->
@@ -1002,7 +1063,7 @@
                             </div>
                             <div id="wifi-connected-list" class="text-xs text-gray-300 space-y-2 bg-slate-900/60 border border-slate-700 rounded-lg p-3 mb-3 hidden"></div>
                             <button onclick="refreshWifiStatus()" 
-                                    class="w-full bg-Ragnar-600 hover:bg-Ragnar-700 text-white py-2 px-4 rounded transition-colors">
+                                    class="w-full bg-sky-600 hover:bg-sky-700 text-white py-2 px-4 rounded transition-colors">
                                 <svg class="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
                                 </svg>
@@ -1072,7 +1133,7 @@
                                 </div>
                                 <div id="wifi-multi-focus-controls" class="mt-3 hidden">
                                     <label for="wifi-multi-focus-select" class="text-xs uppercase tracking-wide text-gray-400">Focused Adapter</label>
-                                    <select id="wifi-multi-focus-select" class="mt-2 w-full bg-slate-950/70 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-Ragnar-500">
+                                    <select id="wifi-multi-focus-select" class="mt-2 w-full bg-slate-950/70 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-sky-500">
                                         <option value="">Loading adapters…</option>
                                     </select>
                                     <p class="text-[11px] text-gray-500 mt-2">Only this adapter drives discovery when Single Focus is active.</p>
@@ -1095,13 +1156,13 @@
                 
                 <!-- Wi-Fi Connection Section -->
                 <div class="mb-8">
-                    <h3 class="text-xl font-semibold mb-4 text-Ragnar-400">Wi-Fi Connection</h3>
+                    <h3 class="text-xl font-semibold mb-4 text-sky-400">Wi-Fi Connection</h3>
                     
                     <!-- Wi-Fi Interface Selection -->
                     <div class="glass rounded-lg p-4 mb-4">
                         <label class="block text-sm font-medium mb-2">Wi-Fi Interface</label>
                         <select id="wifi-interface-select" 
-                                class="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-white focus:outline-none focus:border-Ragnar-500">
+                                class="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-white focus:outline-none focus:border-sky-500">
                             <option value="">Loading interfaces...</option>
                         </select>
                         <div id="wifi-interface-switch" class="hidden mt-4">
@@ -1117,7 +1178,7 @@
                             <h4 class="font-medium">Available Networks</h4>
                             <button onclick="scanWifiNetworks()" 
                                     id="scan-wifi-btn"
-                                    class="bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-4 py-2 rounded transition-colors text-sm">
+                                    class="bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded transition-colors text-sm">
                                 <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
                                 </svg>
@@ -1172,7 +1233,7 @@
                     <div class="mb-4">
                         <label class="flex items-center space-x-2">
                             <input type="checkbox" id="wifi-save-network" checked
-                                   class="form-checkbox h-4 w-4 text-Ragnar-600 bg-slate-700 border-slate-600 rounded">
+                                   class="form-checkbox h-4 w-4 text-sky-600 bg-slate-700 border-slate-600 rounded">
                             <span class="text-sm">Save network for auto-connect</span>
                         </label>
                     </div>
@@ -1188,7 +1249,7 @@
                         </button>
                         <button onclick="connectToWifiNetwork()" 
                                 id="wifi-connect-submit-btn"
-                                class="flex-1 bg-Ragnar-600 hover:bg-Ragnar-700 text-white py-2 px-4 rounded transition-colors">
+                                class="flex-1 bg-sky-600 hover:bg-sky-700 text-white py-2 px-4 rounded transition-colors">
                             Connect
                         </button>
                     </div>
@@ -1245,7 +1306,7 @@
                         </div>
                         <div>
                             <label for="vuln-ip-dropdown" class="text-xs uppercase tracking-wide text-gray-400">Vulnerability scan scope</label>
-                            <select id="vuln-ip-dropdown" class="mt-1 w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-Ragnar-400">
+                            <select id="vuln-ip-dropdown" class="mt-1 w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-sky-400">
                                 <option value="all">All Targets</option>
                             </select>
                             <p class="text-xs text-gray-500 mt-2">Choose a specific host to rerun scanners on recently changed systems.</p>
@@ -1268,19 +1329,19 @@
                         <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
                             <div>
                                 <label class="text-xs uppercase tracking-wide text-gray-400">Target IP</label>
-                                <select id="manual-ip-dropdown" onchange="updateManualPorts()" class="mt-1 w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-Ragnar-400">
+                                <select id="manual-ip-dropdown" onchange="updateManualPorts()" class="mt-1 w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-sky-400">
                                     <option value="">Select IP</option>
                                 </select>
                             </div>
                             <div>
                                 <label class="text-xs uppercase tracking-wide text-gray-400">Port</label>
-                                <select id="manual-port-dropdown" class="mt-1 w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-Ragnar-400">
+                                <select id="manual-port-dropdown" class="mt-1 w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-sky-400">
                                     <option value="">Select Port</option>
                                 </select>
                             </div>
                             <div>
                                 <label class="text-xs uppercase tracking-wide text-gray-400">Action</label>
-                                <select id="manual-action-dropdown" class="mt-1 w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-Ragnar-400">
+                                <select id="manual-action-dropdown" class="mt-1 w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-sky-400">
                                     <option value="">Select Action</option>
                                 </select>
                                 <p id="manual-action-helper" class="text-[11px] text-gray-500 mt-1">Select a port to view compatible attack modules.</p>
@@ -1314,15 +1375,15 @@
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
                         <label class="text-xs uppercase tracking-wide text-gray-400">Target IP</label>
-                        <input id="manual-lynis-ip" type="text" placeholder="192.168.0.42" class="mt-1 w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-Ragnar-400">
+                        <input id="manual-lynis-ip" type="text" placeholder="192.168.0.42" class="mt-1 w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-sky-400">
                     </div>
                     <div>
                         <label class="text-xs uppercase tracking-wide text-gray-400">Username</label>
-                        <input id="manual-lynis-username" type="text" placeholder="root" class="mt-1 w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-Ragnar-400">
+                        <input id="manual-lynis-username" type="text" placeholder="root" class="mt-1 w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-sky-400">
                     </div>
                     <div>
                         <label class="text-xs uppercase tracking-wide text-gray-400">Password</label>
-                        <input id="manual-lynis-password" type="password" placeholder="Required" class="mt-1 w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-Ragnar-400">
+                        <input id="manual-lynis-password" type="password" placeholder="Required" class="mt-1 w-full bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-sky-400">
                     </div>
                 </div>
                 <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mt-4">
@@ -1338,7 +1399,7 @@
             </div>
 
             <div class="mb-8">
-                <h3 class="text-xl font-semibold mb-4 text-Ragnar-400">Bluetooth Operations</h3>
+                <h3 class="text-xl font-semibold mb-4 text-sky-400">Bluetooth Operations</h3>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                     <div class="glass rounded-lg p-4">
                         <div class="flex items-center justify-between mb-3">
@@ -1550,7 +1611,7 @@
                 <div class="glass rounded-xl p-6 h-full flex flex-col">
                     <div class="flex items-center justify-between mb-6">
                         <h2 class="text-2xl font-bold">Discovered Credentials</h2>
-                        <button onclick="refreshCurrentTab()" class="refresh-btn bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-4 py-2 rounded-lg transition-colors">
+                        <button onclick="refreshCurrentTab()" class="refresh-btn bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-lg transition-colors">
                             <svg class="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
                             </svg>
@@ -1564,7 +1625,7 @@
                 <div class="glass rounded-xl p-6 h-full flex flex-col">
                     <div class="flex items-center justify-between mb-6">
                         <h2 class="text-2xl font-bold">Stolen Data</h2>
-                        <button onclick="refreshCurrentTab()" class="refresh-btn bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-4 py-2 rounded-lg transition-colors">
+                        <button onclick="refreshCurrentTab()" class="refresh-btn bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-lg transition-colors">
                             <svg class="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
                             </svg>
@@ -1617,7 +1678,7 @@
                         <h2 class="text-2xl font-bold mb-2">🔍 Service Intelligence</h2>
                         <p class="text-sm text-gray-400">Interesting reconnaissance data from service scans (MQTT topics, banners, etc.)</p>
                     </div>
-                    <button onclick="refreshVulnerabilityIntel()" class="refresh-btn bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-4 py-2 rounded-lg transition-colors">
+                    <button onclick="refreshVulnerabilityIntel()" class="refresh-btn bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-lg transition-colors">
                         <svg class="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
                         </svg>
@@ -1676,7 +1737,7 @@
                         <button onclick="filterAttackLogs('timeout')" class="attack-filter-btn bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-2 rounded-lg transition-colors text-sm" data-filter="timeout">
                             ⏱ Timeout
                         </button>
-                        <button onclick="refreshAttackLogs()" class="bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-3 py-2 rounded-lg transition-colors text-sm">
+                        <button onclick="refreshAttackLogs()" class="bg-sky-600 hover:bg-sky-700 text-white px-3 py-2 rounded-lg transition-colors text-sm">
                             <svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
                             </svg>
@@ -1726,7 +1787,7 @@
                 </div>
                 <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
                     <div class="flex items-center bg-slate-900/60 border border-slate-800 rounded-xl p-1 gap-1 shadow-inner">
-                        <button data-status="open" onclick="setThreatIntelFilter('open')" class="threat-intel-filter-btn px-3 py-2 rounded-lg text-sm font-semibold border border-Ragnar-500 bg-Ragnar-600 text-white shadow-md shadow-Ragnar-500/40" aria-pressed="true">
+                        <button data-status="open" onclick="setThreatIntelFilter('open')" class="threat-intel-filter-btn px-3 py-2 rounded-lg text-sm font-semibold border border-sky-500 bg-sky-600 text-white shadow-md shadow-sky-500/40" aria-pressed="true">
                             Open
                         </button>
                         <button data-status="resolved" onclick="setThreatIntelFilter('resolved')" class="threat-intel-filter-btn px-3 py-2 rounded-lg text-sm font-semibold border border-slate-700 bg-slate-800 text-slate-300 hover:text-white hover:border-slate-500" aria-pressed="false">
@@ -1736,7 +1797,7 @@
                             All
                         </button>
                     </div>
-                    <button onclick="refreshThreatIntel()" class="bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-4 py-2 rounded-lg transition-colors">
+                    <button onclick="refreshThreatIntel()" class="bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-lg transition-colors">
                         <svg class="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
                         </svg>
@@ -1957,7 +2018,7 @@
                             </svg>
                             Clear Files
                         </button>
-                        <button onclick="refreshFiles()" class="refresh-btn bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-4 py-2 rounded-lg transition-colors">
+                        <button onclick="refreshFiles()" class="refresh-btn bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-lg transition-colors">
                             <svg class="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
                             </svg>
@@ -2030,7 +2091,7 @@
                         <!-- Dynamic content -->
                     </div>
                     <div class="flex space-x-3">
-                        <button id="modal-confirm" class="bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-4 py-2 rounded-lg transition-colors">
+                        <button id="modal-confirm" class="bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-lg transition-colors">
                             Confirm
                         </button>
                         <button onclick="closeFileModal()" class="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg transition-colors">
@@ -2048,7 +2109,7 @@
             <div class="glass rounded-xl p-6">
                 <div class="flex items-center justify-between mb-6">
                     <h2 class="text-2xl font-bold">System Monitoring</h2>
-                    <button onclick="refreshSystemStatus()" class="refresh-btn bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-4 py-2 rounded-lg transition-colors">
+                    <button onclick="refreshSystemStatus()" class="refresh-btn bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-lg transition-colors">
                         <svg class="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
                         </svg>
@@ -2153,7 +2214,7 @@
                         <div class="flex items-center justify-between mb-4">
                             <h3 class="font-semibold">Top Processes</h3>
                             <div class="flex space-x-2">
-                                <button onclick="sortProcesses('cpu')" class="process-sort-btn text-xs px-2 py-1 rounded bg-Ragnar-600 text-white" data-sort="cpu">CPU</button>
+                                <button onclick="sortProcesses('cpu')" class="process-sort-btn text-xs px-2 py-1 rounded bg-sky-600 text-white" data-sort="cpu">CPU</button>
                                 <button onclick="sortProcesses('memory')" class="process-sort-btn text-xs px-2 py-1 rounded bg-gray-600 text-white" data-sort="memory">Memory</button>
                             </div>
                         </div>
@@ -2201,7 +2262,7 @@
                             </svg>
                             Export Data
                         </button>
-                        <button onclick="refreshNetkbData()" class="refresh-btn bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-4 py-2 rounded-lg transition-colors">
+                        <button onclick="refreshNetkbData()" class="refresh-btn bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-lg transition-colors">
                             <svg class="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
                             </svg>
@@ -2213,7 +2274,7 @@
                 <!-- NetKB Filter Controls -->
                 <div class="mb-6">
                     <div class="flex flex-wrap gap-2 mb-4">
-                        <button onclick="filterNetkbData('all')" class="netkb-filter-btn px-3 py-1 rounded-full text-sm bg-Ragnar-600 text-white" data-filter="all">
+                        <button onclick="filterNetkbData('all')" class="netkb-filter-btn px-3 py-1 rounded-full text-sm bg-sky-600 text-white" data-filter="all">
                             All Entries
                         </button>
                         <button onclick="filterNetkbData('vulnerabilities')" class="netkb-filter-btn px-3 py-1 rounded-full text-sm bg-gray-600 text-white" data-filter="vulnerabilities">
@@ -2233,7 +2294,7 @@
                     <!-- Search Bar -->
                     <div class="flex space-x-3">
                         <input type="text" id="netkb-search" placeholder="Search NetKB entries..." 
-                               class="flex-1 bg-slate-700 text-white rounded px-3 py-2 border border-slate-600 focus:border-Ragnar-400 focus:outline-none"
+                               class="flex-1 bg-slate-700 text-white rounded px-3 py-2 border border-slate-600 focus:border-sky-400 focus:outline-none"
                                onkeyup="searchNetkbData(this.value)">
                         <button onclick="clearNetkbSearch()" class="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg transition-colors">
                             Clear
@@ -2336,7 +2397,7 @@
             <div class="glass rounded-xl p-6">
                 <div class="flex items-center justify-between mb-6">
                     <h2 class="text-2xl font-bold">E-Paper Display</h2>
-                    <button onclick="refreshEpaperDisplay()" class="refresh-btn bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-4 py-2 rounded-lg transition-colors">
+                    <button onclick="refreshEpaperDisplay()" class="refresh-btn bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-lg transition-colors">
                         <svg class="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
                         </svg>
@@ -2347,7 +2408,7 @@
                 <!-- Live Status Display -->
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
                     <div class="glass rounded-xl p-4">
-                        <h3 class="text-lg font-semibold mb-3 text-Ragnar-400">Current Status</h3>
+                        <h3 class="text-lg font-semibold mb-3 text-sky-400">Current Status</h3>
                         <div class="space-y-2">
                             <div class="flex justify-between">
                                 <span class="text-gray-400">Primary Status:</span>
@@ -2365,7 +2426,7 @@
                     </div>
                     
                     <div class="glass rounded-xl p-4">
-                        <h3 class="text-lg font-semibold mb-3 text-Ragnar-400">Display Info</h3>
+                        <h3 class="text-lg font-semibold mb-3 text-sky-400">Display Info</h3>
                         <div class="space-y-2">
                             <div class="flex justify-between">
                                 <span class="text-gray-400">Resolution:</span>
@@ -2386,10 +2447,10 @@
                 <!-- E-Paper Display Image -->
                 <div class="glass rounded-xl p-6">
                     <div class="flex items-center justify-between mb-4">
-                        <h3 class="text-lg font-semibold text-Ragnar-400">Live E-Paper Display</h3>
+                        <h3 class="text-lg font-semibold text-sky-400">Live E-Paper Display</h3>
                         <div class="flex items-center space-x-2">
                             <span class="text-sm text-gray-400">Size:</span>
-                            <button onclick="toggleEpaperSize()" class="bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-3 py-1 rounded text-sm transition-colors">
+                            <button onclick="toggleEpaperSize()" class="bg-sky-600 hover:bg-sky-700 text-white px-3 py-1 rounded text-sm transition-colors">
                                 Resize
                             </button>
                         </div>
@@ -2415,7 +2476,7 @@
                     </div>
                     <p class="text-center text-gray-400 text-sm mt-4">
                         This shows the exact same content as your Ragnar device's physical e-paper display<br>
-                        <span class="text-Ragnar-400">💡 Click the display image or use the Resize button to cycle through different sizes</span>
+                        <span class="text-sky-400">💡 Click the display image or use the Resize button to cycle through different sizes</span>
                     </p>
                 </div>
             </div>
@@ -2437,7 +2498,7 @@
                             </svg>
                             Start Capture
                         </button>
-                        <button onclick="refreshTrafficData()" class="flex-1 sm:flex-none refresh-btn bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-4 py-2 rounded-lg transition-colors text-sm sm:text-base">
+                        <button onclick="refreshTrafficData()" class="flex-1 sm:flex-none refresh-btn bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-lg transition-colors text-sm sm:text-base">
                             <svg class="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
                             </svg>
@@ -2827,7 +2888,7 @@
                         <h2 class="text-lg sm:text-2xl font-bold">Advanced Vulnerability Scanning</h2>
                         <span class="px-2 py-1 bg-cyan-600 bg-opacity-30 text-cyan-400 text-xs rounded-full whitespace-nowrap">Server Mode</span>
                     </div>
-                    <button onclick="refreshAdvVulnData()" class="w-full sm:w-auto refresh-btn bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-4 py-2 rounded-lg transition-colors text-sm sm:text-base">
+                    <button onclick="refreshAdvVulnData()" class="w-full sm:w-auto refresh-btn bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-lg transition-colors text-sm sm:text-base">
                         <svg class="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
                         </svg>
@@ -2949,7 +3010,7 @@
                                 <input type="text" id="adv-vuln-target" placeholder="192.168.1.1 or https://example.com"
                                        oninput="checkTargetCredentials(this.value)"
                                        onchange="checkTargetCredentials(this.value)"
-                                       class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg focus:ring-2 focus:ring-Ragnar-500 pr-24 text-sm">
+                                       class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg focus:ring-2 focus:ring-sky-500 pr-24 text-sm">
                                 <!-- Credential status badge -->
                                 <div id="target-cred-badge" class="absolute right-2 top-1/2 -translate-y-1/2 hidden">
                                     <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-600 text-white cursor-pointer"
@@ -3055,7 +3116,7 @@
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mb-3">
                             <div>
                                 <label class="block text-xs sm:text-sm text-gray-400 mb-1">Scanner</label>
-                                <select id="adv-vuln-scanner" class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg focus:ring-2 focus:ring-Ragnar-500 text-sm">
+                                <select id="adv-vuln-scanner" class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg focus:ring-2 focus:ring-sky-500 text-sm">
                                     <optgroup label="Traditional Scanners">
                                         <option value="nuclei">Nuclei (Templates)</option>
                                         <option value="nikto">Nikto (Web Server)</option>
@@ -3075,7 +3136,7 @@
                             </div>
                             <div>
                                 <label class="block text-xs sm:text-sm text-gray-400 mb-1">Authentication Type</label>
-                                <select id="zap-auth-type" onchange="toggleScanAuthFields()" class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg focus:ring-2 focus:ring-Ragnar-500 text-sm">
+                                <select id="zap-auth-type" onchange="toggleScanAuthFields()" class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg focus:ring-2 focus:ring-sky-500 text-sm">
                                     <option value="">None (Unauthenticated)</option>
                                     <option value="form">Form-based Login</option>
                                     <option value="http_basic">HTTP Basic Auth</option>
@@ -3415,7 +3476,7 @@
             <div class="glass rounded-xl p-6">
                 <div class="flex items-center justify-between mb-6">
                     <h2 class="text-2xl font-bold">Configuration</h2>
-                    <button onclick="refreshCurrentTab()" class="refresh-btn bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-4 py-2 rounded-lg transition-colors">
+                    <button onclick="refreshCurrentTab()" class="refresh-btn bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-lg transition-colors">
                         <svg class="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
                         </svg>
@@ -3425,7 +3486,7 @@
                 
                 <!-- System Management Section -->
                 <div class="mb-8">
-                    <h3 class="text-xl font-semibold mb-4 text-Ragnar-400">System Management</h3>
+                    <h3 class="text-xl font-semibold mb-4 text-sky-400">System Management</h3>
                     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                         
                         <!-- Update Status Card -->
@@ -3667,7 +3728,7 @@
                         <!-- Advanced Tools Section -->
                         <div class="col-span-full mt-2 mb-1">
                             <div style="border-top:1px solid rgba(255,255,255,0.08);padding-top:1rem;">
-                                <h3 class="text-xl font-semibold mb-4 text-Ragnar-400">Advanced Traffic &amp; Vulnerability Tools</h3>
+                                <h3 class="text-xl font-semibold mb-4 text-sky-400">Advanced Traffic &amp; Vulnerability Tools</h3>
                                 <p class="text-xs text-yellow-400" style="margin-bottom:0.75rem;">⚠️ Recommended for Pi 5 / 8 GB+ hardware. Can be enabled on lower-powered devices — monitor for instability.</p>
                             </div>
                         </div>
@@ -3731,7 +3792,7 @@
                                 <svg id="security-chevron" class="w-5 h-5 text-gray-400 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
                                 </svg>
-                                <h3 class="text-xl font-semibold text-Ragnar-400">Security</h3>
+                                <h3 class="text-xl font-semibold text-sky-400">Security</h3>
                             </div>
                             <span id="security-badge" class="hidden text-xs font-semibold uppercase tracking-wide px-3 py-1 rounded-full bg-green-900/40 text-green-400 border border-green-700">Enabled</span>
                         </button>
@@ -3747,7 +3808,7 @@
                 <div id="pwnagotchi-section" class="mb-8" style="display: none;">
                     <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                         <div>
-                            <h3 class="text-xl font-semibold text-Ragnar-400">Pwnagotchi Bridge</h3>
+                            <h3 class="text-xl font-semibold text-sky-400">Pwnagotchi Bridge</h3>
                             <p class="text-sm text-gray-400 mt-1">Install Pwnagotchi alongside Ragnar and swap which service owns the display without reflashing the SD card.</p>
                         </div>
                         <div class="flex items-center gap-3">
@@ -3856,7 +3917,7 @@
                 <div id="wpasec-section" class="mb-8" style="display: none;">
                     <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between mb-4">
                         <div>
-                            <h3 class="text-xl font-semibold text-Ragnar-400">wpa-sec Integration</h3>
+                            <h3 class="text-xl font-semibold text-sky-400">wpa-sec Integration</h3>
                             <p class="text-sm text-gray-400 mt-1">Automatically import cracked WiFi passwords from <a href="https://wpa-sec.stanev.org" target="_blank" class="text-cyan-400 hover:underline">wpa-sec.stanev.org</a> into Ragnar's known networks list.</p>
                         </div>
                         <div class="flex items-center gap-3">
@@ -3957,7 +4018,7 @@
                     </div>
                 </div>
                 <div class="mb-8">
-                    <h3 class="text-xl font-semibold mb-4 text-Ragnar-400">AI Integration</h3>
+                    <h3 class="text-xl font-semibold mb-4 text-sky-400">AI Integration</h3>
                     <div class="glass rounded-lg p-4">
                         <div class="flex flex-col gap-4 sm:flex-row sm:items-start mb-4">
                             <svg class="w-10 h-10 text-purple-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -4011,17 +4072,17 @@
 
                 <!-- Hardware Profile Configuration Section -->
                 <div class="mb-8">
-                    <h3 class="text-xl font-semibold mb-4 text-Ragnar-400">Hardware Resource Configuration</h3>
+                    <h3 class="text-xl font-semibold mb-4 text-sky-400">Hardware Resource Configuration</h3>
                     
                     <!-- Auto-detect Card -->
-                    <div class="glass rounded-lg p-4 mb-4 border-2 border-Ragnar-600">
+                    <div class="glass rounded-lg p-4 mb-4 border-2 border-sky-600">
                         <div class="flex items-center justify-between mb-3">
                             <div>
                                 <h4 class="font-medium text-lg">Hardware Detection</h4>
                                 <p class="text-sm text-gray-400 mt-1">Automatically detect hardware.</p>
                             </div>
                             <button onclick="detectAndApplyHardware()" 
-                                    class="bg-Ragnar-600 hover:bg-Ragnar-700 text-white py-2 px-4 rounded transition-colors">
+                                    class="bg-sky-600 hover:bg-sky-700 text-white py-2 px-4 rounded transition-colors">
                                 <svg class="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path>
                                 </svg>
@@ -4041,12 +4102,12 @@
                         <div class="flex flex-col sm:flex-row gap-4 items-end">
                             <div class="flex-1">
                                 <label for="hardware-profile-select" class="block text-sm font-medium text-gray-300 mb-2">Hardware Profile</label>
-                                <select id="hardware-profile-select" class="w-full bg-slate-700 border border-slate-600 text-white py-2 px-3 rounded-lg focus:ring-2 focus:ring-Ragnar-500 focus:border-transparent">
+                                <select id="hardware-profile-select" class="w-full bg-slate-700 border border-slate-600 text-white py-2 px-3 rounded-lg focus:ring-2 focus:ring-sky-500 focus:border-transparent">
                                     <option value="">Loading hardware profiles...</option>
                                 </select>
                             </div>
                             <button id="apply-profile-btn" onclick="applySelectedProfile()" 
-                                    class="bg-Ragnar-600 hover:bg-Ragnar-700 text-white py-2 px-6 rounded-lg transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed" 
+                                    class="bg-sky-600 hover:bg-sky-700 text-white py-2 px-6 rounded-lg transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed" 
                                     disabled>
                                 Apply Profile
                             </button>
@@ -4097,7 +4158,7 @@
                 
                 <!-- Configuration Form -->
                 <div>
-                    <h3 class="text-xl font-semibold mb-4 text-Ragnar-400">Advanced Settings</h3>
+                    <h3 class="text-xl font-semibold mb-4 text-sky-400">Advanced Settings</h3>
                     <div class="glass rounded-lg p-4">
                         <p class="text-sm text-gray-400 mb-4">Fine-tune individual settings (changes will override hardware profile)</p>
                         <div id="attack-warning" class="hidden mb-4 p-4 rounded-lg border border-red-500 bg-red-900 bg-opacity-30 text-sm text-red-100">
@@ -4132,7 +4193,7 @@
                 <button onclick="handleReleaseGateDecision(false)" class="flex-1 bg-gray-600 hover:bg-gray-700 text-white py-2 px-4 rounded transition-colors">
                     Later
                 </button>
-                <button onclick="handleReleaseGateDecision(true)" class="flex-1 bg-Ragnar-600 hover:bg-Ragnar-700 text-white py-2 px-4 rounded transition-colors">
+                <button onclick="handleReleaseGateDecision(true)" class="flex-1 bg-sky-600 hover:bg-sky-700 text-white py-2 px-4 rounded transition-colors">
                     Update Anyway
                 </button>
             </div>

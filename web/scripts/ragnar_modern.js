@@ -5,6 +5,50 @@ let reconnectAttempts = 0;
 const RECONNECT_WARNING_THRESHOLD = 5;
 const RECONNECT_DELAY_MAX = 15000;
 let currentTab = 'dashboard';
+
+// === TUXNET PENGUIN RANKS ===
+const PENGUIN_RANKS = [
+    { min: 1,  name: 'Hatchling 🐣' },
+    { min: 2,  name: 'Wobbly Chick 🐥' },
+    { min: 3,  name: 'Little Flipper' },
+    { min: 4,  name: 'Pebble Collector 🪨' },
+    { min: 5,  name: 'Rockhopper 🎸' },
+    { min: 6,  name: 'Chinstrap' },
+    { min: 7,  name: 'Macaroni 🍝' },
+    { min: 8,  name: 'Gentoo' },
+    { min: 9,  name: 'King Penguin 👑' },
+    { min: 10, name: 'Emperor 🌟' },
+];
+function getPenguinRank(level) {
+    const l = parseInt(level) || 1;
+    for (let i = PENGUIN_RANKS.length - 1; i >= 0; i--) {
+        if (l >= PENGUIN_RANKS[i].min) return PENGUIN_RANKS[i].name;
+    }
+    return PENGUIN_RANKS[0].name;
+}
+function updatePenguinRank(level, points) {
+    const rankName = document.getElementById('rank-name');
+    const rankFill = document.getElementById('rank-progress-fill');
+    if (rankName) rankName.textContent = getPenguinRank(level);
+    if (rankFill) {
+        const l = parseInt(level) || 1;
+        const p = parseInt(points) || 0;
+        const ptsPerLevel = 200;
+        const progressInLevel = p % ptsPerLevel;
+        rankFill.style.width = Math.min(100, (progressInLevel / ptsPerLevel) * 100) + '%';
+    }
+}
+
+// === TUXNET STATUS MAPPING ===
+const TUXNET_STATUS = {
+    'IDLE': 'Waddling... 🐧',
+    'SCANNING': 'Diving! 🌊',
+    'ATTACKING': 'Pecking Hard! 🐦',
+    'DONE': 'Back on Ice ❄',
+    'ERROR': 'Slipped on Ice! 🧊',
+    'WAITING': 'Huddling...',
+};
+function tuxnetStatus(s) { return TUXNET_STATUS[s] || s; }
 let autoRefreshIntervals = {};
 
 let preloadedTabs = new Set();
@@ -1282,6 +1326,7 @@ function updateDashboardStats(stats) {
     updateElement('dashboard-scanned-network-count', scannedNetworks);
     scaleStatNumber('dashboard-scanned-network-count', scannedNetworks);
     updateElement('points-count', points);
+    updatePenguinRank(level, points);
 
     const activeSummary = totalTargets > 0 ? `${activeTargets}/${totalTargets} active` : `${activeTargets} active`;
     const newSummary = newTargets > 0 ? `${newTargets} new` : 'No new targets';
@@ -8950,8 +8995,8 @@ function updateDashboardStatus(data) {
     });
 
     // Update status - use the actual e-paper display text
-    updateElement('Ragnar-status', data.ragnar_status || 'IDLE');
-    updateElement('Ragnar-says', (data.ragnar_says || 'Hacking away...'));
+    updateElement('Ragnar-status', tuxnetStatus(data.ragnar_status || 'IDLE'));
+    updateElement('Ragnar-says', (data.ragnar_says || '...brrrp...'));
     
     // Update mode and handle manual controls
     const automationEnabled = typeof data.automation_enabled === 'boolean' ? data.automation_enabled : !Boolean(data.manual_mode);
