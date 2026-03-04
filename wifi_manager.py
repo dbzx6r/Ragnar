@@ -265,13 +265,15 @@ class WiFiManager:
         try:
             cfg = self.shared_data.config
             if not cfg.get('auto_incognito_on_away', False):
+                self.logger.debug("Auto-incognito: disabled (auto_incognito_on_away=False)")
                 return
             home = cfg.get('home_network_ssid', '').strip()
             if not home:
+                self.logger.debug("Auto-incognito: no home network set")
                 return
             on_home = (ssid == home)
             currently_incognito = cfg.get('incognito_mode_enabled', False)
-            # Only act on transitions
+            self.logger.info(f"Auto-incognito check: ssid='{ssid}' home='{home}' on_home={on_home} currently_incognito={currently_incognito}")
             if on_home and currently_incognito:
                 self.logger.info("Auto-incognito: returned to home network — disabling incognito")
                 cfg['incognito_mode_enabled'] = False
@@ -286,6 +288,8 @@ class WiFiManager:
                 self.shared_data.save_config()
                 from actions.device_disguise import DeviceDisguise
                 DeviceDisguise(self.shared_data).execute()
+            else:
+                self.logger.info(f"Auto-incognito: no transition needed (on_home={on_home}, incognito={currently_incognito})")
         except Exception as exc:
             self.logger.warning(f"Auto-incognito check failed: {exc}")
 
@@ -1877,25 +1881,43 @@ class WiFiManager:
         for net in self.known_networks:
             net['priority'] = 100 if net['ssid'] == ssid else 0
         self.save_wifi_config()
-        # Apply OS-level autoconnect priority via nmcli
+        # Apply OS-level autoconnect priority via nmcli to home profile
         try:
-            subprocess.run(
+            result = subprocess.run(
                 ['sudo', 'nmcli', 'con', 'modify', ssid, 'connection.autoconnect-priority', '100'],
                 capture_output=True, timeout=5
             )
-        except Exception:
-            pass
-        # Reset all other known NM profiles to priority 0
-        for net in self.known_networks:
-            if net['ssid'] != ssid:
-                try:
-                    subprocess.run(
-                        ['sudo', 'nmcli', 'con', 'modify', net['ssid'], 'connection.autoconnect-priority', '0'],
-                        capture_output=True, timeout=5
-                    )
-                except Exception:
-                    pass
-        self.logger.info(f"Home network priority set: '{ssid}' → 100, all others → 0")
+            if result.returncode == 0:
+                self.logger.info(f"nmcli: set autoconnect-priority 100 on '{ssid}'")
+            else:
+                self.logger.warning(f"nmcli modify failed for home '{ssid}': {result.stderr.strip()}")
+        except Exception as e:
+            self.logger.warning(f"Could not set NM priority for home network '{ssid}': {e}")
+        # Reset ALL system WiFi profiles (not just Ragnar's known_networks) to priority 0
+        try:
+            all_profiles = []
+            result = subprocess.run(
+                ['nmcli', '-t', '-f', 'NAME,TYPE', 'con', 'show'],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode == 0:
+                for line in result.stdout.strip().split('\n'):
+                    if line and ':' in line:
+                        parts = line.split(':')
+                        if len(parts) >= 2 and parts[1] == '802-11-wireless':
+                            all_profiles.append(parts[0])
+            for profile in all_profiles:
+                if profile != ssid:
+                    try:
+                        subprocess.run(
+                            ['sudo', 'nmcli', 'con', 'modify', profile, 'connection.autoconnect-priority', '0'],
+                            capture_output=True, timeout=5
+                        )
+                    except Exception:
+                        pass
+            self.logger.info(f"Home network priority set: '{ssid}' → 100, {len(all_profiles)-1} others → 0")
+        except Exception as e:
+            self.logger.warning(f"Could not enumerate NM profiles for priority reset: {e}")
 
     def check_ap_clients(self):
         """Check how many clients are connected to the AP"""
