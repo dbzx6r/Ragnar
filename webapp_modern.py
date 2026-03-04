@@ -49,6 +49,12 @@ try:
     pandas_available = True
 except ImportError:
     pandas_available = False
+try:
+    import captive_portal as _captive_portal_module
+    captive_portal_available = True
+except ImportError:
+    _captive_portal_module = None
+    captive_portal_available = False
 from init_shared import shared_data
 from wifi_interfaces import gather_wifi_interfaces, gather_ethernet_interfaces, is_ethernet_available, get_active_ethernet_interface
 from utils import WebUtils
@@ -2841,6 +2847,82 @@ def serve_static(filename):
     return send_from_directory('web', filename)
 
 
+# --- Client captive portal (when Ragnar is a WiFi client) ---
+
+@app.route('/api/captive-portal', methods=['GET'])
+def get_captive_portal_status():
+    """Return current captive portal detection state."""
+    try:
+        status = {
+            "detected": bool(getattr(shared_data, 'captive_portal_detected', False)),
+            "portal_url": getattr(shared_data, 'captive_portal_url', None),
+            "authenticated": bool(getattr(shared_data, 'captive_portal_authenticated', False)),
+            "auto_auth_enabled": bool(
+                shared_data.config.get('captive_portal_auto_auth', True)
+            ),
+        }
+        return jsonify({"success": True, **status})
+    except Exception as exc:
+        logger.error(f"get_captive_portal_status failed: {exc}")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.route('/api/captive-portal/auth', methods=['POST'])
+def trigger_captive_portal_auth():
+    """Manually trigger a captive portal auto-auth attempt."""
+    if not captive_portal_available or _captive_portal_module is None:
+        return jsonify({"success": False, "message": "Captive portal module not available"}), 503
+
+    portal_url = getattr(shared_data, 'captive_portal_url', None)
+    if not portal_url:
+        return jsonify({"success": False, "message": "No captive portal URL known — run a detection first"}), 400
+
+    try:
+        result = _captive_portal_module.try_auto_auth(portal_url)
+        if result.get("success"):
+            shared_data.captive_portal_authenticated = True
+            shared_data.captive_portal_detected = False
+        return jsonify({"success": result.get("success", False), **result})
+    except Exception as exc:
+        logger.error(f"trigger_captive_portal_auth failed: {exc}")
+        return jsonify({"success": False, "message": str(exc)}), 500
+
+
+@app.route('/api/captive-portal/proxy', methods=['GET'])
+def captive_portal_proxy():
+    """Proxy the captive portal page so the user can authenticate from Ragnar's UI.
+
+    Fetches the portal page and rewrites its base URL so relative links work
+    when the HTML is served from Ragnar.  Only available when a portal is
+    actively detected (prevents open-proxy abuse).
+    """
+    if not getattr(shared_data, 'captive_portal_detected', False):
+        return jsonify({"success": False, "message": "No captive portal currently detected"}), 403
+
+    portal_url = getattr(shared_data, 'captive_portal_url', None)
+    if not portal_url:
+        return jsonify({"success": False, "message": "Portal URL not available"}), 404
+
+    try:
+        import requests as _requests
+        resp = _requests.get(portal_url, allow_redirects=True, timeout=10)
+        html = resp.text
+
+        # Inject a <base> tag so relative URLs resolve against the portal origin,
+        # placed immediately after the opening <head> tag (or at the top if absent).
+        base_tag = f'<base href="{portal_url}">'
+        if '<head>' in html.lower():
+            idx = html.lower().index('<head>') + len('<head>')
+            html = html[:idx] + base_tag + html[idx:]
+        else:
+            html = base_tag + html
+
+        return Response(html, status=200, content_type='text/html; charset=utf-8')
+    except Exception as exc:
+        logger.error(f"captive_portal_proxy failed: {exc}")
+        return jsonify({"success": False, "message": f"Could not fetch portal page: {exc}"}), 502
+
+
 @app.route('/api/system/headless')
 def get_system_headless():
     """Expose headless mode flag for UI to hide display-only features."""
@@ -3354,7 +3436,12 @@ def wpasec_imported_networks():
                 if entry.get('imported_at', '') < seen[ssid]['imported_at']:
                     seen[ssid]['imported_at'] = entry['imported_at']
 
-        return jsonify({'imported': list(seen.values())})
+        return jsonify({
+            'imported': list(seen.values()),
+            'last_polled': data.get('last_polled'),
+            'last_total_cracked': data.get('last_total_cracked'),
+            'last_added': data.get('last_added'),
+        })
     except Exception as e:
         logger.error(f"Failed to read wpa-sec imported list: {e}")
         return jsonify({'error': str(e)}), 500

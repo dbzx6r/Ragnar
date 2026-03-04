@@ -4909,6 +4909,16 @@ async function loadWpaSecImported() {
 
         if (countEl) countEl.textContent = `${entries.length} network${entries.length !== 1 ? 's' : ''}`;
 
+        // Restore persisted last-poll status
+        const resultEl = document.getElementById('wpasec-last-result');
+        const addedEl = document.getElementById('wpasec-networks-added');
+        if (data && data.last_polled) {
+            const when = new Date(data.last_polled);
+            const total = data.last_total_cracked != null ? data.last_total_cracked : '?';
+            if (resultEl) resultEl.textContent = `OK — ${total} cracked total (${when.toLocaleString()})`;
+            if (addedEl && data.last_added != null) addedEl.textContent = `${data.last_added} new`;
+        }
+
         if (entries.length === 0) {
             listEl.innerHTML = '<p class="text-gray-500 text-sm p-4 text-center">No networks imported yet — click Poll Now to fetch from wpa-sec.</p>';
             return;

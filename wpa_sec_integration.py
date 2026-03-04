@@ -146,6 +146,7 @@ class WpaSecIntegration:
 
         if not new_entries:
             self.logger.debug(f"wpa-sec poll: {len(entries)} cracked total, 0 new")
+            self._save_poll_meta(len(entries), 0)
             return result
 
         wifi_manager = self._get_wifi_manager()
@@ -171,6 +172,7 @@ class WpaSecIntegration:
             self._imported_ssid_keys.add(f"{ssid}|{password}")
 
         self._save_cache(new_entries)
+        self._save_poll_meta(len(entries), result['added'])
         self.logger.info(f"wpa-sec poll complete: {result['added']} new network(s) added ({len(entries)} total cracked)")
         if result['added'] > 0:
             try:
@@ -255,6 +257,27 @@ class WpaSecIntegration:
                 json.dump({'imported': existing}, fh, indent=2)
         except OSError as exc:
             self.logger.error(f"Could not save wpa-sec cache: {exc}")
+
+    def _save_poll_meta(self, total_cracked: int, added: int):
+        """Persist last_polled timestamp and result summary into the cache file."""
+        try:
+            existing_data = {}
+            if os.path.exists(self._cache_path):
+                with open(self._cache_path, 'r', encoding='utf-8') as fh:
+                    existing_data = json.load(fh)
+        except (OSError, json.JSONDecodeError):
+            existing_data = {}
+
+        existing_data['last_polled'] = datetime.now(timezone.utc).isoformat()
+        existing_data['last_total_cracked'] = total_cracked
+        existing_data['last_added'] = added
+
+        try:
+            os.makedirs(os.path.dirname(self._cache_path), exist_ok=True)
+            with open(self._cache_path, 'w', encoding='utf-8') as fh:
+                json.dump(existing_data, fh, indent=2)
+        except OSError as exc:
+            self.logger.error(f"Could not save wpa-sec poll meta: {exc}")
 
     # ------------------------------------------------------------------
     # Helpers
