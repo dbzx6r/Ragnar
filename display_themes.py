@@ -81,10 +81,10 @@ def _draw_comment_lines(draw, sx, sy, ys, sd):
         y_text += (sd.font_arialbold.getbbox(line)[3] - sd.font_arialbold.getbbox(line)[1]) + 3
 
 
-def _draw_stat_icon_box(draw, x, y, char, font):
-    """Draw a tiny 12x12 icon box with a centered character."""
-    draw.rectangle((x, y, x + 12, y + 12), outline=0)
-    draw.text((x + 2, y + 1), char, font=font, fill=0)
+def _draw_stat_label_value(draw, x, y, label, value, font):
+    """Draw a themed stat as two stacked lines: label (top) + value (bottom)."""
+    draw.text((x, y), label, font=font, fill=0)
+    draw.text((x, y + 9), value, font=font, fill=0)
 
 
 def _draw_corner_chars(draw, sd, corner_char, font):
@@ -224,18 +224,17 @@ def _render_penguin_main(loop, draw, image, sx, sy, ys):
 
     # Stats row 1: Penguins / Cracks / Fish
     row1 = [
-        ("P",  (int(8*sx),  int(22*sy)), (int(22*sx),  int(22*sy)), str(sd.targetnbr)),
-        ("CK", (int(47*sx), int(22*sy)), (int(61*sx),  int(22*sy)), str(sd.portnbr)),
-        ("FS", (int(86*sx), int(22*sy)), (int(100*sx), int(22*sy)), str(sd.vulnnbr)),
+        ("Pngs", int(8*sx),  int(22*sy), str(sd.targetnbr)),
+        ("Crak", int(47*sx), int(22*sy), str(sd.portnbr)),
+        ("Fish", int(86*sx), int(22*sy), str(sd.vulnnbr)),
     ]
     row2 = [
-        ("EG", (int(8*sx),  int(41*sy)), (int(22*sx), int(41*sy)),  str(sd.crednbr)),
-        ("CO", (int(47*sx), int(41*sy)), (int(61*sx), int(41*sy)),  str(sd.zombiesnbr)),
-        ("IN", (int(86*sx), int(41*sy)), (int(100*sx),int(41*sy)),  str(sd.datanbr)),
+        ("Eggs", int(8*sx),  int(41*sy), str(sd.crednbr)),
+        ("Coln", int(47*sx), int(41*sy), str(sd.zombiesnbr)),
+        ("Intl", int(86*sx), int(41*sy), str(sd.datanbr)),
     ]
-    for char, icon_pos, txt_pos, val in row1 + row2:
-        _draw_stat_icon_box(draw, icon_pos[0], icon_pos[1], char, font)
-        draw.text(txt_pos, val, font=font, fill=0)
+    for label, x, y, val in row1 + row2:
+        _draw_stat_label_value(draw, x, y, label, val, font)
 
     # Bottom corner stats
     draw.text((int(3*sx), int(174*sy*ys)), "Fish", font=font, fill=0)
@@ -340,18 +339,17 @@ def _render_car_main(loop, draw, image, sx, sy, ys):
     _draw_header(loop, draw, image, sx, sy, "ROADBOT")
 
     row1 = [
-        ("VH", (int(8*sx),  int(22*sy)), (int(22*sx),  int(22*sy)), str(sd.targetnbr)),
-        ("SP", (int(47*sx), int(22*sy)), (int(61*sx),  int(22*sy)), str(sd.portnbr)),
-        ("DT", (int(86*sx), int(22*sy)), (int(100*sx), int(22*sy)), str(sd.vulnnbr)),
+        ("Cars", int(8*sx),  int(22*sy), str(sd.targetnbr)),
+        ("Spd",  int(47*sx), int(22*sy), str(sd.portnbr)),
+        ("Dent", int(86*sx), int(22*sy), str(sd.vulnnbr)),
     ]
     row2 = [
-        ("FL", (int(8*sx),  int(41*sy)), (int(22*sx), int(41*sy)),  str(sd.crednbr)),
-        ("GR", (int(47*sx), int(41*sy)), (int(61*sx), int(41*sy)),  str(sd.zombiesnbr)),
-        ("RT", (int(86*sx), int(41*sy)), (int(100*sx),int(41*sy)),  str(sd.datanbr)),
+        ("Fuel", int(8*sx),  int(41*sy), str(sd.crednbr)),
+        ("Gear", int(47*sx), int(41*sy), str(sd.zombiesnbr)),
+        ("Rute", int(86*sx), int(41*sy), str(sd.datanbr)),
     ]
-    for char, icon_pos, txt_pos, val in row1 + row2:
-        _draw_stat_icon_box(draw, icon_pos[0], icon_pos[1], char, font)
-        draw.text(txt_pos, val, font=font, fill=0)
+    for label, x, y, val in row1 + row2:
+        _draw_stat_label_value(draw, x, y, label, val, font)
 
     draw.text((int(3*sx), int(174*sy*ys)), "Gold", font=font, fill=0)
     draw.text((int(3*sx), int(183*sy*ys)), str(sd.coinnbr), font=font, fill=0)
@@ -403,7 +401,8 @@ def _draw_matrix_rain(draw, x, y, w, h, font, seed=42):
     col_w = 8
     for col_x in range(x, x + w, col_w):
         drop_len = rng.randint(4, 12)
-        start_y = rng.randint(y, y + h - drop_len * 9)
+        max_start = max(y, y + h - drop_len * 9)
+        start_y = rng.randint(y, max_start)
         for i in range(drop_len):
             ch = rng.choice(MATRIX_CHARS)
             cy2 = start_y + i * 9
@@ -416,11 +415,11 @@ def _draw_matrix_rain(draw, x, y, w, h, font, seed=42):
                     draw.text((col_x + 1, cy2), ch, font=font, fill=0)
 
 
-def _draw_matrix_status_icon(draw, x, y):
+def _draw_matrix_status_icon(draw, x, y, font):
     """Small matrix icon for status zone: binary columns."""
     chars = ['1', '0', '1', '1', '0', '0', '1']
     for i, ch in enumerate(chars):
-        draw.text((x + 1, y + i * 9), ch, fill=0)
+        draw.text((x + 1, y + i * 9), ch, font=font, fill=0)
 
 
 def _draw_binary_band(draw, sx, sy, ys, sd):
@@ -446,18 +445,17 @@ def _render_matrix_main(loop, draw, image, sx, sy, ys):
 
     # Stats: all bracketed labels
     row1 = [
-        ("[T]", (int(8*sx),  int(22*sy)), (int(22*sx),  int(22*sy)), str(sd.targetnbr)),
-        ("[P]", (int(47*sx), int(22*sy)), (int(61*sx),  int(22*sy)), str(sd.portnbr)),
-        ("[V]", (int(86*sx), int(22*sy)), (int(100*sx), int(22*sy)), str(sd.vulnnbr)),
+        ("[TGT]", int(8*sx),  int(22*sy), str(sd.targetnbr)),
+        ("[PRT]", int(47*sx), int(22*sy), str(sd.portnbr)),
+        ("[VLN]", int(86*sx), int(22*sy), str(sd.vulnnbr)),
     ]
     row2 = [
-        ("[C]", (int(8*sx),  int(41*sy)), (int(22*sx), int(41*sy)),  str(sd.crednbr)),
-        ("[Z]", (int(47*sx), int(41*sy)), (int(61*sx), int(41*sy)),  str(sd.zombiesnbr)),
-        ("[D]", (int(86*sx), int(41*sy)), (int(100*sx),int(41*sy)),  str(sd.datanbr)),
+        ("[CRD]", int(8*sx),  int(41*sy), str(sd.crednbr)),
+        ("[ZMB]", int(47*sx), int(41*sy), str(sd.zombiesnbr)),
+        ("[DAT]", int(86*sx), int(41*sy), str(sd.datanbr)),
     ]
-    for char, icon_pos, txt_pos, val in row1 + row2:
-        draw.text(icon_pos, char, font=font, fill=0)
-        draw.text(txt_pos, val, font=font, fill=0)
+    for label, x, y, val in row1 + row2:
+        _draw_stat_label_value(draw, x, y, label, val, font)
 
     draw.text((int(3*sx), int(174*sy*ys)), "[AU]", font=font, fill=0)
     draw.text((int(3*sx), int(183*sy*ys)), str(sd.coinnbr), font=font, fill=0)
@@ -482,11 +480,10 @@ def _render_matrix_main(loop, draw, image, sx, sy, ys):
         "LynisPentestSSH": "[PENTEST]",
     }
     status_text = status_map.get(sd.ragnarorch_status, f"[{sd.ragnarorch_status}]")
-    # Matrix-style status indicator (3 binary columns)
-    for col in range(3):
-        for row in range(7):
-            ch = MATRIX_CHARS[(col * 3 + row) % len(MATRIX_CHARS)]
-            draw.text((int((3 + col * 7) * sx), int((61 + row * 9) * sy * ys)), ch, font=font, fill=0)
+    # Matrix-style status indicator: single binary column on left of status zone
+    for row in range(3):
+        ch = MATRIX_CHARS[row % len(MATRIX_CHARS)]
+        draw.text((int(3 * sx), int((61 + row * 8) * sy * ys)), ch, font=font, fill=0)
     draw.text((int(26*sx), int(62*sy*ys)), status_text, font=font, fill=0)
     draw.text((int(26*sx), int(72*sy*ys)), sd.ragnarstatustext2, font=font, fill=0)
 
@@ -560,18 +557,17 @@ def _render_space_main(loop, draw, image, sx, sy, ys):
     _draw_header(loop, draw, image, sx, sy, "STAR-NET")
 
     row1 = [
-        ("PL", (int(8*sx),  int(22*sy)), (int(22*sx),  int(22*sy)), str(sd.targetnbr)),
-        ("SG", (int(47*sx), int(22*sy)), (int(61*sx),  int(22*sy)), str(sd.portnbr)),
-        ("TH", (int(86*sx), int(22*sy)), (int(100*sx), int(22*sy)), str(sd.vulnnbr)),
+        ("Plnt", int(8*sx),  int(22*sy), str(sd.targetnbr)),
+        ("Sgnl", int(47*sx), int(22*sy), str(sd.portnbr)),
+        ("Thrt", int(86*sx), int(22*sy), str(sd.vulnnbr)),
     ]
     row2 = [
-        ("LF", (int(8*sx),  int(41*sy)), (int(22*sx), int(41*sy)),  str(sd.crednbr)),
-        ("MN", (int(47*sx), int(41*sy)), (int(61*sx), int(41*sy)),  str(sd.zombiesnbr)),
-        ("PB", (int(86*sx), int(41*sy)), (int(100*sx),int(41*sy)),  str(sd.datanbr)),
+        ("Life", int(8*sx),  int(41*sy), str(sd.crednbr)),
+        ("Moon", int(47*sx), int(41*sy), str(sd.zombiesnbr)),
+        ("Prbe", int(86*sx), int(41*sy), str(sd.datanbr)),
     ]
-    for char, icon_pos, txt_pos, val in row1 + row2:
-        _draw_stat_icon_box(draw, icon_pos[0], icon_pos[1], char, font)
-        draw.text(txt_pos, val, font=font, fill=0)
+    for label, x, y, val in row1 + row2:
+        _draw_stat_label_value(draw, x, y, label, val, font)
 
     draw.text((int(3*sx), int(174*sy*ys)), "Ore", font=font, fill=0)
     draw.text((int(3*sx), int(183*sy*ys)), str(sd.coinnbr), font=font, fill=0)
@@ -673,18 +669,17 @@ def _render_ghost_main(loop, draw, image, sx, sy, ys):
     _draw_header(loop, draw, image, sx, sy, "B00NET")
 
     row1 = [
-        ("SP", (int(8*sx),  int(22*sy)), (int(22*sx),  int(22*sy)), str(sd.targetnbr)),
-        ("HT", (int(47*sx), int(22*sy)), (int(61*sx),  int(22*sy)), str(sd.portnbr)),
-        ("CU", (int(86*sx), int(22*sy)), (int(100*sx), int(22*sy)), str(sd.vulnnbr)),
+        ("Sprt", int(8*sx),  int(22*sy), str(sd.targetnbr)),
+        ("Hant", int(47*sx), int(22*sy), str(sd.portnbr)),
+        ("Curs", int(86*sx), int(22*sy), str(sd.vulnnbr)),
     ]
     row2 = [
-        ("SK", (int(8*sx),  int(41*sy)), (int(22*sx), int(41*sy)),  str(sd.crednbr)),
-        ("EY", (int(47*sx), int(41*sy)), (int(61*sx), int(41*sy)),  str(sd.zombiesnbr)),
-        ("BT", (int(86*sx), int(41*sy)), (int(100*sx),int(41*sy)),  str(sd.datanbr)),
+        ("Skll", int(8*sx),  int(41*sy), str(sd.crednbr)),
+        ("Eyes", int(47*sx), int(41*sy), str(sd.zombiesnbr)),
+        ("Bats", int(86*sx), int(41*sy), str(sd.datanbr)),
     ]
-    for char, icon_pos, txt_pos, val in row1 + row2:
-        _draw_stat_icon_box(draw, icon_pos[0], icon_pos[1], char, font)
-        draw.text(txt_pos, val, font=font, fill=0)
+    for label, x, y, val in row1 + row2:
+        _draw_stat_label_value(draw, x, y, label, val, font)
 
     draw.text((int(3*sx), int(174*sy*ys)), "Gld", font=font, fill=0)
     draw.text((int(3*sx), int(183*sy*ys)), str(sd.coinnbr), font=font, fill=0)
