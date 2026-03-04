@@ -777,9 +777,9 @@ except Exception as e:
     # Install PyBluez for Bluetooth WiFi control
     log "INFO" "Installing PyBluez for Bluetooth WiFi control..."
     sudo apt-get install -y libbluetooth-dev bluez python3-dev >/dev/null 2>&1 || true
-    sudo pip3 install --break-system-packages "PyBluez>=0.23" || {
+    sudo pip3 install --break-system-packages "git+https://github.com/pybluez/pybluez.git#egg=PyBluez" || {
         log "WARNING" "Failed to install PyBluez. Bluetooth WiFi control will be disabled."
-        log "WARNING" "You can install it manually later with: sudo pip3 install --break-system-packages PyBluez"
+        log "WARNING" "You can install it manually later with: sudo pip3 install --break-system-packages 'git+https://github.com/pybluez/pybluez.git#egg=PyBluez'"
     }
 
     # Verify Waveshare e-Paper Python library (already installed in main())
