@@ -23,7 +23,7 @@ import logging
 import subprocess
 import threading
 import traceback
-from datetime import datetime
+from collections import deque
 try:
     from PIL import Image, ImageFont
 except ImportError:
@@ -297,8 +297,10 @@ class SharedData:
         self.crackedpwddir = self._default_crackedpwddir
         self.datastolendir = self._default_datastolendir
         self.zombiesdir = os.path.join(self.output_dir, 'zombies')
-        self.vulnerabilities_dir = os.path.join(self.output_dir, 'vulnerabilities')
-        self.scan_results_dir = os.path.join(self.output_dir, "scan_results")
+        self._default_vulnerabilities_dir = os.path.join(self.output_dir, 'vulnerabilities')
+        self._default_scan_results_dir = os.path.join(self.output_dir, "scan_results")
+        self.vulnerabilities_dir = self._default_vulnerabilities_dir
+        self.scan_results_dir = self._default_scan_results_dir
         # Directories under resourcesdir
         self.picdir = os.path.join(self.resourcesdir, 'images')
         self.fontdir = os.path.join(self.resourcesdir, 'fonts')
@@ -319,7 +321,7 @@ class SharedData:
         self.livestatusfile = os.path.join(self.datadir, 'livestatus.csv')
         self.gamification_file = os.path.join(self.datadir, 'gamification.json')
         self.pwnagotchi_status_file = os.path.join(self.datadir, 'pwnagotchi_status.json')
-        # Files directly under vulnerabilities_dir
+        # Files directly under vulnerabilities_dir (kept in sync via _update_output_paths)
         self.vuln_summary_file = os.path.join(self.vulnerabilities_dir, 'vulnerability_summary.csv')
         self.vuln_scan_progress_file = os.path.join(self.vulnerabilities_dir, 'scan_progress.json')
         # Files directly under dictionarydir
@@ -344,6 +346,9 @@ class SharedData:
         loot_data_dir = context.get('data_stolen_dir') or self._default_datastolendir
         loot_credentials_dir = context.get('credentials_dir') or self._default_crackedpwddir
         self._update_loot_paths(loot_data_dir, loot_credentials_dir)
+        scan_results_dir = context.get('scan_results_dir') or self._default_scan_results_dir
+        vulnerabilities_dir = context.get('vulnerabilities_dir') or self._default_vulnerabilities_dir
+        self._update_output_paths(scan_results_dir, vulnerabilities_dir)
         if configure_db and hasattr(self, 'db'):
             self._configure_database()
 
@@ -391,6 +396,17 @@ class SharedData:
             self.crackedpwddir = credentials_dir
         self.crackedpwd_dir = self.crackedpwddir  # legacy attribute name used by web UI
         self._refresh_credential_files()
+
+    def _update_output_paths(self, scan_results_dir, vulnerabilities_dir):
+        """Switch scan result and vulnerability dirs to the active network's paths."""
+        if scan_results_dir:
+            os.makedirs(scan_results_dir, exist_ok=True)
+            self.scan_results_dir = scan_results_dir
+        if vulnerabilities_dir:
+            os.makedirs(vulnerabilities_dir, exist_ok=True)
+            self.vulnerabilities_dir = vulnerabilities_dir
+            self.vuln_summary_file = os.path.join(vulnerabilities_dir, 'vulnerability_summary.csv')
+            self.vuln_scan_progress_file = os.path.join(vulnerabilities_dir, 'scan_progress.json')
 
     def _refresh_credential_files(self):
         """Keep credential CSV paths aligned with the active credential directory."""
@@ -489,6 +505,7 @@ class SharedData:
             "ref_height": default_profile["ref_height"],
             "epd_type": DEFAULT_EPD_TYPE,
             "screen_reversed": default_profile.get("default_flip", False),
+            "display_theme": "viking",
             
             
             "__title_lists__": "List Settings",
@@ -499,6 +516,19 @@ class SharedData:
             "steal_file_extensions": [".txt",".conf",".xml",".db",".sql",".key",".pem",".crt",".yaml",".yml",".config",".ini",".env",".cfg"],
             
             "__title_network__": "Network",
+            "aggressive_mode_enabled": False,
+            "ipcam_enabled": True,
+            "router_scanner_enabled": True,
+            "mqtt_scanner_enabled": True,
+            "snmp_scanner_enabled": True,
+            "incognito_mode_enabled": False,
+            "home_network_ssid": "",
+            "auto_incognito_on_away": False,
+            "captive_portal_auto_auth": True,
+            "original_mac": "",
+            "tshark_enabled": False,
+            "ngrep_enabled": False,
+            "nuclei_enabled": False,
             "nmap_scan_aggressivity": "-T4",
             "portstart": 1,
             "portend": 5500,
@@ -527,8 +557,8 @@ class SharedData:
             "wifi_monitor_enabled": True,
             "wifi_auto_ap_fallback": True,
             "wifi_ap_timeout": 180,
-            "wifi_multi_network_scans_enabled": True,
-            "wifi_multi_scan_mode": "multi",
+            "wifi_multi_network_scans_enabled": False,
+            "wifi_multi_scan_mode": "single",
             "wifi_multi_scan_focus_interface": "",
             "wifi_multi_scan_max_interfaces": 2,
             "wifi_multi_scan_max_parallel": 1,
@@ -570,7 +600,14 @@ class SharedData:
             "pwnagotchi_installed": False,
             "pwnagotchi_mode": "ragnar",
             "pwnagotchi_last_switch": "",
-            "pwnagotchi_last_status": "Not installed"
+            "pwnagotchi_last_status": "Not installed",
+
+            "__title_wpasec__": "wpa-sec Integration",
+            "wpasec_enabled": False,
+            "wpasec_api_key": "",
+            "wpasec_poll_interval": 3600,
+            "wpasec_auto_connect": True,
+            "wpasec_priority": 5
         }
 
     def apply_display_profile(self, epd_type=None, set_orientation_if_missing=False, persist=False):
@@ -857,6 +894,10 @@ class SharedData:
         self.wifi_signal_dbm = None  # Latest RSSI value for display
         self.wifi_signal_quality = None  # Normalized 0-100 quality percentage
         self.pan_connected = False
+        # Captive portal state (updated by wifi_manager after each connection)
+        self.captive_portal_detected = False
+        self.captive_portal_url = None
+        self.captive_portal_authenticated = False
         self.usb_active = False
         self.ragnarsays = "Hacking away..."
         self.ragnarorch_status = "IDLE"
@@ -878,6 +919,7 @@ class SharedData:
         self.networkkbnbr = 0
         self.attacksnbr = 0
         self.vulnerable_host_count = 0
+        self.activity_log = deque(maxlen=50)  # Live activity feed (thread-safe append)
         self.gamification_data = {}
         self.points_per_level = 200
         self.points_per_mac = 15
@@ -1155,6 +1197,17 @@ class SharedData:
         except Exception as e:
             logger.error(f"Unexpected error in initialize_csv: {e}")
 
+
+    def log_activity(self, event_type: str, message: str, detail: str = "", icon: str = ""):
+        """Append an event to the live activity feed."""
+        from datetime import datetime as _dt
+        self.activity_log.append({
+            "type": event_type,
+            "message": message,
+            "detail": detail,
+            "icon": icon,
+            "ts": _dt.now().isoformat(timespec="seconds"),
+        })
 
     def load_config(self):
         """Load the configuration from the shared configuration JSON file."""

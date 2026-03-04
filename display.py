@@ -26,6 +26,7 @@ from PIL import Image, ImageDraw
 from init_shared import shared_data  
 from comment import Commentaireia
 from logger import Logger
+from display_themes import get_theme
 import subprocess  
 
 logger = Logger(name="display.py", level=logging.DEBUG)
@@ -63,7 +64,6 @@ class Display:
             logger.info("Display initialization complete.")
         except Exception as e:
             logger.error(f"Error during display initialization: {e}")
-            raise
 
         self.main_image_thread = threading.Thread(target=self.update_main_image)
         self.main_image_thread.daemon = True
@@ -333,13 +333,25 @@ class Display:
                 logger.error(f"Error updating shared data: {e}")
 
     def display_comment(self, status):
-        """Display the comment based on the status of the ragnarorch."""
+        """Display the comment based on the status of the ragnarorch.
+        
+        If the active display theme has a themed comment pool, use a random
+        phrase from it instead of the default commentaire_ia."""
+        try:
+            _theme = get_theme(self.shared_data.config)
+            _pool = _theme.get("comments", {})
+            if _pool:
+                _phrases = _pool.get(status) or _pool.get("IDLE")
+                if _phrases:
+                    self.shared_data.ragnarsays = random.choice(_phrases)
+                    self.shared_data.ragnarstatustext = self.shared_data.ragnarorch_status
+                    return
+        except Exception:
+            pass
         comment = self.commentaire_ia.get_commentaire(status)
         if comment:
             self.shared_data.ragnarsays = comment
             self.shared_data.ragnarstatustext = self.shared_data.ragnarorch_status
-        else:
-            pass
 
     # # # def is_bluetooth_connected(self):
     # # #     """
@@ -725,8 +737,10 @@ class Display:
         self._page_cache[key] = (now, data)
         return data
 
-    def _draw_page_frame(self, draw, title):
-        """Draw standard page frame: border, title, divider, footer."""
+    def _draw_page_frame(self, draw, page_key):
+        """Draw standard page frame using the active theme's page title."""
+        theme = get_theme(self.shared_data.config)
+        title = theme["page_titles"].get(page_key, page_key.upper())
         w = self.shared_data.width
         h = self.shared_data.height
         font = self.shared_data.font_arial9
@@ -900,7 +914,7 @@ class Display:
 
     def _render_network_page(self, image, draw):
         """Render Page 2: Network Scanner - real host data from database."""
-        self._draw_page_frame(draw, "NETWORK SCAN")
+        self._draw_page_frame(draw, "network")
         w = self.shared_data.width
         h = self.shared_data.height
         font = self.shared_data.font_arial9
@@ -949,7 +963,7 @@ class Display:
 
     def _render_vuln_page(self, image, draw):
         """Render Page 3: Vulnerability Scanner - real scan intel from files."""
-        self._draw_page_frame(draw, "VULN INTEL")
+        self._draw_page_frame(draw, "vuln")
         w = self.shared_data.width
         h = self.shared_data.height
         font = self.shared_data.font_arial9
@@ -992,7 +1006,7 @@ class Display:
 
     def _render_discovered_page(self, image, draw):
         """Render Page 4: Discovered - real credentials, loot, and attack data."""
-        self._draw_page_frame(draw, "DISCOVERED")
+        self._draw_page_frame(draw, "discovered")
         w = self.shared_data.width
         h = self.shared_data.height
         font = self.shared_data.font_arial9
@@ -1030,7 +1044,7 @@ class Display:
 
     def _render_advanced_page(self, image, draw):
         """Render Page 5: Advanced Vuln Scanner - real scanner status and findings."""
-        self._draw_page_frame(draw, "ADV SCANNER")
+        self._draw_page_frame(draw, "advanced")
         w = self.shared_data.width
         h = self.shared_data.height
         font = self.shared_data.font_arial9
@@ -1102,7 +1116,7 @@ class Display:
 
     def _render_traffic_page(self, image, draw):
         """Render Page 6: Traffic Analysis - real capture data."""
-        self._draw_page_frame(draw, "TRAFFIC")
+        self._draw_page_frame(draw, "traffic")
         w = self.shared_data.width
         h = self.shared_data.height
         font = self.shared_data.font_arial9
@@ -1142,9 +1156,33 @@ class Display:
             ]
             self._draw_stat_rows(draw, y, stats)
 
+    @staticmethod
+    def _apply_incognito_mask(img):
+        """Overlay an anonymous mask on the viking's face. Scales to any image size."""
+        try:
+            masked = img.convert('RGB')
+            d = ImageDraw.Draw(masked)
+            w = masked.width
+            # All coordinates defined on a 28px reference, scaled to actual size
+            s = w / 28.0
+            def px(v): return int(v * s)
+            # Oval face mask
+            d.ellipse([px(9), px(8), px(19), px(15)], fill='white', outline='black')
+            # Eyes (2x2 pixel blocks scaled)
+            eye_sz = max(1, px(1))
+            d.rectangle([px(11), px(10), px(11)+eye_sz, px(10)+eye_sz], fill='black')
+            d.rectangle([px(16), px(10), px(16)+eye_sz, px(10)+eye_sz], fill='black')
+            # Smile points
+            for pt in [(11, 13), (12, 14), (14, 14), (16, 14), (17, 13)]:
+                d.point((px(pt[0]), px(pt[1])), fill='black')
+            return masked.convert(img.mode)
+        except Exception:
+            return img  # fallback: return original if anything goes wrong
+
     def run(self):
         """Main loop for updating the EPD display with shared data."""
         self.manual_mode_txt = ""
+        _last_page = PAGE_MAIN
         while not self.shared_data.display_should_exit:
             try:
                 self.epd_helper.init_partial_update()
@@ -1160,6 +1198,16 @@ class Display:
                 current_page = PAGE_MAIN
                 if self.button_listener and self.button_listener.available:
                     current_page = self.button_listener.current_page
+
+                # Full refresh on page change to prevent V2 ghosting
+                if current_page != _last_page:
+                    try:
+                        self.epd_helper.init_full_update()
+                        self.epd_helper.clear()
+                        self.epd_helper.init_partial_update()
+                    except Exception:
+                        pass
+                    _last_page = current_page
 
                 if current_page == PAGE_NETWORK:
                     self._render_network_page(image, draw)
@@ -1189,101 +1237,23 @@ class Display:
                     self._sleep_interruptible(current_page)
                     continue
 
-                # === PAGE_MAIN: Default Ragnar display ===
-                # Check PiSugar once per frame for title sizing + battery text
-                _pisugar_available = False
+                # === PAGE_MAIN: Delegate to active theme renderer ===
+                # PiSugar info is needed by the theme header helper
+                self._pisugar_available = False
+                self._ps = None
                 try:
                     _ri = getattr(self.shared_data, 'ragnar_instance', None)
                     _ps = getattr(_ri, 'pisugar_listener', None) if _ri else None
-                    _pisugar_available = _ps and _ps.available
+                    self._pisugar_available = bool(_ps and _ps.available)
+                    self._ps = _ps if self._pisugar_available else None
                 except Exception:
                     pass
-                if _pisugar_available:
-                    draw.text((int(40 * self.scale_factor_x), int(6 * self.scale_factor_y)), "RAGNAR", font=self.shared_data.font_viking_sm, fill=0)
-                else:
-                    draw.text((int(37 * self.scale_factor_x), int(5 * self.scale_factor_y)), "RAGNAR", font=self.shared_data.font_viking, fill=0)
-                draw.text((int(110 * self.scale_factor_x), int(170 * self.scale_factor_y)), self.manual_mode_txt, font=self.shared_data.font_arial14, fill=0)
-                
-                # Show AP status or WiFi status in the top-left corner
-                if hasattr(self.shared_data, 'ap_mode_active') and self.shared_data.ap_mode_active:
-                    # Show AP status with client count
-                    ap_text = f"AP"
-                    if hasattr(self.shared_data, 'ap_client_count') and self.shared_data.ap_client_count > 0:
-                        ap_text = f"AP:{self.shared_data.ap_client_count}"
-                    draw.text((int(3 * self.scale_factor_x), int(3 * self.scale_factor_y)), ap_text, font=self.shared_data.font_arial9, fill=0)
-                elif self.shared_data.wifi_connected:
-                    self.render_wifi_wave_indicator(image, draw)
-                # # # if self.shared_data.bluetooth_active:
-                # # #     image.paste(self.shared_data.bluetooth, (int(23 * self.scale_factor_x), int(4 * self.scale_factor_y)))
-                if self.shared_data.pan_connected:
-                    image.paste(self.shared_data.connected, (int(104 * self.scale_factor_x), int(3 * self.scale_factor_y)))
-                if self.shared_data.usb_active:
-                    image.paste(self.shared_data.usb, (int(90 * self.scale_factor_x), int(4 * self.scale_factor_y)))
 
-                # Battery percentage (PiSugar) - flush right in header
-                if _pisugar_available:
-                    try:
-                        bat_level = _ps.get_battery_level()
-                        if bat_level is not None:
-                            bat_level = int(round(bat_level))
-                            charging = _ps.is_charging()
-                            bat_text = f"{bat_level}%+" if charging else f"{bat_level}%"
-                            bbox = self.shared_data.font_arial9.getbbox(bat_text)
-                            text_w = bbox[2] - bbox[0]
-                            tx = self.shared_data.width - text_w - 1
-                            draw.text((tx, int(10 * self.scale_factor_y)),
-                                      bat_text, font=self.shared_data.font_arial9, fill=0)
-                    except Exception:
-                        pass
-
-                # ys stretches the status/comment section down on wider displays
-                # Stats rows stay at normal scale, only dividers and status below get stretched
-                ys = self.y_stretch
-                sx = self.scale_factor_x
-                sy = self.scale_factor_y
-                stats = [
-                    (self.shared_data.target, (int(8 * sx), int(22 * sy)), (int(28 * sx), int(22 * sy)), str(self.shared_data.targetnbr)),
-                    (self.shared_data.port, (int(47 * sx), int(22 * sy)), (int(67 * sx), int(22 * sy)), str(self.shared_data.portnbr)),
-                    (self.shared_data.vuln, (int(86 * sx), int(22 * sy)), (int(106 * sx), int(22 * sy)), str(self.shared_data.vulnnbr)),
-                    (self.shared_data.cred, (int(8 * sx), int(41 * sy)), (int(28 * sx), int(41 * sy)), str(self.shared_data.crednbr)),
-                    (self.shared_data.money, (int(3 * sx), int(172 * sy)), (int(3 * sx), int(192 * sy)), str(self.shared_data.coinnbr)),
-                    (self.shared_data.level, (int(2 * sx), int(217 * sy)), (int(4 * sx), int(237 * sy)), str(self.shared_data.levelnbr)),
-                    (self.shared_data.zombie, (int(47 * sx), int(41 * sy)), (int(67 * sx), int(41 * sy)), str(self.shared_data.zombiesnbr)),
-                    (self.shared_data.networkkb, (int(102 * sx), int(190 * sy)), (int(102 * sx), int(208 * sy)), str(self.shared_data.networkkbnbr)),
-                    (self.shared_data.data, (int(86 * sx), int(41 * sy)), (int(106 * sx), int(41 * sy)), str(self.shared_data.datanbr)),
-                    (self.shared_data.attacks, (int(100 * sx), int(218 * sy)), (int(102 * sx), int(237 * sy)), str(self.shared_data.attacksnbr)),
-                ]
-
-                for img, img_pos, text_pos, text in stats:
-                    image.paste(img, img_pos)
-                    draw.text(text_pos, text, font=self.shared_data.font_arial9, fill=0)
-
-                self.shared_data.update_ragnarstatus()
-                image.paste(self.shared_data.ragnarstatusimage, (int(3 * sx), int(60 * sy * ys)))
-                draw.text((int(35 * sx), int(65 * sy * ys)), self.shared_data.ragnarstatustext, font=self.shared_data.font_arial9, fill=0)
-                draw.text((int(35 * sx), int(75 * sy * ys)), self.shared_data.ragnarstatustext2, font=self.shared_data.font_arial9, fill=0)
-
-                # Frise ribbon - hide on wide displays to save vertical space
-                if ys == 1.0:
-                    frise_x, frise_y = self.get_frise_position()
-                    image.paste(self.shared_data.frise, (frise_x, frise_y))
-
-                draw.rectangle((1, 1, self.shared_data.width - 1, self.shared_data.height - 1), outline=0)
-                draw.line((1, int(20 * sy), self.shared_data.width - 1, int(20 * sy)), fill=0)
-                draw.line((1, int(59 * sy * ys), self.shared_data.width - 1, int(59 * sy * ys)), fill=0)
-                draw.line((1, int(87 * sy * ys), self.shared_data.width - 1, int(87 * sy * ys)), fill=0)
-
-                lines = self.shared_data.wrap_text(self.shared_data.ragnarsays, self.shared_data.font_arialbold, self.shared_data.width - 4)
-                y_text = int(90 * sy * ys)
-
-                if self.main_image is not None:
-                    image.paste(self.main_image, (self.shared_data.x_center1, self.shared_data.y_bottom1))
-                else:
-                    logger.error("Main image not found in shared_data.")
-
-                for line in lines:
-                    draw.text((int(4 * self.scale_factor_x), y_text), line, font=self.shared_data.font_arialbold, fill=0)
-                    y_text += (self.shared_data.font_arialbold.getbbox(line)[3] - self.shared_data.font_arialbold.getbbox(line)[1]) + 3
+                _theme = get_theme(self.shared_data.config)
+                _sx = self.scale_factor_x
+                _sy = self.scale_factor_y
+                _ys = self.y_stretch
+                _theme["render_main_page"](self, draw, image, _sx, _sy, _ys)
 
                 if self.screen_reversed:
                     image = image.transpose(Image.Transpose.ROTATE_180)

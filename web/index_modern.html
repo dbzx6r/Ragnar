@@ -215,7 +215,10 @@
                 width: 100%;
             }
         }
+        /* Toggle switch: show green when ON, regardless of Tailwind purge state */
+        label > input[type="checkbox"]:checked + div { background-color: #16a34a !important; }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 </head>
 
 <body class="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white min-h-screen">
@@ -247,8 +250,14 @@
                     <button onclick="showTab('network')" class="nav-btn px-4 py-2 rounded-lg hover:bg-slate-700 transition-colors" data-tab="network">
                         Network
                     </button>
+                    <button onclick="showTab('network-map')" class="nav-btn px-4 py-2 rounded-lg hover:bg-slate-700 transition-colors" data-tab="network-map">
+                        Map
+                    </button>
                     <button onclick="showTab('discovered')" class="nav-btn px-4 py-2 rounded-lg hover:bg-slate-700 transition-colors" data-tab="discovered">
                         Discovered
+                    </button>
+                    <button onclick="showTab('credentials')" class="nav-btn px-4 py-2 rounded-lg hover:bg-slate-700 transition-colors" data-tab="credentials">
+                        Credentials
                     </button>
                     <button id="pentest-nav-btn" onclick="showTab('pentest')"
                             class="nav-btn px-4 py-2 rounded-lg transition-colors pentest-nav-btn hidden"
@@ -313,7 +322,9 @@
             <div class="px-2 pt-2 pb-3 space-y-1">
                 <button onclick="showTab('dashboard')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Dashboard</button>
                 <button onclick="showTab('network')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Network</button>
+                <button onclick="showTab('network-map')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Network Map</button>
                 <button onclick="showTab('discovered')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Discovered</button>
+                <button onclick="showTab('credentials')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Credentials</button>
                 <button onclick="showTab('pentest')"
                         id="mobile-pentest-nav"
                         class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700 pentest-nav-btn hidden"
@@ -338,6 +349,20 @@
         
         <!-- Dashboard Tab -->
         <div id="dashboard-tab" class="tab-content">
+            <!-- Report Export Bar -->
+            <div class="glass rounded-xl p-4 mb-6 flex items-center justify-between">
+                <div>
+                    <span class="font-semibold">Scan Report</span>
+                    <span class="text-gray-400 text-sm ml-2">Export a full HTML report of all findings</span>
+                </div>
+                <button onclick="exportScanReport()" id="export-report-btn"
+                    class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-colors text-sm flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-4-4m4 4l4-4m6 4H6"></path>
+                    </svg>
+                    Export Report
+                </button>
+            </div>
             <!-- Stats Grid -->
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-8">
                 <!-- Targets Card -->
@@ -828,6 +853,126 @@
             </div>
         </div>
         
+        <!-- Activity Feed Card (end of dashboard tab) -->
+        <div class="mt-6 glass rounded-xl p-6">
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-3">
+                    <svg class="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                    </svg>
+                    <h3 class="text-lg font-semibold">Live Activity</h3>
+                </div>
+                <span id="activity-feed-count" class="text-xs text-gray-500"></span>
+            </div>
+            <div id="activity-feed-list" class="space-y-1 overflow-y-auto" style="max-height: 280px;">
+                <p class="text-gray-500 text-sm text-center py-6">No activity yet — events will appear here as Ragnar works.</p>
+            </div>
+        </div>
+        </div>
+
+        <!-- Credentials Tab -->
+        <div id="credentials-tab" class="tab-content hidden">
+            <div class="glass rounded-xl p-6">
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6">
+                    <div>
+                        <h2 class="text-2xl font-bold mb-1">Credentials</h2>
+                        <p class="text-sm text-gray-400">All discovered credentials across all services</p>
+                    </div>
+                    <div class="flex gap-2 mt-4 sm:mt-0">
+                        <button onclick="exportCredentialsCSV()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-colors text-sm">
+                            Export CSV
+                        </button>
+                        <button onclick="loadCredentials(true)" class="bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-4 py-2 rounded-lg transition-colors text-sm">
+                            Refresh
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Stats row -->
+                <div id="cred-stats" class="grid grid-cols-3 sm:grid-cols-7 gap-3 mb-6"></div>
+
+                <!-- Filters -->
+                <div class="flex flex-col sm:flex-row gap-3 mb-4">
+                    <div class="relative flex-1">
+                        <svg class="w-4 h-4 text-gray-400 pointer-events-none" style="position:absolute;right:0.75rem;top:50%;transform:translateY(-50%);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 1 0 5 11a6 6 0 0 0 12 0z"></path>
+                        </svg>
+                        <input id="cred-ip-search" type="text" placeholder="Filter by IP..." oninput="onCredSearch(this.value)"
+                            class="w-full bg-slate-800 border border-slate-600 rounded-lg py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-Ragnar-500" style="padding-left:0.75rem;padding-right:2.5rem;">
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <button onclick="filterCredsByService('all')" data-svc="all" class="cred-svc-btn bg-Ragnar-600 text-white px-3 py-2 rounded-lg text-sm transition-colors">All</button>
+                        <button onclick="filterCredsByService('ssh')" data-svc="ssh" class="cred-svc-btn bg-slate-700 hover:bg-slate-600 text-white px-3 py-2 rounded-lg text-sm transition-colors">SSH</button>
+                        <button onclick="filterCredsByService('smb')" data-svc="smb" class="cred-svc-btn bg-slate-700 hover:bg-slate-600 text-white px-3 py-2 rounded-lg text-sm transition-colors">SMB</button>
+                        <button onclick="filterCredsByService('ftp')" data-svc="ftp" class="cred-svc-btn bg-slate-700 hover:bg-slate-600 text-white px-3 py-2 rounded-lg text-sm transition-colors">FTP</button>
+                        <button onclick="filterCredsByService('telnet')" data-svc="telnet" class="cred-svc-btn bg-slate-700 hover:bg-slate-600 text-white px-3 py-2 rounded-lg text-sm transition-colors">Telnet</button>
+                        <button onclick="filterCredsByService('rdp')" data-svc="rdp" class="cred-svc-btn bg-slate-700 hover:bg-slate-600 text-white px-3 py-2 rounded-lg text-sm transition-colors">RDP</button>
+                        <button onclick="filterCredsByService('sql')" data-svc="sql" class="cred-svc-btn bg-slate-700 hover:bg-slate-600 text-white px-3 py-2 rounded-lg text-sm transition-colors">SQL</button>
+                    </div>
+                </div>
+
+                <!-- Table -->
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="border-b border-slate-700">
+                                <th onclick="sortCredsBy('ip')" class="text-left py-3 px-4 text-gray-400 font-medium cursor-pointer hover:text-white select-none">
+                                    IP <span id="cred-sort-ip" class="text-xs"></span>
+                                </th>
+                                <th onclick="sortCredsBy('service')" class="text-left py-3 px-4 text-gray-400 font-medium cursor-pointer hover:text-white select-none">
+                                    Service <span id="cred-sort-service" class="text-xs"></span>
+                                </th>
+                                <th class="text-left py-3 px-4 text-gray-400 font-medium">Port</th>
+                                <th onclick="sortCredsBy('username')" class="text-left py-3 px-4 text-gray-400 font-medium cursor-pointer hover:text-white select-none">
+                                    Username <span id="cred-sort-username" class="text-xs"></span>
+                                </th>
+                                <th class="text-left py-3 px-4 text-gray-400 font-medium">Password</th>
+                                <th class="text-left py-3 px-4 text-gray-400 font-medium">Copy</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cred-table-body">
+                            <tr><td colspan="6" class="py-8 text-center text-gray-400">Loading credentials...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div id="cred-table-count" class="text-sm text-gray-400 mt-3"></div>
+            </div>
+        </div>
+
+        <!-- Network Map Tab -->
+        <div id="network-map-tab" class="tab-content hidden">
+            <div class="glass rounded-xl p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <h2 class="text-2xl font-bold">Network Map</h2>
+                        <p class="text-sm text-gray-400">Interactive force-directed graph of discovered hosts</p>
+                    </div>
+                    <div class="flex items-center gap-4">
+                        <!-- Legend -->
+                        <div class="flex items-center gap-3 text-xs text-gray-400">
+                            <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-full bg-slate-500"></span> No data</span>
+                            <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-full bg-green-500"></span> Low</span>
+                            <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-full bg-amber-500"></span> Medium</span>
+                            <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-full bg-red-500"></span> High</span>
+                        </div>
+                        <button onclick="refreshNetworkMap()" class="bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-4 py-2 rounded-lg transition-colors text-sm">
+                            Refresh
+                        </button>
+                    </div>
+                </div>
+                <!-- Tooltip -->
+                <div id="map-tooltip" class="absolute z-50 bg-slate-800 border border-slate-600 rounded-lg p-3 text-sm pointer-events-none hidden max-w-xs"></div>
+                <!-- SVG canvas -->
+                <div id="network-map-container" class="w-full rounded-lg bg-slate-950 border border-slate-700" style="height:600px;position:relative;">
+                    <div id="network-map-loading" class="flex items-center justify-center h-full text-gray-400">
+                        <p>Loading network map...</p>
+                    </div>
+                    <svg id="network-map-svg" class="w-full h-full" style="display:none;"></svg>
+                </div>
+                <p class="text-xs text-gray-500 mt-2">Click a node to open host details. Scroll to zoom. Drag to pan.</p>
+            </div>
+        </div>
+
         <!-- Connect Tab -->
         <div id="connect-tab" class="tab-content hidden">
             <div class="glass rounded-xl p-6">
@@ -921,8 +1066,8 @@
                                         <p class="text-[11px] text-gray-500">Choose whether Ragnar chases every adapter or locks onto one.</p>
                                     </div>
                                     <div id="wifi-multi-mode-buttons" class="flex gap-2">
-                                        <button type="button" data-mode="multi" class="text-xs font-semibold px-3 py-1 rounded-full border border-slate-600 bg-slate-800 text-gray-300 transition-all">Single Focus</button>
-                                        <button type="button" data-mode="single" class="text-xs font-semibold px-3 py-1 rounded-full border border-slate-600 bg-slate-800 text-gray-300 transition-all">All Adapters</button>
+                                        <button type="button" data-mode="single" class="text-xs font-semibold px-3 py-1 rounded-full border border-slate-600 bg-slate-800 text-gray-300 transition-all">Single Focus</button>
+                                        <button type="button" data-mode="multi" class="text-xs font-semibold px-3 py-1 rounded-full border border-slate-600 bg-slate-800 text-gray-300 transition-all">All Adapters</button>
                                     </div>
                                 </div>
                                 <div id="wifi-multi-focus-controls" class="mt-3 hidden">
@@ -930,7 +1075,7 @@
                                     <select id="wifi-multi-focus-select" class="mt-2 w-full bg-slate-950/70 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-Ragnar-500">
                                         <option value="">Loading adapters…</option>
                                     </select>
-                                    <p class="text-[11px] text-gray-500 mt-2">Only this adapter drives discovery when All Adapters mode is active.</p>
+                                    <p class="text-[11px] text-gray-500 mt-2">Only this adapter drives discovery when Single Focus is active.</p>
                                 </div>
                             </div>
                             <div id="wifi-multi-interface-list" class="mt-4 space-y-3">
@@ -1851,6 +1996,32 @@
                 
             </div>
 
+            <!-- File Preview Modal -->
+            <div id="file-preview-modal" class="fixed inset-0 bg-black bg-opacity-75 hidden items-center justify-center z-50 p-4">
+                <div class="glass rounded-xl w-full max-w-4xl flex flex-col overflow-hidden" style="max-height:calc(100vh - 2rem)">
+                    <!-- Modal header -->
+                    <div class="flex items-center justify-between p-4 border-b border-slate-700 flex-shrink-0">
+                        <div class="flex items-center gap-3">
+                            <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                            </svg>
+                            <span id="preview-filename" class="font-semibold truncate max-w-md"></span>
+                            <span id="preview-truncated-badge" class="hidden text-xs bg-yellow-700 text-yellow-200 px-2 py-0.5 rounded">Truncated — file too large</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button id="preview-download-btn" onclick="" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-sm transition-colors">Download</button>
+                            <button onclick="closeFilePreview()" class="p-1.5 hover:bg-slate-700 rounded-lg transition-colors">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <!-- Modal content -->
+                    <div id="preview-content" class="flex-1 overflow-y-auto p-4 min-h-0"></div>
+                </div>
+            </div>
+
             <!-- File Operations Modal -->
             <div id="file-operations-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
                 <div class="glass rounded-xl p-6 max-w-md w-full mx-4">
@@ -2212,6 +2383,45 @@
                     </div>
                 </div>
                 
+                <!-- Display Theme Selector -->
+                <div class="glass rounded-xl p-6 mb-6">
+                    <h3 class="text-lg font-semibold mb-4 text-Ragnar-400">🎨 Display Theme</h3>
+                    <p class="text-gray-400 text-sm mb-4">Choose a theme for the e-ink display. Changes take effect on the next display refresh.</p>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3" id="theme-selector-grid">
+                        <button onclick="setDisplayTheme('viking')"   data-theme="viking"   class="theme-btn glass rounded-lg p-3 text-center hover:bg-slate-700 transition-colors border-2 border-transparent">
+                            <div class="text-2xl mb-1">⚔️</div>
+                            <div class="text-xs text-white font-semibold">Viking</div>
+                            <div class="text-xs text-gray-400">Classic</div>
+                        </button>
+                        <button onclick="setDisplayTheme('penguin')"  data-theme="penguin"  class="theme-btn glass rounded-lg p-3 text-center hover:bg-slate-700 transition-colors border-2 border-transparent">
+                            <div class="text-2xl mb-1">🐧</div>
+                            <div class="text-xs text-white font-semibold">Penguin</div>
+                            <div class="text-xs text-gray-400">Antarctica</div>
+                        </button>
+                        <button onclick="setDisplayTheme('car')"      data-theme="car"      class="theme-btn glass rounded-lg p-3 text-center hover:bg-slate-700 transition-colors border-2 border-transparent">
+                            <div class="text-2xl mb-1">🚗</div>
+                            <div class="text-xs text-white font-semibold">Car</div>
+                            <div class="text-xs text-gray-400">Road Trip</div>
+                        </button>
+                        <button onclick="setDisplayTheme('matrix')"   data-theme="matrix"   class="theme-btn glass rounded-lg p-3 text-center hover:bg-slate-700 transition-colors border-2 border-transparent">
+                            <div class="text-2xl mb-1">💊</div>
+                            <div class="text-xs text-white font-semibold">Matrix</div>
+                            <div class="text-xs text-gray-400">Hacker</div>
+                        </button>
+                        <button onclick="setDisplayTheme('space')"    data-theme="space"    class="theme-btn glass rounded-lg p-3 text-center hover:bg-slate-700 transition-colors border-2 border-transparent">
+                            <div class="text-2xl mb-1">🚀</div>
+                            <div class="text-xs text-white font-semibold">Space</div>
+                            <div class="text-xs text-gray-400">Cosmic</div>
+                        </button>
+                        <button onclick="setDisplayTheme('ghost')"    data-theme="ghost"    class="theme-btn glass rounded-lg p-3 text-center hover:bg-slate-700 transition-colors border-2 border-transparent">
+                            <div class="text-2xl mb-1">👻</div>
+                            <div class="text-xs text-white font-semibold">Ghost</div>
+                            <div class="text-xs text-gray-400">Spooky</div>
+                        </button>
+                    </div>
+                    <p class="text-gray-500 text-xs mt-3" id="theme-active-label">Active theme: <span id="theme-active-name" class="text-Ragnar-400 font-semibold">Viking ⚔️</span></p>
+                </div>
+
                 <!-- E-Paper Display Image -->
                 <div class="glass rounded-xl p-6">
                     <div class="flex items-center justify-between mb-4">
@@ -3353,6 +3563,201 @@
                                 Disabled for headless installations. Pwnagotchi requires an e-paper display.
                             </div>
                         </div>
+
+                        <!-- wpa-sec Toggle Card -->
+                        <div class="glass rounded-lg p-4">
+                            <div class="flex items-center justify-between mb-3">
+                                <h4 class="font-medium">wpa-sec Integration</h4>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="wpasec-enabled" class="sr-only peer" onchange="toggleWpaSecVisibility()">
+                                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-cyan-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-600"></div>
+                                </label>
+                            </div>
+                            <div class="text-sm text-gray-400 mb-3">
+                                Automatically import cracked WiFi passwords from wpa-sec.stanev.org into Ragnar's known networks.
+                            </div>
+                            <div class="text-xs text-gray-500">
+                                Toggle to show/hide wpa-sec configuration options below
+                            </div>
+                        </div>
+
+                        <!-- Aggressive Mode Toggle Card -->
+                        <div class="glass rounded-lg p-4 border border-red-900/40">
+                            <div class="flex items-center justify-between mb-3">
+                                <h4 class="font-medium text-red-300">Aggressive Mode</h4>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="aggressive-mode-enabled" class="sr-only peer" onchange="toggleAggressiveMode()">
+                                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-red-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600"></div>
+                                </label>
+                            </div>
+                            <div class="text-sm text-gray-400 mb-3">
+                                Faster scans, shorter retry delays, and immediate network entry. Applies a performance preset to all timing settings.
+                            </div>
+                            <div class="text-xs text-gray-500">
+                                Scan interval 60s · Vuln scan 180s · Retry delays 60/120s · Attacks new networks immediately
+                            </div>
+                        </div>
+
+                        <div class="glass rounded-lg p-4">
+                            <div class="flex items-center justify-between mb-3">
+                                <h4 class="font-medium">IP Camera Scanner</h4>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="ipcam-enabled" class="sr-only peer" onchange="toggleIpCamEnabled()">
+                                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-cyan-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-600"></div>
+                                </label>
+                            </div>
+                            <div class="text-sm text-gray-400 mb-3">
+                                Auto-discover IP cameras (port 554/RTSP), test default credentials, and save a snapshot to Data Stolen.
+                            </div>
+                            <div class="text-xs text-gray-500">
+                                Supports Hikvision, Dahua, Axis, Foscam, Amcrest, Reolink, and generic cameras
+                            </div>
+                        </div>
+
+                        <div class="glass rounded-lg p-4">
+                            <div class="flex items-center justify-between mb-3">
+                                <h4 class="font-medium">Router Admin Scanner</h4>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="router-scanner-enabled" class="sr-only peer" onchange="toggleRouterScannerEnabled()">
+                                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-cyan-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-600"></div>
+                                </label>
+                            </div>
+                            <div class="text-sm text-gray-400 mb-3">
+                                Target the default gateway with brand-specific default credentials (Netgear, TP-Link, Asus, Cisco, etc.). Saves admin page dump to Data Stolen.
+                            </div>
+                            <div class="text-xs text-gray-500">
+                                Runs once per network · Tries HTTP/HTTPS on common admin ports
+                            </div>
+                        </div>
+
+                        <div class="glass rounded-lg p-4">
+                            <div class="flex items-center justify-between mb-3">
+                                <h4 class="font-medium">MQTT Subscriber</h4>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="mqtt-scanner-enabled" class="sr-only peer" onchange="toggleMQTTScannerEnabled()">
+                                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-cyan-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-600"></div>
+                                </label>
+                            </div>
+                            <div class="text-sm text-gray-400 mb-3">
+                                Connect to open MQTT brokers (port 1883) and passively collect IoT messages — smart home states, sensor data, device commands.
+                            </div>
+                            <div class="text-xs text-gray-500">
+                                Records for 30s · Saves topic list and sample payloads · Requires paho-mqtt
+                            </div>
+                        </div>
+
+                        <div class="glass rounded-lg p-4">
+                            <div class="flex items-center justify-between mb-3">
+                                <h4 class="font-medium">SNMP Scanner</h4>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="snmp-scanner-enabled" class="sr-only peer" onchange="toggleSNMPScannerEnabled()">
+                                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-cyan-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-600"></div>
+                                </label>
+                            </div>
+                            <div class="text-sm text-gray-400 mb-3">
+                                Try public/private SNMP community strings on port 161. Extracts device names, interfaces, and ARP tables that reveal other devices on the LAN.
+                            </div>
+                            <div class="text-xs text-gray-500">
+                                Uses snmpwalk (pre-installed) · Saves full MIB dump to Data Stolen
+                            </div>
+                        </div>
+
+                        <div class="glass rounded-lg p-4" style="border:1px solid rgba(168,85,247,0.25);background:rgba(88,28,135,0.15);">
+                            <div class="flex items-center justify-between mb-3">
+                                <h4 class="font-medium" style="display:flex;align-items:center;gap:0.4rem;">
+                                    <span style="font-size:1rem;">🕵️</span> Incognito Mode
+                                </h4>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="incognito-mode-enabled" class="sr-only peer" onchange="toggleIncognitoMode()">
+                                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all" style="peer-checked:background-color:#9333ea;" onload="this.style.backgroundColor = document.getElementById('incognito-mode-enabled').checked ? '#9333ea' : ''"></div>
+                                </label>
+                            </div>
+                            <div class="text-sm text-gray-400 mb-3">
+                                Disguise Ragnar as an iPhone on the network. Spoofs MAC address to an Apple OUI, sets hostname to iPhone, and broadcasts iPhone.local via mDNS.
+                            </div>
+                            <div class="text-xs text-gray-500">
+                                Requires root · Modifies wlan0 MAC · Restores original identity when disabled
+                            </div>
+                        </div>
+
+                        <!-- Auto-Incognito on Away Networks -->
+                        <div class="glass rounded-lg p-4" style="border:1px solid rgba(168,85,247,0.25);background:rgba(88,28,135,0.15);">
+                            <div class="flex items-center justify-between mb-3">
+                                <h4 class="font-medium" style="display:flex;align-items:center;gap:0.4rem;">
+                                    <span style="font-size:1rem;">🏠</span> Auto-Incognito Away Mode
+                                </h4>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="auto-incognito-on-away" class="sr-only peer" onchange="toggleAutoIncognito()">
+                                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
+                                </label>
+                            </div>
+                            <div class="text-sm text-gray-400 mb-3">
+                                Automatically enable Incognito Mode on any network that isn't your home network, and disable it when you return home.
+                            </div>
+                            <div class="flex items-center gap-2 mt-2">
+                                <input type="text" id="home-network-ssid" placeholder="Home network SSID" class="flex-1 rounded px-3 py-1.5 text-sm bg-gray-800 border border-gray-600 text-white focus:outline-none focus:border-purple-500" oninput="saveHomeNetwork()">
+                                <button onclick="setHomeNetworkToCurrent()" class="text-xs px-3 py-1.5 rounded bg-purple-700 hover:bg-purple-600 text-white whitespace-nowrap">Use Current</button>
+                            </div>
+                            <div class="text-xs text-gray-500 mt-2">
+                                Leave SSID blank to disable auto-incognito · Changes apply on next network switch
+                            </div>
+                        </div>
+
+                        <!-- Advanced Tools Section -->
+                        <div class="col-span-full mt-2 mb-1">
+                            <div style="border-top:1px solid rgba(255,255,255,0.08);padding-top:1rem;">
+                                <h3 class="text-xl font-semibold mb-4 text-Ragnar-400">Advanced Traffic &amp; Vulnerability Tools</h3>
+                                <p class="text-xs text-yellow-400" style="margin-bottom:0.75rem;">⚠️ Recommended for Pi 5 / 8 GB+ hardware. Can be enabled on lower-powered devices — monitor for instability.</p>
+                            </div>
+                        </div>
+
+                        <div class="glass rounded-lg p-4">
+                            <div class="flex items-center justify-between mb-3">
+                                <h4 class="font-medium">tshark Capture</h4>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="tshark-enabled" class="sr-only peer" onchange="toggleTsharkEnabled()">
+                                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-cyan-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-600"></div>
+                                </label>
+                            </div>
+                            <div class="text-sm text-gray-400 mb-3">
+                                Run a short tshark packet capture on each network and save a pcap to Data Stolen for offline analysis.
+                            </div>
+                            <div class="text-xs text-gray-500">
+                                Requires tshark (Wireshark CLI) · Captures 30s · Pi 5 / 8 GB+ recommended
+                            </div>
+                        </div>
+
+                        <div class="glass rounded-lg p-4">
+                            <div class="flex items-center justify-between mb-3">
+                                <h4 class="font-medium">ngrep Traffic Search</h4>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="ngrep-enabled" class="sr-only peer" onchange="toggleNgrepEnabled()">
+                                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-cyan-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-600"></div>
+                                </label>
+                            </div>
+                            <div class="text-sm text-gray-400 mb-3">
+                                Passively search live traffic for plaintext credentials, tokens, and sensitive strings using pattern matching.
+                            </div>
+                            <div class="text-xs text-gray-500">
+                                Requires ngrep · Scans HTTP, FTP, Telnet, POP3 · Pi 5 / 8 GB+ recommended
+                            </div>
+                        </div>
+
+                        <div class="glass rounded-lg p-4">
+                            <div class="flex items-center justify-between mb-3">
+                                <h4 class="font-medium">Nuclei Scanner</h4>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="nuclei-enabled" class="sr-only peer" onchange="toggleNucleiEnabled()">
+                                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-cyan-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-600"></div>
+                                </label>
+                            </div>
+                            <div class="text-sm text-gray-400 mb-3">
+                                Run Nuclei vulnerability templates against discovered hosts. Detects CVEs, misconfigs, exposed panels, and default credentials.
+                            </div>
+                            <div class="text-xs text-gray-500">
+                                Requires nuclei · Community templates · Pi 5 / 8 GB+ recommended
+                            </div>
+                        </div>
                         
                     </div>
                 </div>
@@ -3486,7 +3891,110 @@
                     </div>
                 </div>
                 
-                <!-- AI Configuration Section -->
+                <!-- wpa-sec Section -->
+                <div id="wpasec-section" class="mb-8" style="display: none;">
+                    <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between mb-4">
+                        <div>
+                            <h3 class="text-xl font-semibold text-Ragnar-400">wpa-sec Integration</h3>
+                            <p class="text-sm text-gray-400 mt-1">Automatically import cracked WiFi passwords from <a href="https://wpa-sec.stanev.org" target="_blank" class="text-cyan-400 hover:underline">wpa-sec.stanev.org</a> into Ragnar's known networks list.</p>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <span id="wpasec-status-badge" class="text-xs font-semibold uppercase tracking-wide px-3 py-1 rounded-full bg-slate-700 text-slate-200">Disabled</span>
+                            <button onclick="pollWpaSecNow()" class="bg-cyan-700 hover:bg-cyan-600 text-white px-4 py-2 rounded-lg transition-colors text-sm">
+                                Poll Now
+                            </button>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        <!-- Config card -->
+                        <div class="glass rounded-lg p-4">
+                            <h4 class="font-medium text-lg mb-4">Configuration</h4>
+                            <div class="space-y-4">
+                                <div>
+                                    <label class="flex items-center space-x-3 cursor-pointer mb-1">
+                                        <input type="checkbox" id="wpasec-auto-connect" class="w-5 h-5 rounded border-gray-600 text-cyan-600 focus:ring-cyan-500 focus:ring-offset-gray-900">
+                                        <span class="text-sm font-medium">Enable (active polling)</span>
+                                    </label>
+                                    <p class="text-xs text-gray-500 ml-8">Start the background poller — polls wpa-sec on the interval below</p>
+                                </div>
+                                <div>
+                                    <label class="block text-sm text-gray-400 mb-1">API Key</label>
+                                    <input type="password" id="wpasec-api-key" placeholder="Your wpa-sec API key"
+                                           class="w-full px-4 py-2 rounded-lg bg-slate-700 border border-slate-600 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 text-sm font-mono">
+                                    <p class="text-xs text-gray-500 mt-1">Get your key from <a href="https://wpa-sec.stanev.org" target="_blank" class="text-cyan-400 hover:underline">wpa-sec.stanev.org</a> → account → API Key</p>
+                                </div>
+                                <div>
+                                    <label class="block text-sm text-gray-400 mb-1">Poll Interval (seconds)</label>
+                                    <input type="number" id="wpasec-poll-interval" min="300" max="86400" value="3600"
+                                           class="w-full px-4 py-2 rounded-lg bg-slate-700 border border-slate-600 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 text-sm">
+                                    <p class="text-xs text-gray-500 mt-1">Default: 3600 (1 hour). Minimum: 300 (5 min)</p>
+                                </div>
+                                <div>
+                                    <label class="block text-sm text-gray-400 mb-1">Network Priority</label>
+                                    <input type="number" id="wpasec-priority" min="1" max="10" value="5"
+                                           class="w-full px-4 py-2 rounded-lg bg-slate-700 border border-slate-600 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 text-sm">
+                                    <p class="text-xs text-gray-500 mt-1">Priority assigned to auto-added networks (1–10)</p>
+                                </div>
+                                <div>
+                                    <label class="flex items-center space-x-3 cursor-pointer">
+                                        <input type="checkbox" id="wpasec-auto-connect-toggle" class="w-5 h-5 rounded border-gray-600 text-cyan-600 focus:ring-cyan-500 focus:ring-offset-gray-900" checked>
+                                        <span class="text-sm font-medium">Auto-add to Known Networks</span>
+                                    </label>
+                                    <p class="text-xs text-gray-500 ml-8 mt-1">When a password is found, automatically add it so Ragnar can connect</p>
+                                </div>
+                                <button onclick="saveWpaSecConfig()" class="w-full bg-cyan-700 hover:bg-cyan-600 text-white py-2 px-4 rounded-lg transition-colors font-medium">
+                                    Save wpa-sec Settings
+                                </button>
+                            </div>
+                        </div>
+                        <!-- Status / last poll card -->
+                        <div class="glass rounded-lg p-4">
+                            <h4 class="font-medium text-lg mb-4">Status</h4>
+                            <div class="space-y-3 text-sm text-gray-300">
+                                <div class="flex justify-between">
+                                    <span class="text-gray-400">Poller Active</span>
+                                    <span id="wpasec-status-active" class="font-semibold text-slate-200">—</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-400">Last Poll Result</span>
+                                    <span id="wpasec-last-result" class="font-semibold text-slate-200">Never polled</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-400">Networks Added</span>
+                                    <span id="wpasec-networks-added" class="font-semibold text-cyan-400">—</span>
+                                </div>
+                            </div>
+                            <div class="mt-4 p-3 bg-slate-900/60 rounded-lg border border-slate-700 text-xs text-gray-400">
+                                <p class="font-medium text-gray-300 mb-1">How it works</p>
+                                <ol class="list-decimal list-inside space-y-1">
+                                    <li>Pwnagotchi (or manual upload) captures WPA handshakes and uploads them to wpa-sec</li>
+                                    <li>wpa-sec cracks the password</li>
+                                    <li>Ragnar polls the wpa-sec API and imports the cracked password</li>
+                                    <li>Next time Ragnar sees that network, it connects automatically</li>
+                                </ol>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Imported Networks List -->
+                    <div class="glass rounded-lg p-4 mt-4">
+                        <div class="flex items-center justify-between mb-3">
+                            <div>
+                                <h4 class="font-medium text-lg">Imported Networks</h4>
+                                <p class="text-xs text-gray-500 mt-0.5">Networks added to Ragnar's known list via wpa-sec</p>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span id="wpasec-import-count" class="text-xs font-semibold px-2 py-1 rounded-full bg-cyan-900/40 text-cyan-300 border border-cyan-700/50">0 networks</span>
+                                <button onclick="loadWpaSecImported()" class="bg-slate-700 hover:bg-slate-600 text-white text-sm px-3 py-1.5 rounded-lg transition-colors">
+                                    Refresh
+                                </button>
+                            </div>
+                        </div>
+                        <div id="wpasec-imported-list" class="bg-slate-950/70 border border-slate-800 rounded-lg overflow-y-auto" style="max-height: 260px;">
+                            <p class="text-gray-500 text-sm p-4 text-center">No networks imported yet — click Poll Now to fetch from wpa-sec.</p>
+                        </div>
+                    </div>
+                </div>
                 <div class="mb-8">
                     <h3 class="text-xl font-semibold mb-4 text-Ragnar-400">AI Integration</h3>
                     <div class="glass rounded-lg p-4">
@@ -3670,8 +4178,71 @@
         </div>
     </div>
 
+    <!-- Host Detail Panel -->
+    <div id="host-detail-overlay" class="fixed inset-0 bg-black bg-opacity-50 hidden z-40" onclick="closeHostPanel()"></div>
+    <div id="host-detail-panel" class="fixed top-0 right-0 h-full w-full sm:w-2/3 lg:w-1/2 xl:w-2/5 bg-slate-900 border-l border-slate-700 shadow-2xl z-50 transform translate-x-full transition-transform duration-300 overflow-y-auto">
+        <div class="p-6">
+            <!-- Header -->
+            <div class="flex items-center justify-between mb-6">
+                <div>
+                    <h2 id="hdp-ip" class="text-2xl font-bold font-mono"></h2>
+                    <p id="hdp-hostname" class="text-gray-400 text-sm mt-1"></p>
+                </div>
+                <button onclick="closeHostPanel()" class="p-2 hover:bg-slate-700 rounded-lg transition-colors">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Status / Meta -->
+            <div class="grid grid-cols-2 gap-3 mb-6">
+                <div class="bg-slate-800 rounded-lg p-3">
+                    <div class="text-xs text-gray-400 mb-1">Status</div>
+                    <div id="hdp-status" class="font-semibold"></div>
+                </div>
+                <div class="bg-slate-800 rounded-lg p-3">
+                    <div class="text-xs text-gray-400 mb-1">MAC</div>
+                    <div id="hdp-mac" class="font-mono text-sm"></div>
+                </div>
+                <div class="bg-slate-800 rounded-lg p-3">
+                    <div class="text-xs text-gray-400 mb-1">Last Seen</div>
+                    <div id="hdp-lastseen" class="text-sm"></div>
+                </div>
+                <div class="bg-slate-800 rounded-lg p-3">
+                    <div class="text-xs text-gray-400 mb-1">Open Ports</div>
+                    <div id="hdp-portcount" class="font-semibold"></div>
+                </div>
+            </div>
+
+            <!-- Open Ports -->
+            <div class="mb-6">
+                <h3 class="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-2">Open Ports</h3>
+                <div id="hdp-ports" class="flex flex-wrap gap-2"></div>
+            </div>
+
+            <!-- Credentials -->
+            <div class="mb-6">
+                <h3 class="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-2">Credentials Found</h3>
+                <div id="hdp-creds" class="space-y-2"></div>
+            </div>
+
+            <!-- Attack History -->
+            <div class="mb-6">
+                <h3 class="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-2">Attack History</h3>
+                <div id="hdp-attacks" class="space-y-2 max-h-64 overflow-y-auto"></div>
+            </div>
+
+            <!-- Vulnerability Summary -->
+            <div id="hdp-vuln-section" class="mb-6 hidden">
+                <h3 class="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-2">Vulnerability Notes</h3>
+                <pre id="hdp-vuln" class="bg-slate-800 rounded-lg p-3 text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap max-h-48 overflow-y-auto"></pre>
+            </div>
+        </div>
+    </div>
+
     <!-- JavaScript -->
     <script src="/web/scripts/ragnar_modern.js?v=20251127"></script>
-    
+
 </body>
 </html>
