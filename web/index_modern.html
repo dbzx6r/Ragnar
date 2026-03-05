@@ -906,6 +906,13 @@
                             <button onclick="addScanSubnet()" class="bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-3 py-1.5 rounded text-sm whitespace-nowrap">Add</button>
                         </div>
                         <p id="subnet-error" class="text-xs text-red-400 hidden"></p>
+                        <!-- Scan log -->
+                        <div class="mt-3 border-t border-slate-700 pt-2">
+                            <p class="text-xs text-gray-500 font-medium mb-1">Scan Log</p>
+                            <div id="subnet-scan-log" class="max-h-40 overflow-y-auto space-y-0.5 text-xs font-mono bg-slate-900/60 rounded p-2">
+                                <p class="text-gray-600 italic">No scan data yet — waiting for next scan cycle.</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <!-- Tooltip -->

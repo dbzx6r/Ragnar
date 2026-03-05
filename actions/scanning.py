@@ -1469,6 +1469,15 @@ class NetworkScanner:
 
             self.update_netkb(netkbfile, netkb_data, alive_macs)
 
+            # Log primary-subnet result
+            primary_host_count = len(ip_data.ip_list) if ip_data else 0
+            self.shared_data.append_subnet_scan_log(
+                primary_net or 'primary',
+                'ok',
+                f"Primary scan complete — {primary_host_count} device(s) found",
+                devices=primary_host_count,
+            )
+
             # ----------------------------------------------------------
             # Extra-subnet scanning: scan additional user-configured CIDRs
             # so that devices behind other routers / APs appear on the map.
@@ -1488,12 +1497,24 @@ class NetworkScanner:
                     extra_net = ipaddress.ip_network(extra_cidr, strict=False)
                     if str(extra_net) == primary_net:
                         self.logger.debug(f"Skipping extra subnet {extra_cidr} — same as primary network")
+                        self.shared_data.append_subnet_scan_log(
+                            extra_cidr, 'skip',
+                            'Skipped — same as primary subnet',
+                        )
                         continue
                 except ValueError:
                     self.logger.warning(f"Invalid extra subnet CIDR '{extra_cidr}' — skipping")
+                    self.shared_data.append_subnet_scan_log(
+                        extra_cidr, 'error',
+                        f'Invalid CIDR "{extra_cidr}"',
+                    )
                     continue
 
                 self.logger.info(f"🌐 Scanning extra subnet: {extra_net}")
+                self.shared_data.append_subnet_scan_log(
+                    str(extra_net), 'info',
+                    f'Scanning {extra_net}…',
+                )
                 try:
                     extra_results = self.run_nmap_network_scan(
                         str(extra_net),
@@ -1508,9 +1529,26 @@ class NetworkScanner:
                         ports_found = data.get('open_ports', [])
                         netkb_data.append([mac, ip, hostname, ports_found])
                         alive_macs.add(mac)
-                    self.logger.info(f"✅ Extra subnet {extra_net}: {len(extra_results)} hosts found")
+                    found = len(extra_results)
+                    self.logger.info(f"✅ Extra subnet {extra_net}: {found} hosts found")
+                    if found > 0:
+                        self.shared_data.append_subnet_scan_log(
+                            str(extra_net), 'ok',
+                            f'{found} device(s) found on {extra_net}',
+                            devices=found,
+                        )
+                    else:
+                        self.shared_data.append_subnet_scan_log(
+                            str(extra_net), 'error',
+                            f'{extra_net} — no devices responded',
+                            devices=0,
+                        )
                 except Exception as e:
                     self.logger.error(f"Extra subnet scan failed for {extra_net}: {e}")
+                    self.shared_data.append_subnet_scan_log(
+                        str(extra_net), 'error',
+                        f'Scan failed for {extra_net}: {e}',
+                    )
 
             # Re-run netkb update with merged data (primary + extra subnets)
             if extra_subnets:

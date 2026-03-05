@@ -3074,6 +3074,17 @@ def manage_scan_subnets():
         logger.error(f"Error managing scan subnets: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/config/scan-subnets/log')
+def get_scan_subnets_log():
+    """Return the in-memory subnet scan log (newest last)."""
+    try:
+        log = shared_data.get_subnet_scan_log()
+        return jsonify({'log': log})
+    except Exception as e:
+        logger.error(f"Error fetching subnet scan log: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/config/hardware-profiles')
 def get_hardware_profiles():
     """Get predefined hardware profiles for different Raspberry Pi models"""

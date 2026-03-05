@@ -15550,7 +15550,12 @@ function toggleSubnetPanel() {
     if (!panel) return;
     const hidden = panel.classList.toggle('hidden');
     if (chevron) chevron.style.transform = hidden ? '' : 'rotate(90deg)';
-    if (!hidden) loadScanSubnets();           // refresh list every time user opens
+    if (!hidden) {
+        loadScanSubnets();           // refresh subnet list
+        _startSubnetLogPolling();    // start live log updates
+    } else {
+        _stopSubnetLogPolling();     // stop polling when panel closed
+    }
 }
 
 async function loadScanSubnets() {
@@ -15625,6 +15630,57 @@ async function removeScanSubnet(cidr) {
     } catch (e) {
         console.error('removeScanSubnet error', e);
     }
+}
+
+// ── Subnet Scan Log ─────────────────────────────────────────
+let _subnetLogTimer = null;
+
+const _logStatusStyle = {
+    ok:    'text-green-400',
+    error: 'text-red-400',
+    info:  'text-blue-400',
+    skip:  'text-yellow-400',
+};
+const _logStatusIcon = {
+    ok:    '✅',
+    error: '❌',
+    info:  '🔍',
+    skip:  '⏭️',
+};
+
+async function loadSubnetScanLog() {
+    const container = document.getElementById('subnet-scan-log');
+    if (!container) return;
+    try {
+        const resp = await networkAwareFetch('/api/config/scan-subnets/log');
+        const data = await resp.json();
+        const log = data.log || [];
+        if (log.length === 0) {
+            container.innerHTML = '<p class="text-gray-600 italic">No scan data yet — waiting for next scan cycle.</p>';
+            return;
+        }
+        // Render newest-first
+        container.innerHTML = log.slice().reverse().map(e => {
+            const cls = _logStatusStyle[e.status] || 'text-gray-400';
+            const icon = _logStatusIcon[e.status] || '•';
+            const dev = e.devices !== undefined ? ` (${e.devices} device${e.devices !== 1 ? 's' : ''})` : '';
+            return `<div class="${cls}"><span class="text-gray-600">${escapeHtml(e.ts)}</span> ${icon} <span class="text-gray-300">${escapeHtml(e.cidr)}</span> — ${escapeHtml(e.msg)}${dev}</div>`;
+        }).join('');
+        // Auto-scroll to top (newest)
+        container.scrollTop = 0;
+    } catch (e) {
+        console.error('loadSubnetScanLog error', e);
+    }
+}
+
+function _startSubnetLogPolling() {
+    _stopSubnetLogPolling();
+    loadSubnetScanLog();                         // immediate
+    _subnetLogTimer = setInterval(loadSubnetScanLog, 10000);  // every 10s while panel open
+}
+
+function _stopSubnetLogPolling() {
+    if (_subnetLogTimer) { clearInterval(_subnetLogTimer); _subnetLogTimer = null; }
 }
 
 // Export new functions to window

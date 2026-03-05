@@ -944,6 +944,11 @@ class SharedData:
         self._latest_scan_results = {}
         self._scan_results_lock = threading.Lock()
 
+        # Subnet scan log – ring buffer of recent scan events for the UI
+        self._subnet_scan_log = []          # list of dicts
+        self._subnet_scan_log_lock = threading.Lock()
+        self._SUBNET_LOG_MAX = 50           # keep last 50 entries
+
     def load_gamification_data(self):
         """Load persistent gamification progress from disk."""
         os.makedirs(self.datadir, exist_ok=True)
@@ -1519,6 +1524,36 @@ class SharedData:
             except Exception:
                 return self.storage_manager.default_ssid
         return (ssid or self.storage_manager.default_ssid or 'default')
+
+    # ── Subnet scan log helpers ──────────────────────────────────
+    def append_subnet_scan_log(self, cidr, status, message, devices=None):
+        """Append an entry to the subnet scan log visible in the UI.
+
+        Args:
+            cidr:    The subnet that was scanned (or 'primary').
+            status:  'ok' | 'error' | 'info' | 'skip'
+            message: Human-readable description.
+            devices: Number of devices found (optional).
+        """
+        import datetime as _dt
+        entry = {
+            'ts': _dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'cidr': str(cidr),
+            'status': status,
+            'msg': message,
+        }
+        if devices is not None:
+            entry['devices'] = int(devices)
+        with self._subnet_scan_log_lock:
+            self._subnet_scan_log.append(entry)
+            # trim to ring-buffer size
+            if len(self._subnet_scan_log) > self._SUBNET_LOG_MAX:
+                self._subnet_scan_log = self._subnet_scan_log[-self._SUBNET_LOG_MAX:]
+
+    def get_subnet_scan_log(self):
+        """Return a copy of the scan log (newest last)."""
+        with self._subnet_scan_log_lock:
+            return list(self._subnet_scan_log)
 
     def set_latest_scan_results(self, scan_data):
         """Store fresh scan results scoped to the currently active network."""
