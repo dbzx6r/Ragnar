@@ -35,30 +35,37 @@ class PushoverService:
         """Pre-populate _notified_devices and _last_notified_vuln_count from the DB
         so that a restart does not re-notify about already-known devices/vulns."""
         try:
-            db = getattr(self.shared_data, 'db_manager', None)
+            db = getattr(self.shared_data, 'db', None)
             if db is None:
                 return
-            conn = db.get_connection()
-            if conn is None:
-                return
-            cursor = conn.cursor()
-            # Load all known IPs
-            cursor.execute("SELECT ip FROM hosts WHERE ip IS NOT NULL AND ip != ''")
-            rows = cursor.fetchall()
-            with self._lock:
-                for row in rows:
-                    ip = row[0] if isinstance(row, (list, tuple)) else row.get('ip', '')
-                    if ip:
-                        self._notified_devices.add(ip)
-            # Load current vuln count as baseline (so we only alert on genuinely new ones)
-            cursor.execute(
-                "SELECT COUNT(*) FROM hosts "
-                "WHERE vulnerabilities IS NOT NULL AND vulnerabilities != '' AND vulnerabilities != 'None'"
-            )
-            row = cursor.fetchone()
-            baseline = row[0] if row else 0
-            with self._lock:
-                self._last_notified_vuln_count = baseline
+            with db.get_connection() as conn:
+                cursor = conn.cursor()
+                # Load all known IPs
+                cursor.execute("SELECT ip FROM hosts WHERE ip IS NOT NULL AND ip != ''")
+                rows = cursor.fetchall()
+                with self._lock:
+                    for row in rows:
+                        ip = row[0] if isinstance(row, (list, tuple)) else row.get('ip', '')
+                        if ip:
+                            self._notified_devices.add(ip)
+                # Load current vuln count as baseline (so we only alert on genuinely new ones)
+                cursor.execute(
+                    "SELECT COUNT(*) FROM hosts "
+                    "WHERE vulnerabilities IS NOT NULL AND vulnerabilities != '' AND vulnerabilities != 'None'"
+                )
+                row = cursor.fetchone()
+                baseline = row[0] if row else 0
+                with self._lock:
+                    self._last_notified_vuln_count = baseline
+                # Load credential baseline count
+                try:
+                    cursor.execute("SELECT COUNT(*) FROM hosts WHERE credentials IS NOT NULL AND credentials != '' AND credentials != 'None'")
+                    cred_row = cursor.fetchone()
+                    cred_baseline = cred_row[0] if cred_row else 0
+                    with self._lock:
+                        self._notified_creds = cred_baseline
+                except Exception:
+                    pass  # credentials column may not exist
             logger.debug(
                 f"Pushover: loaded {len(self._notified_devices)} known IPs, "
                 f"vuln baseline={baseline} from DB"
