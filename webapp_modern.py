@@ -3009,6 +3009,71 @@ def update_config():
         logger.error(f"Error updating config: {e}")
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/api/config/scan-subnets', methods=['GET', 'POST', 'DELETE'])
+def manage_scan_subnets():
+    """Manage the list of extra subnets to scan.
+
+    GET:    Return current list + auto-detected primary subnet.
+    POST:   Add a new CIDR (body: {"cidr": "10.0.0.0/24"}).
+    DELETE: Remove a CIDR  (body: {"cidr": "10.0.0.0/24"}).
+    """
+    import ipaddress as _ip
+    try:
+        subnets = list(shared_data.config.get('scan_subnets', []))
+
+        # Detect primary subnet for reference
+        primary = None
+        try:
+            import netifaces
+            gws = netifaces.gateways()
+            gw_tuple = gws.get('default', {}).get(netifaces.AF_INET)
+            if gw_tuple:
+                iface_addrs = netifaces.ifaddresses(gw_tuple[1]).get(netifaces.AF_INET)
+                if iface_addrs:
+                    my_ip = iface_addrs[0]['addr']
+                    mask = iface_addrs[0]['netmask']
+                    cidr_bits = sum(bin(int(x)).count('1') for x in mask.split('.'))
+                    primary = str(_ip.ip_network(f"{my_ip}/{cidr_bits}", strict=False))
+        except Exception:
+            pass
+
+        if request.method == 'GET':
+            return jsonify({'subnets': subnets, 'primary': primary})
+
+        data = request.get_json() or {}
+        raw = str(data.get('cidr', '')).strip()
+        if not raw:
+            return jsonify({'error': 'Missing cidr field'}), 400
+
+        # Validate
+        try:
+            net = _ip.ip_network(raw, strict=False)
+            normalised = str(net)
+        except ValueError:
+            return jsonify({'error': f'Invalid CIDR: {raw}'}), 400
+
+        if request.method == 'POST':
+            if normalised == primary:
+                return jsonify({'error': 'This is already your primary subnet — no need to add it'}), 400
+            if normalised not in subnets:
+                subnets.append(normalised)
+                shared_data.config['scan_subnets'] = subnets
+                shared_data.scan_subnets = subnets
+                shared_data.save_config()
+            return jsonify({'subnets': subnets, 'primary': primary})
+
+        if request.method == 'DELETE':
+            subnets = [s for s in subnets if s != normalised]
+            shared_data.config['scan_subnets'] = subnets
+            shared_data.scan_subnets = subnets
+            shared_data.save_config()
+            return jsonify({'subnets': subnets, 'primary': primary})
+
+    except Exception as e:
+        logger.error(f"Error managing scan subnets: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/config/hardware-profiles')
 def get_hardware_profiles():
     """Get predefined hardware profiles for different Raspberry Pi models"""

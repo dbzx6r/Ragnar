@@ -15304,7 +15304,10 @@ async function loadNetworkMap() {
     }
 
     // Check AI availability on first load
-    if (!_mapInitialized) await _checkMapAiStatus();
+    if (!_mapInitialized) {
+        await _checkMapAiStatus();
+        loadScanSubnets();          // populate subnet badge / panel
+    }
 
     document.getElementById('network-map-loading').style.display = 'flex';
     document.getElementById('network-map-svg').style.display = 'none';
@@ -15540,6 +15543,90 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+// ── Subnet Manager ──────────────────────────────────────────
+function toggleSubnetPanel() {
+    const panel = document.getElementById('subnet-panel');
+    const chevron = document.getElementById('subnet-chevron');
+    if (!panel) return;
+    const hidden = panel.classList.toggle('hidden');
+    if (chevron) chevron.style.transform = hidden ? '' : 'rotate(90deg)';
+    if (!hidden) loadScanSubnets();           // refresh list every time user opens
+}
+
+async function loadScanSubnets() {
+    try {
+        const resp = await networkAwareFetch('/api/config/scan-subnets');
+        const data = await resp.json();
+
+        // primary note
+        const primaryEl = document.getElementById('subnet-primary');
+        if (primaryEl && data.primary) {
+            primaryEl.textContent = `Primary (auto-detected): ${data.primary}`;
+        }
+
+        // badge count
+        const badge = document.getElementById('subnet-count');
+        const subs = data.subnets || [];
+        if (badge) badge.textContent = subs.length;
+
+        // list
+        const list = document.getElementById('subnet-list');
+        if (!list) return;
+        if (subs.length === 0) {
+            list.innerHTML = '<p class="text-xs text-gray-600 italic">No extra subnets configured.</p>';
+            return;
+        }
+        list.innerHTML = subs.map(cidr => `
+            <div class="flex items-center justify-between bg-slate-700/50 rounded px-2 py-1">
+                <span class="font-mono text-xs text-gray-300">${escapeHtml(cidr)}</span>
+                <button onclick="removeScanSubnet('${escapeHtml(cidr)}')" class="text-red-400 hover:text-red-300 text-xs ml-2">&times;</button>
+            </div>`).join('');
+    } catch (e) {
+        console.error('loadScanSubnets error', e);
+    }
+}
+
+async function addScanSubnet() {
+    const input = document.getElementById('subnet-input');
+    const errorEl = document.getElementById('subnet-error');
+    if (!input) return;
+    const cidr = input.value.trim();
+    if (!cidr) return;
+
+    // hide previous error
+    if (errorEl) { errorEl.textContent = ''; errorEl.classList.add('hidden'); }
+
+    try {
+        const resp = await networkAwareFetch('/api/config/scan-subnets', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cidr })
+        });
+        const data = await resp.json();
+        if (!resp.ok || data.error) {
+            if (errorEl) { errorEl.textContent = data.error || 'Failed to add subnet'; errorEl.classList.remove('hidden'); }
+            return;
+        }
+        input.value = '';
+        await loadScanSubnets();
+    } catch (e) {
+        if (errorEl) { errorEl.textContent = e.message; errorEl.classList.remove('hidden'); }
+    }
+}
+
+async function removeScanSubnet(cidr) {
+    try {
+        await networkAwareFetch('/api/config/scan-subnets', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cidr })
+        });
+        await loadScanSubnets();
+    } catch (e) {
+        console.error('removeScanSubnet error', e);
+    }
+}
+
 // Export new functions to window
 window.checkServerCapabilities = checkServerCapabilities;
 window.loadTrafficAnalysisData = loadTrafficAnalysisData;
@@ -15582,3 +15669,6 @@ window.deleteTargetCredential = deleteTargetCredential;
 window.loadNetworkMap = loadNetworkMap;
 window.refreshNetworkMap = refreshNetworkMap;
 window.onMapAiToggleClick = onMapAiToggleClick;
+window.toggleSubnetPanel = toggleSubnetPanel;
+window.addScanSubnet = addScanSubnet;
+window.removeScanSubnet = removeScanSubnet;

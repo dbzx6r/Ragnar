@@ -890,6 +890,24 @@
                 </div>
                 <!-- Device type legend (own row beneath header) -->
                 <div id="map-legend" class="flex flex-wrap items-center gap-3 text-xs text-gray-400 mb-3"></div>
+                <!-- Subnet manager (collapsible) -->
+                <div id="subnet-manager" class="mb-3">
+                    <button onclick="toggleSubnetPanel()" class="text-xs text-gray-400 hover:text-gray-200 flex items-center gap-1 mb-2 transition-colors">
+                        <svg id="subnet-chevron" class="w-3 h-3 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                        <span>Scan Subnets</span>
+                        <span id="subnet-count" class="bg-slate-700 text-gray-300 text-xs px-1.5 rounded-full">0</span>
+                    </button>
+                    <div id="subnet-panel" class="hidden bg-slate-800/50 rounded-lg p-3 text-sm space-y-2">
+                        <p class="text-xs text-gray-500">Add extra subnets so Ragnar discovers devices behind other routers/APs.</p>
+                        <div id="subnet-primary" class="text-xs text-gray-500"></div>
+                        <div id="subnet-list" class="space-y-1"></div>
+                        <div class="flex gap-2">
+                            <input id="subnet-input" type="text" placeholder="e.g. 10.0.0.0/24" class="flex-1 px-3 py-1.5 rounded bg-slate-700 border border-slate-600 text-sm focus:border-Ragnar-500 focus:outline-none">
+                            <button onclick="addScanSubnet()" class="bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-3 py-1.5 rounded text-sm whitespace-nowrap">Add</button>
+                        </div>
+                        <p id="subnet-error" class="text-xs text-red-400 hidden"></p>
+                    </div>
+                </div>
                 <!-- Tooltip -->
                 <div id="map-tooltip" class="absolute z-50 bg-slate-800 border border-slate-600 rounded-lg p-3 text-sm pointer-events-none hidden max-w-xs"></div>
                 <!-- SVG canvas -->

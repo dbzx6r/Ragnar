@@ -1468,7 +1468,54 @@ class NetworkScanner:
                         writer.writerow([ip, hostname, alive, mac] + [str(port) if port in ports else '' for port in all_ports])
 
             self.update_netkb(netkbfile, netkb_data, alive_macs)
-            
+
+            # ----------------------------------------------------------
+            # Extra-subnet scanning: scan additional user-configured CIDRs
+            # so that devices behind other routers / APs appear on the map.
+            # ARP is Layer-2 and won't reach remote subnets, but nmap -Pn
+            # works as long as a route exists (e.g. via the gateway).
+            # ----------------------------------------------------------
+            extra_subnets = getattr(self.shared_data, 'scan_subnets', None) or []
+            if not extra_subnets:
+                extra_subnets = self.shared_data.config.get('scan_subnets', [])
+            primary_net = str(network) if network else None
+            for extra_cidr in extra_subnets:
+                extra_cidr = str(extra_cidr).strip()
+                if not extra_cidr:
+                    continue
+                # Validate CIDR and skip if it's the same as the primary network
+                try:
+                    extra_net = ipaddress.ip_network(extra_cidr, strict=False)
+                    if str(extra_net) == primary_net:
+                        self.logger.debug(f"Skipping extra subnet {extra_cidr} — same as primary network")
+                        continue
+                except ValueError:
+                    self.logger.warning(f"Invalid extra subnet CIDR '{extra_cidr}' — skipping")
+                    continue
+
+                self.logger.info(f"🌐 Scanning extra subnet: {extra_net}")
+                try:
+                    extra_results = self.run_nmap_network_scan(
+                        str(extra_net),
+                        portstart,
+                        portend,
+                        extra_ports,
+                    )
+                    # Merge extra-subnet hosts into netkb_data so they persist in the DB
+                    for ip, data in extra_results.items():
+                        hostname = data.get('hostname', '')
+                        mac = data.get('mac', '') or gma(ip=ip)
+                        ports_found = data.get('open_ports', [])
+                        netkb_data.append([mac, ip, hostname, ports_found])
+                        alive_macs.add(mac)
+                    self.logger.info(f"✅ Extra subnet {extra_net}: {len(extra_results)} hosts found")
+                except Exception as e:
+                    self.logger.error(f"Extra subnet scan failed for {extra_net}: {e}")
+
+            # Re-run netkb update with merged data (primary + extra subnets)
+            if extra_subnets:
+                self.update_netkb(netkbfile, netkb_data, alive_macs)
+
             # Store fresh scan results in memory for immediate orchestrator access
             # This eliminates race conditions with CSV file writes
             try:
