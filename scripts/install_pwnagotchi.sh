@@ -518,6 +518,7 @@ if [[ -f "$SWAP_BUTTON_SCRIPT" ]]; then
 Description=Swap Button Listener - GPIO KEY1 + PiSugar (Ragnar/Pwnagotchi)
 After=pisugar-server.service
 Wants=pisugar-server.service
+Conflicts=ragnar.service
 
 [Service]
 Type=simple
@@ -526,7 +527,7 @@ Restart=on-failure
 RestartSec=10
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=pwnagotchi.service
 EOF
 
     chmod 644 "$SWAP_BUTTON_SERVICE"
