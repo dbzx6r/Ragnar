@@ -216,7 +216,7 @@
             }
         }
         /* Toggle switch: show green when ON, regardless of Tailwind purge state */
-        label > input[type="checkbox"]:checked + div { background-color: #16a34a !important; }
+        label.toggle-switch > input[type="checkbox"]:checked + div { background-color: #16a34a !important; }
         /* AI map toggle – uses Ragnar color, not green */
         #map-ai-toggle-track { background: #475569; border-radius: 9999px; width: 36px; height: 20px; position: relative; cursor: pointer; transition: background 0.2s; }
         #map-ai-toggle-track.active { background: var(--ragnar-600, #7c3aed); }
