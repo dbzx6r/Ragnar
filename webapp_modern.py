@@ -3617,7 +3617,7 @@ def get_network_topology():
     """Build a topology graph with gateway as center, device types classified, and links inferred."""
     with _network_context_from_request():
         try:
-            from device_classifier import classify_device, DEVICE_ICONS, DEVICE_TYPE_LABELS, DEVICE_TYPE_COLORS
+            from device_classifier import classify_device, classify_device_ai, DEVICE_ICONS, DEVICE_TYPE_LABELS, DEVICE_TYPE_COLORS
 
             hosts = shared_data.db.get_all_hosts()
             gw = getattr(shared_data, 'gateway_info', {}) or {}
@@ -3666,7 +3666,13 @@ def get_network_topology():
                 vendor = host.get('vendor', '') or ''
                 status = host.get('status', 'unknown')
 
-                classification = classify_device(vendor, ports, gateway_ip=gateway_ip, device_ip=ip)
+                classification = classify_device_ai(
+                    vendor, ports,
+                    hostname=host.get('hostname', ''),
+                    mac=host.get('mac', ''),
+                    ai_service=getattr(shared_data, 'ai_service', None),
+                    gateway_ip=gateway_ip, device_ip=ip,
+                )
 
                 # Risk scoring (same as existing)
                 port_count = len(ports)
