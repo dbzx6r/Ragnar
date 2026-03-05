@@ -170,32 +170,53 @@ class SharedData:
         self.initialize_variables() # Initialize the variables used by the application
         self.load_gamification_data()  # Load persistent gamification progress
 
-        # Initialize network intelligence (after paths and config are ready)
+        # Initialize network intelligence and AI service in background
+        # to avoid blocking startup (these are not needed immediately)
         self.network_intelligence = None
-        if not self._pager_mode:
-            self.initialize_network_intelligence()
         self.threat_intelligence = None  # type: ignore
-
-        # Initialize AI service (after paths and config are ready)
         self.ai_service = None
-        if not self._pager_mode:
-            self.initialize_ai_service()
-
-        # Initialize counters for dashboard
-        if not self._pager_mode:
-            self.scanned_networks_count = self._calculate_scanned_networks_count()
-        else:
-            self.scanned_networks_count = 0
+        self.scanned_networks_count = 0
+        self._deferred_init_done = threading.Event()
 
         self.create_livestatusfile()
-        self.load_fonts() # Load the fonts used by the application
-        self.load_images() # Load the images used by the application
-        # self.create_initial_image() # Create the initial image displayed on the screen
+
+        # Defer heavy I/O (fonts, images, AI, network intelligence) to a
+        # background thread so the main thread can continue to start the
+        # display and web server sooner.
+        if not self._pager_mode:
+            threading.Thread(target=self._deferred_init, daemon=True).start()
+        else:
+            # Pager mode: load fonts/images synchronously (lightweight)
+            self.load_fonts()
+            self.load_images()
+            self._deferred_init_done.set()
 
         # Start background cleanup task for old hosts (needs DB)
         if not self._pager_mode and self.db is not None:
             self._start_cleanup_task()
         
+    def _deferred_init(self):
+        """Run heavy initialization tasks in a background thread.
+
+        Loads fonts, images, network intelligence, AI service, and
+        network counts without blocking the main startup path.
+        """
+        try:
+            self.load_fonts()
+            self.load_images()
+            self.initialize_network_intelligence()
+            self.initialize_ai_service()
+            self.scanned_networks_count = self._calculate_scanned_networks_count()
+            logger.info("Deferred initialization completed")
+        except Exception as e:
+            logger.error(f"Deferred initialization error: {e}")
+        finally:
+            self._deferred_init_done.set()
+
+    def wait_for_deferred_init(self, timeout: float = 30.0) -> bool:
+        """Wait for deferred init to finish (used by display before first render)."""
+        return self._deferred_init_done.wait(timeout=timeout)
+
     def initialize_network_intelligence(self):
         """Initialize the network intelligence system"""
         try:
@@ -297,8 +318,10 @@ class SharedData:
         self.crackedpwddir = self._default_crackedpwddir
         self.datastolendir = self._default_datastolendir
         self.zombiesdir = os.path.join(self.output_dir, 'zombies')
-        self.vulnerabilities_dir = os.path.join(self.output_dir, 'vulnerabilities')
-        self.scan_results_dir = os.path.join(self.output_dir, "scan_results")
+        self._default_vulnerabilities_dir = os.path.join(self.output_dir, 'vulnerabilities')
+        self._default_scan_results_dir = os.path.join(self.output_dir, "scan_results")
+        self.vulnerabilities_dir = self._default_vulnerabilities_dir
+        self.scan_results_dir = self._default_scan_results_dir
         # Directories under resourcesdir
         self.picdir = os.path.join(self.resourcesdir, 'images')
         self.fontdir = os.path.join(self.resourcesdir, 'fonts')
@@ -319,7 +342,7 @@ class SharedData:
         self.livestatusfile = os.path.join(self.datadir, 'livestatus.csv')
         self.gamification_file = os.path.join(self.datadir, 'gamification.json')
         self.pwnagotchi_status_file = os.path.join(self.datadir, 'pwnagotchi_status.json')
-        # Files directly under vulnerabilities_dir
+        # Files directly under vulnerabilities_dir (kept in sync via _update_output_paths)
         self.vuln_summary_file = os.path.join(self.vulnerabilities_dir, 'vulnerability_summary.csv')
         self.vuln_scan_progress_file = os.path.join(self.vulnerabilities_dir, 'scan_progress.json')
         # Files directly under dictionarydir
@@ -344,6 +367,9 @@ class SharedData:
         loot_data_dir = context.get('data_stolen_dir') or self._default_datastolendir
         loot_credentials_dir = context.get('credentials_dir') or self._default_crackedpwddir
         self._update_loot_paths(loot_data_dir, loot_credentials_dir)
+        scan_results_dir = context.get('scan_results_dir') or self._default_scan_results_dir
+        vulnerabilities_dir = context.get('vulnerabilities_dir') or self._default_vulnerabilities_dir
+        self._update_output_paths(scan_results_dir, vulnerabilities_dir)
         if configure_db and hasattr(self, 'db'):
             self._configure_database()
 
@@ -391,6 +417,17 @@ class SharedData:
             self.crackedpwddir = credentials_dir
         self.crackedpwd_dir = self.crackedpwddir  # legacy attribute name used by web UI
         self._refresh_credential_files()
+
+    def _update_output_paths(self, scan_results_dir, vulnerabilities_dir):
+        """Switch scan result and vulnerability dirs to the active network's paths."""
+        if scan_results_dir:
+            os.makedirs(scan_results_dir, exist_ok=True)
+            self.scan_results_dir = scan_results_dir
+        if vulnerabilities_dir:
+            os.makedirs(vulnerabilities_dir, exist_ok=True)
+            self.vulnerabilities_dir = vulnerabilities_dir
+            self.vuln_summary_file = os.path.join(vulnerabilities_dir, 'vulnerability_summary.csv')
+            self.vuln_scan_progress_file = os.path.join(vulnerabilities_dir, 'scan_progress.json')
 
     def _refresh_credential_files(self):
         """Keep credential CSV paths aligned with the active credential directory."""
@@ -471,7 +508,7 @@ class SharedData:
             "log_critical": True,
             "terminal_log_level": "all",
             
-            "startup_delay": 10,
+            "startup_delay": 2,
             "web_delay": 2,
             "screen_delay": 1,
             "comment_delaymin": 15,
@@ -502,6 +539,7 @@ class SharedData:
             "nmap_scan_aggressivity": "-T4",
             "portstart": 1,
             "portend": 5500,
+            "scan_subnets": [],
             "default_vulnerability_ports": [22, 80, 443],
             "network_max_failed_pings": 15,
             "network_device_retention_days": 14,
@@ -565,6 +603,14 @@ class SharedData:
             "ai_network_insights": True,
             "ai_max_tokens": 500,
             "ai_temperature": 0.7,
+
+            "__title_pushover__": "Pushover Notifications",
+            "pushover_enabled": False,
+            "pushover_notify_new_device": True,
+            "pushover_notify_new_vulnerability": True,
+            "pushover_notify_new_credential": True,
+            "pushover_notify_device_lost": False,
+            "pushover_notify_device_back_online": False,
 
             "__title_pwnagotchi__": "Pwnagotchi Integration",
             "pwnagotchi_installed": False,
@@ -673,7 +719,9 @@ class SharedData:
                     logger.warning(f"Could not generate actions.json: {e}")
             self._load_status_list_from_actions_json()
         else:
-            self.generate_actions_json()
+            # Skip costly re-import of every action module if actions.json
+            # is already up to date (same set of .py files in actions/).
+            self._generate_actions_json_if_needed()
         self.delete_webconsolelog()
         self.initialize_csv()
         self.initialize_epd_display()
@@ -754,7 +802,6 @@ class SharedData:
             return
         try:
             logger.info("Initializing EPD display...")
-            time.sleep(1)
             epd_type = self.config.get("epd_type", DEFAULT_EPD_TYPE)
 
             # Auto-detect if set to "auto" OR if still on factory default (user never ran installer with detection)
@@ -849,6 +896,7 @@ class SharedData:
         self.orchestrator_should_exit = False
         self.webapp_should_exit = False 
         self.ragnar_instance = None
+        self.gateway_info = {}  # Populated by NetworkScanner.get_gateway_info()
         self.wifichanged = False
         self.bluetooth_active = False
         self.bluetooth_scan_active = False
@@ -903,6 +951,11 @@ class SharedData:
         # In-memory scan results keyed per active network for orchestrator access
         self._latest_scan_results = {}
         self._scan_results_lock = threading.Lock()
+
+        # Subnet scan log – ring buffer of recent scan events for the UI
+        self._subnet_scan_log = []          # list of dicts
+        self._subnet_scan_log_lock = threading.Lock()
+        self._SUBNET_LOG_MAX = 50           # keep last 50 entries
 
     def load_gamification_data(self):
         """Load persistent gamification progress from disk."""
@@ -1053,6 +1106,58 @@ class SharedData:
         except Exception as e:
             logger.error(f"Unexpected error occurred while creating live status file: {e}")
 
+
+    def _generate_actions_json_if_needed(self):
+        """Only regenerate actions.json if the action modules have changed.
+
+        Compares the modification time of the actions directory against the
+        existing actions.json file.  If no .py file is newer, we also verify
+        that every action .py has a corresponding entry in the JSON — a
+        previous generation may have missed modules due to transient import
+        errors (e.g. scanning.py failing once).
+        """
+        try:
+            if os.path.exists(self.actions_file):
+                json_mtime = os.path.getmtime(self.actions_file)
+                # Check if any action .py file is newer than actions.json
+                needs_regen = False
+                py_modules = set()
+                for filename in os.listdir(self.actions_dir):
+                    if filename.endswith('.py') and filename != '__init__.py':
+                        py_modules.add(filename[:-3])
+                        py_path = os.path.join(self.actions_dir, filename)
+                        if os.path.getmtime(py_path) > json_mtime:
+                            needs_regen = True
+
+                if not needs_regen:
+                    # Timestamps match — but verify no modules are missing
+                    try:
+                        with open(self.actions_file, 'r') as f:
+                            existing = json.load(f)
+                        json_modules = {a.get('b_module') for a in existing}
+                        # Modules that have .py files but no JSON entry may have
+                        # been skipped due to a transient import failure.  Some
+                        # .py files are intentionally excluded (helpers without
+                        # b_class/b_status), so only flag if the count differs
+                        # significantly — or specifically if critical modules
+                        # like 'scanning' are absent.
+                        missing = py_modules - json_modules
+                        if missing:
+                            logger.info(f"actions.json missing modules {missing} — regenerating")
+                            needs_regen = True
+                    except Exception as e:
+                        logger.debug(f"Could not validate actions.json contents: {e}")
+                        needs_regen = True
+
+                if not needs_regen:
+                    # actions.json is up to date — just load status_list from it
+                    self._load_status_list_from_actions_json()
+                    logger.info("actions.json is up to date — skipped regeneration")
+                    return
+        except Exception as e:
+            logger.debug(f"Actions freshness check failed, regenerating: {e}")
+        # Fall through: regenerate
+        self.generate_actions_json()
 
     def generate_actions_json(self):
         """Generate the actions JSON file, it will be used to store the actions configuration."""
@@ -1249,9 +1354,10 @@ class SharedData:
             raise
 
     def _get_image_scale(self):
-        """Get the image scale factor for the current display. Returns 1.0 for default 2.13" displays."""
-        sf = getattr(self, 'scale_factor_x', 1.0)
-        return sf if sf > 1.05 else 1.0  # Only scale if display is meaningfully larger
+        """Get the image scale factor for the current display.
+        Always returns 1.0 — icons are drawn at their native size on all displays.
+        Wider displays (e.g. 2.7" 176x264) centre the content instead of stretching."""
+        return 1.0
 
     def load_images(self):
         """Load the images for the e-paper display, scaled for display size."""
@@ -1427,6 +1533,36 @@ class SharedData:
             except Exception:
                 return self.storage_manager.default_ssid
         return (ssid or self.storage_manager.default_ssid or 'default')
+
+    # ── Subnet scan log helpers ──────────────────────────────────
+    def append_subnet_scan_log(self, cidr, status, message, devices=None):
+        """Append an entry to the subnet scan log visible in the UI.
+
+        Args:
+            cidr:    The subnet that was scanned (or 'primary').
+            status:  'ok' | 'error' | 'info' | 'skip'
+            message: Human-readable description.
+            devices: Number of devices found (optional).
+        """
+        import datetime as _dt
+        entry = {
+            'ts': _dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'cidr': str(cidr),
+            'status': status,
+            'msg': message,
+        }
+        if devices is not None:
+            entry['devices'] = int(devices)
+        with self._subnet_scan_log_lock:
+            self._subnet_scan_log.append(entry)
+            # trim to ring-buffer size
+            if len(self._subnet_scan_log) > self._SUBNET_LOG_MAX:
+                self._subnet_scan_log = self._subnet_scan_log[-self._SUBNET_LOG_MAX:]
+
+    def get_subnet_scan_log(self):
+        """Return a copy of the scan log (newest last)."""
+        with self._subnet_scan_log_lock:
+            return list(self._subnet_scan_log)
 
     def set_latest_scan_results(self, scan_data):
         """Store fresh scan results scoped to the currently active network."""

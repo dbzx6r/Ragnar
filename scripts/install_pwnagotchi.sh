@@ -509,17 +509,19 @@ SWAP_BUTTON_SERVICE="/etc/systemd/system/ragnar-swap-button.service"
 
 if [[ -f "$SWAP_BUTTON_SCRIPT" ]]; then
     chmod 755 "$SWAP_BUTTON_SCRIPT"
-    cp "$SWAP_BUTTON_SCRIPT" /usr/local/bin/ragnar-swap-button
+    # Run directly from repo so git pull auto-updates the script
+    # Also keep a symlink at the old path for backwards compatibility
+    ln -sf "$SWAP_BUTTON_SCRIPT" /usr/local/bin/ragnar-swap-button
 
     cat >"$SWAP_BUTTON_SERVICE" <<EOF
 [Unit]
-Description=PiSugar Button Listener (Ragnar/Pwnagotchi Swap)
+Description=Swap Button Listener - GPIO KEY1 + PiSugar (Ragnar/Pwnagotchi)
 After=pisugar-server.service
 Wants=pisugar-server.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /usr/local/bin/ragnar-swap-button
+ExecStart=/usr/bin/python3 $SWAP_BUTTON_SCRIPT
 Restart=on-failure
 RestartSec=10
 

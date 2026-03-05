@@ -987,15 +987,15 @@ EOF
     cat > /etc/systemd/system/ragnar.service << EOF
 [Unit]
 Description=ragnar Service
-After=multi-user.target
+After=network.target
 
 [Service]
-ExecStartPre=-/home/ragnar/Ragnar/kill_port_8000.sh
-ExecStartPre=-/bin/bash -c 'ip link set mon0 down 2>/dev/null; iw mon0 del 2>/dev/null; systemctl stop pwnagotchi 2>/dev/null; systemctl stop bettercap 2>/dev/null; true'
+ExecStartPre=-/bin/bash -c '/home/ragnar/Ragnar/kill_port_8000.sh; ip link set mon0 down 2>/dev/null; iw mon0 del 2>/dev/null; systemctl stop pwnagotchi 2>/dev/null; systemctl stop bettercap 2>/dev/null; true'
 EOF
 
     if [ -n "$wipe_exec" ]; then
         # Prefix with - so wipe_epd failure does not block service start
+        # Must run as separate process: GPIO pins conflict if shared with Display's EPDHelper
         cat >> /etc/systemd/system/ragnar.service << EOF
 ExecStartPre=-/usr/bin/python3 -OO /home/ragnar/Ragnar/wipe_epd.py
 EOF
@@ -1009,7 +1009,7 @@ StandardError=inherit
 Restart=always
 RestartSec=3
 User=root
-TimeoutStopSec=10
+TimeoutStopSec=5
 KillMode=mixed
 
 # Check open files and restart if it reached the limit (ulimit -n buffer of 10000)

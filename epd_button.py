@@ -2,7 +2,7 @@
 # GPIO pins: KEY1=5, KEY2=6, KEY3=13, KEY4=19
 # Uses gpiozero (same library as the Waveshare EPD driver) to avoid conflicts
 #
-# KEY1: Home - go back to main page
+# KEY1: Swap to Pwnagotchi (with 10s cooldown)
 # KEY2: Flip screen upside down (toggle)
 # KEY3: Next page - rotate through all pages
 # KEY4: Restart Ragnar service
@@ -39,6 +39,7 @@ class EPDButtonListener:
         self.flip_screen = False
         self.available = False
         self._buttons = []
+        self._swap_cooldown = 0  # timestamp of last swap to prevent double triggers
 
     def start(self):
         """Start the button listener using gpiozero callbacks."""
@@ -74,9 +75,25 @@ class EPDButtonListener:
         self._buttons = []
 
     def _on_key1(self):
-        """KEY1: Home - go back to main page."""
-        self.current_page = PAGE_MAIN
-        logger.info("Button KEY1: Home (main page)")
+        """KEY1: Swap to Pwnagotchi (with 10s cooldown)."""
+        now = time.time()
+        if now - self._swap_cooldown < 10:
+            logger.debug("KEY1 swap ignored - cooldown active")
+            return
+        self._swap_cooldown = now
+
+        try:
+            current_mode = self.shared_data.config.get('pwnagotchi_mode', 'ragnar')
+            target = 'pwnagotchi' if current_mode != 'pwnagotchi' else 'ragnar'
+            logger.info(f"Button KEY1: swapping to {target}")
+
+            from webapp_modern import _schedule_pwn_mode_switch, _write_pwn_status_file, _update_pwn_config, _emit_pwn_status_update
+            _write_pwn_status_file('switching', f'Button-triggered swap to {target}', 'swap', {'target_mode': target})
+            _update_pwn_config({'pwnagotchi_mode': target, 'pwnagotchi_last_status': f'Swapping to {target} (KEY1 button)'})
+            _emit_pwn_status_update()
+            _schedule_pwn_mode_switch(target)
+        except Exception as e:
+            logger.error(f"KEY1 swap trigger failed: {e}")
 
     def _on_key2(self):
         """KEY2: Flip screen upside down (toggle)."""

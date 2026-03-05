@@ -1050,6 +1050,10 @@ def _execute_pwn_mode_switch(target_mode: str) -> None:
     if target_mode == 'pwnagotchi':
         _ensure_pwn_launcher()
 
+        # Stop the display loop FIRST so it doesn't overwrite the transition message.
+        # E-paper retains its image without power, so the message stays visible.
+        shared_data.display_should_exit = True
+
         # Show transition message on e-paper before Ragnar stops.
         # Run in a thread with a timeout so a blocked SPI bus never hangs the swap.
         _epd_t = threading.Thread(target=_show_epaper_transition, args=("Switching to Pwnagotchi...",), daemon=True)
@@ -1077,10 +1081,11 @@ def _execute_pwn_mode_switch(target_mode: str) -> None:
                 ['systemd-run', '--no-block', '--collect',
                  '--unit=ragnar-to-pwnagotchi-swap',
                  'bash', '-c',
-                 'sleep 1 && systemctl stop ragnar.service'
-                 ' && sleep 3'
+                 'systemctl stop ragnar.service'
+                 ' && python3 -OO /home/ragnar/Ragnar/wipe_epd.py 2>/dev/null; true'
                  ' && systemctl start bettercap.service'
-                 ' && systemctl start pwnagotchi.service'],
+                 ' && systemctl start pwnagotchi.service'
+                 ' && systemctl start ragnar-swap-button.service'],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
@@ -1374,6 +1379,19 @@ def sync_vulnerability_count():
         shared_data.vulnnbr = vuln_count
         logger.debug(f"Updated shared_data.vulnnbr: {old_count} -> {vuln_count}")
 
+        # ── Pushover: new vulnerability notification ──
+        # Always pass the absolute total; PushoverService tracks its own baseline
+        # (loaded from DB at startup) to avoid re-alerting on restart.
+        try:
+            from pushover_service import PushoverService
+            _po = getattr(shared_data, '_pushover_service', None)
+            if _po is None:
+                _po = PushoverService(shared_data)
+                shared_data._pushover_service = _po
+            _po.notify_new_vulnerabilities(vuln_count)
+        except Exception as _po_err:
+            logger.debug(f"Pushover vulnerability notification skipped: {_po_err}")
+
         old_host_count = getattr(shared_data, 'vulnerable_host_count', 0)
         shared_data.vulnerable_host_count = len(vulnerable_hosts)
         logger.debug(f"Updated vulnerable host count: {old_host_count} -> {shared_data.vulnerable_host_count}")
@@ -1537,6 +1555,21 @@ def sync_all_counts():
             shared_data.new_targets = len(shared_data.new_target_ips)
             shared_data.lost_targets = len(shared_data.lost_target_ips)
 
+            # ── Pushover: new / lost device notifications ──
+            try:
+                from pushover_service import PushoverService
+                _po = getattr(shared_data, '_pushover_service', None)
+                if _po is None:
+                    _po = PushoverService(shared_data)
+                    shared_data._pushover_service = _po
+                if new_active_hosts:
+                    _po.notify_new_devices(new_active_hosts)
+                    _po.notify_device_back_online(new_active_hosts)
+                if lost_active_hosts:
+                    _po.notify_device_lost(lost_active_hosts)
+            except Exception as _po_err:
+                logger.debug(f"Pushover new/lost device notification skipped: {_po_err}")
+
             if discovered_macs:
                 new_mac_count, points_awarded = shared_data.process_discovered_macs(discovered_macs)
                 if new_mac_count:
@@ -1612,6 +1645,14 @@ def sync_all_counts():
                 if old_creds != cred_count:
                     shared_data.crednbr = cred_count
                     logger.info(f"WEBAPP: Updated credentials: {old_creds} -> {cred_count} from {len(cred_files_found)} files")
+                    # ── Pushover: new credentials notification ──
+                    if cred_count > old_creds:
+                        try:
+                            _po = getattr(shared_data, '_pushover_service', None)
+                            if _po:
+                                _po.notify_new_credentials(cred_count - old_creds, cred_count)
+                        except Exception as _po_err:
+                            logger.debug(f"Pushover credential notification skipped: {_po_err}")
                 else:
                     logger.debug(f"WEBAPP: Credentials stable at: {cred_count} from {len(cred_files_found)} files")
             else:
@@ -3005,6 +3046,160 @@ def update_config():
         logger.error(f"Error updating config: {e}")
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/api/config/scan-subnets', methods=['GET', 'POST', 'DELETE'])
+def manage_scan_subnets():
+    """Manage the list of extra subnets to scan.
+
+    GET:    Return current list + auto-detected primary subnet.
+    POST:   Add a new CIDR (body: {"cidr": "10.0.0.0/24"}).
+    DELETE: Remove a CIDR  (body: {"cidr": "10.0.0.0/24"}).
+    """
+    import ipaddress as _ip
+    try:
+        subnets = list(shared_data.config.get('scan_subnets', []))
+
+        # Detect primary subnet for reference
+        primary = None
+        try:
+            import netifaces
+            gws = netifaces.gateways()
+            gw_tuple = gws.get('default', {}).get(netifaces.AF_INET)
+            if gw_tuple:
+                iface_addrs = netifaces.ifaddresses(gw_tuple[1]).get(netifaces.AF_INET)
+                if iface_addrs:
+                    my_ip = iface_addrs[0]['addr']
+                    mask = iface_addrs[0]['netmask']
+                    cidr_bits = sum(bin(int(x)).count('1') for x in mask.split('.'))
+                    primary = str(_ip.ip_network(f"{my_ip}/{cidr_bits}", strict=False))
+        except Exception:
+            pass
+
+        if request.method == 'GET':
+            return jsonify({'subnets': subnets, 'primary': primary})
+
+        data = request.get_json() or {}
+        raw = str(data.get('cidr', '')).strip()
+        if not raw:
+            return jsonify({'error': 'Missing cidr field'}), 400
+
+        # Validate
+        try:
+            net = _ip.ip_network(raw, strict=False)
+            normalised = str(net)
+        except ValueError:
+            return jsonify({'error': f'Invalid CIDR: {raw}'}), 400
+
+        if request.method == 'POST':
+            if normalised == primary:
+                return jsonify({'error': 'This is already your primary subnet — no need to add it'}), 400
+            if normalised not in subnets:
+                subnets.append(normalised)
+                shared_data.config['scan_subnets'] = subnets
+                shared_data.scan_subnets = subnets
+                shared_data.save_config()
+            return jsonify({'subnets': subnets, 'primary': primary})
+
+        if request.method == 'DELETE':
+            subnets = [s for s in subnets if s != normalised]
+            shared_data.config['scan_subnets'] = subnets
+            shared_data.scan_subnets = subnets
+            shared_data.save_config()
+            return jsonify({'subnets': subnets, 'primary': primary})
+
+    except Exception as e:
+        logger.error(f"Error managing scan subnets: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/config/scan-subnets/trigger', methods=['POST'])
+def trigger_subnet_scan():
+    """Trigger an immediate nmap scan of a specific subnet in the background.
+
+    Body: {"cidr": "10.0.0.0/24"}
+    Returns immediately — results appear in the subnet scan log.
+    """
+    import ipaddress as _ip
+    try:
+        data = request.get_json() or {}
+        raw = str(data.get('cidr', '')).strip()
+        if not raw:
+            return jsonify({'error': 'Missing cidr field'}), 400
+        try:
+            net = _ip.ip_network(raw, strict=False)
+            normalised = str(net)
+        except ValueError:
+            return jsonify({'error': f'Invalid CIDR: {raw}'}), 400
+
+        def _bg_scan(cidr):
+            try:
+                from actions.scanning import NetworkScanner
+                scanner = NetworkScanner(shared_data)
+                portstart = shared_data.portstart
+                portend = shared_data.portend
+                extra_ports = shared_data.portlist
+
+                shared_data.append_subnet_scan_log(
+                    cidr, 'info', f'Scanning {cidr}\u2026',
+                )
+                results = scanner.run_nmap_network_scan(
+                    cidr, portstart, portend, extra_ports,
+                )
+                found = len(results)
+                # Persist discovered hosts into DB
+                for host, host_data in results.items():
+                    mac = host_data.get('mac', '')
+                    if not mac or mac == '00:00:00:00:00:00':
+                        ip_parts = host.split('.')
+                        if len(ip_parts) == 4:
+                            mac = f"00:00:{int(ip_parts[0]):02x}:{int(ip_parts[1]):02x}:{int(ip_parts[2]):02x}:{int(ip_parts[3]):02x}"
+                    if mac:
+                        scanner.db.upsert_host(
+                            mac=mac.lower().strip(),
+                            ip=host,
+                            hostname=host_data.get('hostname', ''),
+                            ports=','.join(map(str, sorted(host_data.get('open_ports', [])))),
+                        )
+                        scanner.db.update_ping_status(mac.lower().strip(), success=True)
+
+                if found > 0:
+                    shared_data.append_subnet_scan_log(
+                        cidr, 'ok',
+                        f'{found} device(s) found on {cidr}',
+                        devices=found,
+                    )
+                else:
+                    shared_data.append_subnet_scan_log(
+                        cidr, 'error',
+                        f'{cidr} \u2014 no devices responded',
+                        devices=0,
+                    )
+                logger.info(f"Subnet trigger scan complete for {cidr}: {found} hosts")
+            except Exception as e:
+                logger.error(f"Subnet trigger scan failed for {cidr}: {e}")
+                shared_data.append_subnet_scan_log(
+                    cidr, 'error', f'Scan failed: {e}',
+                )
+
+        import threading
+        t = threading.Thread(target=_bg_scan, args=(normalised,), daemon=True)
+        t.start()
+        return jsonify({'status': 'scan_triggered', 'cidr': normalised})
+
+    except Exception as e:
+        logger.error(f"Error triggering subnet scan: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/config/scan-subnets/log')
+def get_scan_subnets_log():
+    """Return the in-memory subnet scan log (newest last)."""
+    try:
+        log = shared_data.get_subnet_scan_log()
+        return jsonify({'log': log})
+    except Exception as e:
+        logger.error(f"Error fetching subnet scan log: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/config/hardware-profiles')
 def get_hardware_profiles():
     """Get predefined hardware profiles for different Raspberry Pi models"""
@@ -3608,6 +3803,425 @@ def get_network():
             return jsonify({'error': str(e)}), 500
 
 
+def _batch_ai_classify(nodes, indices, ai_service, labels, valid_types):
+    """Classify multiple low-confidence devices in a SINGLE GPT-5 Nano call.
+
+    Mutates nodes in-place for the given indices.
+    """
+    if not indices:
+        return
+
+    # Build a compact table for the prompt
+    lines = []
+    for idx in indices:
+        n = nodes[idx]
+        lines.append(
+            f"{idx}|{n.get('vendor','') or '?'}|{n.get('hostname','') or '?'}|"
+            f"{n.get('mac','') or '?'}|{','.join(n['ports'][:10]) or 'none'}"
+        )
+
+    valid_list = ", ".join(sorted(valid_types - {"ragnar", "unknown"}))
+
+    system = (
+        "You are a network device classifier. For each numbered line, reply with "
+        "ONLY the line number and device_type, one per line. "
+        f"Valid types: {valid_list}. "
+        "Format: NUMBER|TYPE\nExample: 0|smart_tv\nIf uncertain reply NUMBER|unknown"
+    )
+
+    user = (
+        "IDX|VENDOR|HOSTNAME|MAC|PORTS\n" + "\n".join(lines)
+    )
+
+    original_model = ai_service.model
+    try:
+        ai_service.model = "gpt-5-nano"
+        answer = ai_service._ask(system, user)
+    finally:
+        ai_service.model = original_model
+
+    if not answer:
+        return
+
+    # Parse response lines
+    for line in answer.strip().splitlines():
+        line = line.strip().strip('`')
+        if '|' not in line:
+            continue
+        parts = line.split('|', 1)
+        try:
+            idx = int(parts[0].strip())
+            dtype = parts[1].strip().lower().replace(' ', '_').strip('"\'.,')
+        except (ValueError, IndexError):
+            continue
+        if idx in indices and dtype in valid_types:
+            nodes[idx]['type'] = dtype
+            nodes[idx]['type_label'] = labels.get(dtype, 'Unknown')
+            nodes[idx]['confidence'] = 0.7
+
+
+@app.route('/api/network/topology')
+def get_network_topology():
+    """Build a topology graph with gateway as center, device types classified, and links inferred."""
+    with _network_context_from_request():
+        try:
+            import hashlib
+            from device_classifier import classify_device, classify_device_ai, DEVICE_ICONS, DEVICE_TYPE_LABELS, DEVICE_TYPE_COLORS, VALID_DEVICE_TYPES
+
+            # Client can explicitly request AI classification
+            use_ai = request.args.get('use_ai', '0') == '1'
+
+            hosts = shared_data.db.get_all_hosts()
+            gw = getattr(shared_data, 'gateway_info', {}) or {}
+            gateway_ip = gw.get('gateway_ip')
+            ragnar_ip = gw.get('ragnar_ip')
+            subnet = gw.get('subnet')
+            interface = gw.get('interface')
+
+            # Compute a lightweight fingerprint of the current host list
+            # so the client can detect network changes
+            _hash_parts = sorted(f"{h.get('ip','')}|{h.get('mac','')}|{h.get('ports','')}" for h in hosts)
+            network_hash = hashlib.md5('|'.join(_hash_parts).encode()).hexdigest()[:12]
+
+            # If no gateway info yet, try to detect from netifaces directly
+            if not gateway_ip:
+                try:
+                    import netifaces
+                    gws = netifaces.gateways()
+                    gw_tuple = gws.get('default', {}).get(netifaces.AF_INET)
+                    if gw_tuple:
+                        gateway_ip = gw_tuple[0]
+                        interface = gw_tuple[1]
+                        iface_addrs = netifaces.ifaddresses(gw_tuple[1]).get(netifaces.AF_INET)
+                        if iface_addrs:
+                            ragnar_ip = iface_addrs[0]['addr']
+                except Exception:
+                    pass
+
+            # Build credentials set for risk scoring
+            cred_ips = set()
+            try:
+                cred_data = shared_data.db.get_all_credentials() if hasattr(shared_data.db, 'get_all_credentials') else []
+                for c in cred_data:
+                    ip_val = c.get('ip', '')
+                    if ip_val:
+                        cred_ips.add(ip_val)
+            except Exception:
+                pass
+
+            # ----------------------------------------------------------
+            # Phase 1: fast rule-based classification (no AI calls)
+            # ----------------------------------------------------------
+            nodes = []
+            node_ids = set()
+            low_confidence_indices = []  # indices of nodes needing AI help
+
+            for host in hosts:
+                ip = host.get('ip', '')
+                if not ip:
+                    continue
+
+                ports_str = host.get('ports', '')
+                ports = [p.strip() for p in ports_str.split(',') if p.strip()] if ports_str else []
+                vendor = host.get('vendor', '') or ''
+                status = host.get('status', 'unknown')
+                hostname = host.get('hostname', '') or ''
+                mac = host.get('mac', '') or ''
+
+                # Rule-based + hostname classification (no AI yet)
+                classification = classify_device_ai(
+                    vendor, ports,
+                    hostname=hostname,
+                    mac=mac,
+                    ai_service=None,  # skip AI in phase 1
+                    gateway_ip=gateway_ip, device_ip=ip,
+                )
+
+                # Risk scoring
+                port_count = len(ports)
+                has_creds = 5 if ip in cred_ips else 0
+                degraded = 3 if status == 'degraded' else 0
+                risk = port_count + has_creds + degraded
+
+                node = {
+                    'id': ip,
+                    'ip': ip,
+                    'mac': mac,
+                    'hostname': hostname,
+                    'vendor': vendor,
+                    'type': classification['device_type'],
+                    'type_label': classification['label'],
+                    'confidence': classification['confidence'],
+                    'ports': ports,
+                    'status': status,
+                    'risk': risk,
+                    'last_seen': host.get('last_seen', ''),
+                    'is_gateway': ip == gateway_ip,
+                    'is_ragnar': ip == ragnar_ip,
+                }
+                nodes.append(node)
+                node_ids.add(ip)
+
+                # Track low-confidence nodes for batch AI
+                if classification['confidence'] < 0.65 and not node['is_gateway']:
+                    low_confidence_indices.append(len(nodes) - 1)
+
+            # ----------------------------------------------------------
+            # Phase 2: batch AI classification (only when client requests it)
+            # ----------------------------------------------------------
+            ai_used = False
+            ai_service = getattr(shared_data, 'ai_service', None)
+            if use_ai and ai_service and low_confidence_indices and ai_service.ensure_ready():
+                # Check if we have cached AI results for this exact network state
+                _topo_ai_cache = getattr(shared_data, '_topo_ai_cache', {})
+                cached = _topo_ai_cache.get(network_hash)
+                if cached:
+                    # Apply cached classifications
+                    for idx, dtype, label in cached:
+                        if idx < len(nodes):
+                            nodes[idx]['type'] = dtype
+                            nodes[idx]['type_label'] = label
+                            nodes[idx]['confidence'] = 0.7
+                    ai_used = True
+                else:
+                    try:
+                        _batch_ai_classify(nodes, low_confidence_indices, ai_service, DEVICE_TYPE_LABELS, VALID_DEVICE_TYPES)
+                        # Store results in cache
+                        cache_entries = [(idx, nodes[idx]['type'], nodes[idx]['type_label']) for idx in low_confidence_indices]
+                        shared_data._topo_ai_cache = {network_hash: cache_entries}
+                        ai_used = True
+                    except Exception as e:
+                        logger.debug(f"Batch AI classification failed (non-fatal): {e}")
+
+            # ----------------------------------------------------------
+            # Phase 3: build topology links
+            # ----------------------------------------------------------
+            import ipaddress
+            potential_aps = []  # Devices that extend the network
+
+            # Ensure gateway is in node list even if not in hosts table
+            if gateway_ip and gateway_ip not in node_ids:
+                gw_vendor = gw.get('gateway_vendor', '')
+                gw_class = classify_device(gw_vendor, ['53', '80', '443'], gateway_ip=gateway_ip, device_ip=gateway_ip)
+                nodes.append({
+                    'id': gateway_ip,
+                    'ip': gateway_ip,
+                    'mac': gw.get('gateway_mac', ''),
+                    'hostname': 'Gateway',
+                    'vendor': gw_vendor,
+                    'type': 'router',
+                    'type_label': 'Router/Gateway',
+                    'confidence': 1.0,
+                    'ports': [],
+                    'status': 'alive',
+                    'risk': 0,
+                    'last_seen': '',
+                    'is_gateway': True,
+                    'is_ragnar': False,
+                })
+                node_ids.add(gateway_ip)
+
+            # Identify network-extending devices (APs, extenders, secondary routers)
+            _NETWORK_EXTENDER_TYPES = {'access_point', 'extender', 'switch'}
+            for node in nodes:
+                if node['is_gateway'] or node['is_ragnar']:
+                    continue
+                if node['type'] in _NETWORK_EXTENDER_TYPES:
+                    potential_aps.append(node)
+                elif node['type'] == 'router' and node['confidence'] >= 0.8:
+                    potential_aps.append(node)
+
+            # ── Determine the gateway's /24 subnet ──
+            gw_subnet_prefix = None
+            if gateway_ip:
+                try:
+                    gw_subnet_prefix = str(ipaddress.ip_network(f"{gateway_ip}/24", strict=False))
+                except Exception:
+                    pass
+
+            # ── Build AP subnet map ──
+            # If an AP/router is on a DIFFERENT /24 than the gateway,
+            # every device on that /24 is assumed to go through that AP.
+            ap_subnet_map = {}    # "/24 network string" → AP ip
+            ap_macs_prefix = {}   # MAC OUI prefix → AP ip  (fallback for same-subnet)
+            for ap in potential_aps:
+                ap_ip = ap.get('ip', '')
+                if not ap_ip:
+                    continue
+
+                # Subnet-based mapping
+                try:
+                    ap_net = str(ipaddress.ip_network(f"{ap_ip}/24", strict=False))
+                    if gw_subnet_prefix and ap_net != gw_subnet_prefix:
+                        # This AP serves a different subnet
+                        ap_subnet_map[ap_net] = ap_ip
+                    elif not gw_subnet_prefix:
+                        ap_subnet_map[ap_net] = ap_ip
+                except Exception:
+                    pass
+
+                # MAC OUI fallback (same-subnet heuristic)
+                mac = ap.get('mac', '')
+                if mac and len(mac) >= 8:
+                    prefix = mac[:8].lower()
+                    ap_macs_prefix[prefix] = ap_ip
+
+            # ── Build links ──
+            links = []
+            for node in nodes:
+                if node['is_gateway']:
+                    continue
+                target = gateway_ip or (nodes[0]['ip'] if nodes else None)
+                link_type = 'default'
+                node_ip = node.get('ip', '')
+                node_type = node.get('type', '')
+
+                # Strategy 1: Subnet-based assignment
+                # If this device is on the same /24 as an AP that is NOT
+                # on the gateway's subnet, route it through that AP.
+                try:
+                    node_net = str(ipaddress.ip_network(f"{node_ip}/24", strict=False))
+                    if node_net in ap_subnet_map and ap_subnet_map[node_net] != node_ip:
+                        target = ap_subnet_map[node_net]
+                        link_type = 'subnet_inferred'
+                except Exception:
+                    node_net = None
+
+                # Strategy 2: MAC OUI prefix (same-subnet fallback)
+                if link_type == 'default' and node_type not in ('router', 'access_point', 'extender', 'switch'):
+                    mac = node.get('mac', '')
+                    if mac and len(mac) >= 8:
+                        prefix = mac[:8].lower()
+                        if prefix in ap_macs_prefix and ap_macs_prefix[prefix] != node_ip:
+                            target = ap_macs_prefix[prefix]
+                            link_type = 'ap_inferred'
+
+                if target:
+                    links.append({
+                        'source': node_ip,
+                        'target': target,
+                        'type': link_type,
+                    })
+
+            # APs / extenders connect upstream to gateway
+            for ap in potential_aps:
+                if gateway_ip:
+                    links.append({
+                        'source': ap['ip'],
+                        'target': gateway_ip,
+                        'type': 'ap_uplink',
+                    })
+
+            result = {
+                'gateway': {
+                    'ip': gateway_ip,
+                    'mac': gw.get('gateway_mac', ''),
+                    'vendor': gw.get('gateway_vendor', ''),
+                },
+                'ragnar': {
+                    'ip': ragnar_ip,
+                    'interface': interface,
+                },
+                'subnet': subnet,
+                'nodes': nodes,
+                'links': links,
+                'device_icons': DEVICE_ICONS,
+                'device_labels': DEVICE_TYPE_LABELS,
+                'device_colors': DEVICE_TYPE_COLORS,
+                'network_hash': network_hash,
+                'ai_used': ai_used,
+            }
+            return jsonify(result)
+
+        except Exception as e:
+            logger.error(f"Error building topology: {e}")
+            logger.debug(traceback.format_exc())
+            return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/host/<path:ip>')
+def get_host_detail(ip):
+    """Get all aggregated data for a single host"""
+    try:
+        # Get host base data from DB
+        host_data = None
+        hosts = shared_data.db.get_all_hosts()
+        for h in hosts:
+            if h.get('ip') == ip:
+                host_data = h
+                break
+
+        if not host_data:
+            return jsonify({'error': 'Host not found'}), 404
+
+        ports_str = host_data.get('ports', '')
+        ports = [p.strip() for p in ports_str.split(',') if p.strip()] if ports_str else []
+
+        # Get credentials for this IP across all services
+        all_creds = web_utils.get_all_credentials()
+        host_creds = []
+        for svc, entries in all_creds.items():
+            for e in entries:
+                if e.get('ip') == ip:
+                    host_creds.append({**e, 'service': svc})
+
+        # Get attack logs for this IP (last 30)
+        attack_log_dir = os.path.join(shared_data.logsdir, 'attacks')
+        host_attacks = []
+        if os.path.exists(attack_log_dir):
+            from datetime import datetime, timedelta
+            cutoff = datetime.now() - timedelta(days=30)
+            for lf in sorted(os.listdir(attack_log_dir), reverse=True)[:30]:
+                if not lf.startswith('attacks_') or not lf.endswith('.json'):
+                    continue
+                try:
+                    file_date = datetime.strptime(lf.replace('attacks_','').replace('.json',''), '%Y-%m-%d')
+                    if file_date < cutoff:
+                        continue
+                    with open(os.path.join(attack_log_dir, lf), 'r', encoding='utf-8') as f:
+                        for entry in json.load(f):
+                            if entry.get('target_ip') == ip:
+                                host_attacks.append(entry)
+                except Exception:
+                    continue
+        host_attacks.sort(key=lambda x: x.get('timestamp',''), reverse=True)
+        host_attacks = host_attacks[:30]
+
+        # Get vulnerability file for this IP if it exists
+        vuln_summary = ''
+        vuln_file = os.path.join(shared_data.vulnerabilities_dir, f'vuln_{ip}.txt')
+        if os.path.exists(vuln_file):
+            try:
+                with open(vuln_file, 'r', encoding='utf-8', errors='ignore') as f:
+                    vuln_summary = f.read(4000)  # cap at 4KB
+            except Exception:
+                pass
+
+        return jsonify({
+            'ip': ip,
+            'hostname': host_data.get('hostname', ''),
+            'mac': host_data.get('mac', ''),
+            'status': host_data.get('status', 'unknown'),
+            'ports': ports,
+            'last_seen': host_data.get('last_seen', ''),
+            'notes': host_data.get('notes', ''),
+            'services': {
+                'ssh': host_data.get('ssh_connector', ''),
+                'ftp': host_data.get('ftp_connector', ''),
+                'smb': host_data.get('smb_connector', ''),
+                'telnet': host_data.get('telnet_connector', ''),
+                'rdp': host_data.get('rdp_connector', ''),
+                'sql': host_data.get('sql_connector', ''),
+            },
+            'credentials': host_creds,
+            'attack_logs': host_attacks,
+            'vuln_summary': vuln_summary,
+        })
+    except Exception as e:
+        logger.error(f"Error getting host detail for {ip}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/credentials')
 def get_credentials():
     """Get discovered credentials"""
@@ -3630,6 +4244,170 @@ def get_loot():
         except Exception as e:
             logger.error(f"Error getting loot: {e}")
             return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/report/export')
+def export_report():
+    """Generate and download a self-contained HTML scan report"""
+    try:
+        from datetime import datetime as _dt
+        import html as _html
+
+        # Gather data
+        hosts = shared_data.db.get_all_hosts()
+        all_creds = web_utils.get_all_credentials()
+        flat_creds = []
+        for svc, entries in all_creds.items():
+            for e in entries:
+                flat_creds.append({**e, 'service': svc})
+
+        # Attack logs (last 30 days)
+        attack_log_dir = os.path.join(shared_data.logsdir, 'attacks')
+        all_attacks = []
+        if os.path.exists(attack_log_dir):
+            from datetime import timedelta
+            cutoff = _dt.now() - timedelta(days=30)
+            for lf in sorted(os.listdir(attack_log_dir), reverse=True)[:30]:
+                if not lf.startswith('attacks_') or not lf.endswith('.json'):
+                    continue
+                try:
+                    file_date = _dt.strptime(lf.replace('attacks_','').replace('.json',''), '%Y-%m-%d')
+                    if file_date < cutoff:
+                        continue
+                    with open(os.path.join(attack_log_dir, lf), 'r', encoding='utf-8') as f:
+                        all_attacks.extend(json.load(f))
+                except Exception:
+                    continue
+        all_attacks.sort(key=lambda x: x.get('timestamp',''), reverse=True)
+
+        # Stats
+        alive_hosts = [h for h in hosts if h.get('status') == 'alive']
+        total_ports = sum(len([p for p in (h.get('ports','') or '').split(',') if p.strip()]) for h in hosts)
+        success_attacks = [a for a in all_attacks if a.get('status') == 'success']
+
+        generated_at = _dt.now().strftime('%Y-%m-%d %H:%M:%S')
+        network_ssid = getattr(shared_data, 'active_network_ssid', None) or 'Unknown'
+
+        def e(s): return _html.escape(str(s or ''))
+
+        # Build host rows
+        host_rows = ''
+        for h in sorted(hosts, key=lambda x: x.get('ip','')):
+            ports_str = h.get('ports','') or ''
+            ports = [p.strip() for p in ports_str.split(',') if p.strip()]
+            status = h.get('status','unknown')
+            status_color = '#4ade80' if status == 'alive' else ('#facc15' if status == 'degraded' else '#9ca3af')
+            host_rows += f"""<tr>
+                <td><span style="color:{status_color}">{e(status)}</span></td>
+                <td class="mono">{e(h.get('ip',''))}</td>
+                <td>{e(h.get('hostname',''))}</td>
+                <td class="mono">{e(h.get('mac',''))}</td>
+                <td>{e(len(ports))}</td>
+                <td class="mono small">{e(', '.join(ports[:10])) + ('…' if len(ports) > 10 else '')}</td>
+                <td>{e(h.get('last_seen',''))}</td>
+            </tr>"""
+
+        # Build credential rows
+        cred_rows = ''
+        svc_colors = {'ssh':'#93c5fd','smb':'#c4b5fd','ftp':'#fde68a','telnet':'#fdba74','rdp':'#f9a8d4','sql':'#86efac'}
+        for c in flat_creds:
+            color = svc_colors.get(c.get('service',''), '#9ca3af')
+            cred_rows += f"""<tr>
+                <td class="mono">{e(c.get('ip',''))}</td>
+                <td><span style="color:{color};font-weight:600">{e(c.get('service','').upper())}</span></td>
+                <td class="mono">{e(c.get('username',''))}</td>
+                <td class="mono">{e(c.get('password',''))}</td>
+            </tr>"""
+
+        # Build attack rows (top 200)
+        attack_rows = ''
+        status_colors_atk = {'success':'#4ade80','failed':'#f87171','timeout':'#facc15'}
+        for a in all_attacks[:200]:
+            color = status_colors_atk.get(a.get('status',''), '#9ca3af')
+            attack_rows += f"""<tr>
+                <td class="small">{e(a.get('timestamp',''))}</td>
+                <td class="mono">{e(a.get('target_ip',''))}</td>
+                <td>{e(a.get('attack_type',''))}</td>
+                <td>{e(a.get('target_port',''))}</td>
+                <td><span style="color:{color};font-weight:600">{e(a.get('status',''))}</span></td>
+                <td class="small">{e((a.get('message','') or '')[:80])}</td>
+            </tr>"""
+
+        html_report = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ragnar Scan Report — {e(generated_at)}</title>
+<style>
+  *{{box-sizing:border-box;margin:0;padding:0}}
+  body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f172a;color:#e2e8f0;padding:2rem}}
+  h1{{font-size:1.8rem;margin-bottom:0.25rem;color:#f8fafc}}
+  .subtitle{{color:#94a3b8;margin-bottom:2rem;font-size:0.9rem}}
+  .stats{{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1rem;margin-bottom:2rem}}
+  .stat{{background:#1e293b;border:1px solid #334155;border-radius:0.5rem;padding:1rem;text-align:center}}
+  .stat-value{{font-size:2rem;font-weight:700;color:#f8fafc}}
+  .stat-label{{font-size:0.75rem;color:#94a3b8;margin-top:0.25rem;text-transform:uppercase;letter-spacing:.05em}}
+  section{{margin-bottom:2.5rem}}
+  h2{{font-size:1.1rem;font-weight:600;color:#cbd5e1;border-bottom:1px solid #334155;padding-bottom:0.5rem;margin-bottom:1rem;text-transform:uppercase;letter-spacing:.05em}}
+  .table-wrap{{overflow-x:auto}}
+  table{{width:100%;border-collapse:collapse;font-size:0.8rem}}
+  th{{background:#1e293b;color:#94a3b8;text-align:left;padding:0.5rem 0.75rem;font-weight:600;white-space:nowrap}}
+  td{{padding:0.45rem 0.75rem;border-bottom:1px solid #1e293b}}
+  tr:hover td{{background:#1e293b}}
+  .mono{{font-family:'SF Mono',monospace}}
+  .small{{font-size:0.72rem}}
+  .empty{{color:#475569;font-style:italic;padding:1rem 0}}
+  .footer{{margin-top:3rem;color:#475569;font-size:0.75rem;text-align:center}}
+</style>
+</head>
+<body>
+<h1>Ragnar Scan Report</h1>
+<p class="subtitle">Generated: {e(generated_at)} &nbsp;|&nbsp; Network: {e(network_ssid)}</p>
+
+<div class="stats">
+  <div class="stat"><div class="stat-value">{len(hosts)}</div><div class="stat-label">Total Hosts</div></div>
+  <div class="stat"><div class="stat-value" style="color:#4ade80">{len(alive_hosts)}</div><div class="stat-label">Alive</div></div>
+  <div class="stat"><div class="stat-value">{total_ports}</div><div class="stat-label">Open Ports</div></div>
+  <div class="stat"><div class="stat-value" style="color:#f87171">{len(flat_creds)}</div><div class="stat-label">Credentials</div></div>
+  <div class="stat"><div class="stat-value">{len(all_attacks)}</div><div class="stat-label">Attacks Logged</div></div>
+  <div class="stat"><div class="stat-value" style="color:#4ade80">{len(success_attacks)}</div><div class="stat-label">Successful</div></div>
+</div>
+
+<section>
+  <h2>Discovered Hosts ({len(hosts)})</h2>
+  <div class="table-wrap">
+  {'<table><thead><tr><th>Status</th><th>IP</th><th>Hostname</th><th>MAC</th><th>Ports #</th><th>Open Ports</th><th>Last Seen</th></tr></thead><tbody>' + host_rows + '</tbody></table>' if host_rows else '<p class="empty">No hosts discovered</p>'}
+  </div>
+</section>
+
+<section>
+  <h2>Discovered Credentials ({len(flat_creds)})</h2>
+  <div class="table-wrap">
+  {'<table><thead><tr><th>IP</th><th>Service</th><th>Username</th><th>Password</th></tr></thead><tbody>' + cred_rows + '</tbody></table>' if cred_rows else '<p class="empty">No credentials found</p>'}
+  </div>
+</section>
+
+<section>
+  <h2>Attack Log (last 30 days — top 200)</h2>
+  <div class="table-wrap">
+  {'<table><thead><tr><th>Timestamp</th><th>Target IP</th><th>Attack Type</th><th>Port</th><th>Status</th><th>Message</th></tr></thead><tbody>' + attack_rows + '</tbody></table>' if attack_rows else '<p class="empty">No attacks logged</p>'}
+  </div>
+</section>
+
+<p class="footer">Ragnar Security Scanner &mdash; For authorized testing only</p>
+</body>
+</html>"""
+
+        filename = f"ragnar_report_{_dt.now().strftime('%Y%m%d_%H%M%S')}.html"
+        response = make_response(html_report)
+        response.headers['Content-Type'] = 'text/html; charset=utf-8'
+        response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
+    except Exception as e:
+        logger.error(f"Error generating report: {e}")
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/vulnerability-report/<path:filename>')
@@ -4318,7 +5096,8 @@ def attack_logs():
                 'target_port': target_port,
                 'status': status,
                 'message': message,
-                'details': details
+                'details': details,
+                'network_ssid': getattr(shared_data, 'active_network_ssid', None) or 'unknown'
             }
             
             # Load existing logs or create new list
@@ -4360,6 +5139,7 @@ def attack_logs():
             ip_filter = request.args.get('ip', None)
             attack_type_filter = request.args.get('type', None)
             status_filter = request.args.get('status', None)
+            network_filter = request.args.get('network', None)
             limit = int(request.args.get('limit', 100))
             days_back = int(request.args.get('days', 7))
             
@@ -4405,18 +5185,27 @@ def attack_logs():
                     logger.error(f"Error reading attack log file {log_file}: {e}")
                     continue
 
+            # Collect all unique network SSIDs across all logs (before filtering)
+            available_networks = sorted(set(
+                log.get('network_ssid') or 'unknown'
+                for log in all_logs
+            ))
+
             # Apply filters
             filtered_logs = all_logs
 
             if ip_filter:
                 filtered_logs = [log for log in filtered_logs if log.get('target_ip') == ip_filter]
-            
+
             if attack_type_filter:
                 filtered_logs = [log for log in filtered_logs if log.get('attack_type') == attack_type_filter]
-            
+
             if status_filter:
                 filtered_logs = [log for log in filtered_logs if log.get('status') == status_filter]
-            
+
+            if network_filter:
+                filtered_logs = [log for log in filtered_logs if (log.get('network_ssid') or 'unknown') == network_filter]
+
             # Sort by timestamp (most recent first)
             filtered_logs.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
 
@@ -4441,10 +5230,12 @@ def attack_logs():
                 'filtered_count': filtered_count,
                 'success_count': success_count,
                 'failed_count': failed_count,
+                'available_networks': available_networks,
                 'filters_applied': {
                     'ip': ip_filter,
                     'type': attack_type_filter,
                     'status': status_filter,
+                    'network': network_filter,
                     'days': days_back,
                     'limit': limit
                 }
@@ -10588,6 +11379,96 @@ def run_manual_lynis_pentest():
 # FILE MANAGEMENT ENDPOINTS
 # ============================================================================
 
+def _get_networks_dir():
+    """Return the filesystem path to the per-network storage root."""
+    manager = getattr(shared_data, 'storage_manager', None)
+    if manager:
+        return getattr(manager, 'networks_dir', os.path.join(shared_data.datadir, 'networks'))
+    return os.path.join(shared_data.datadir, 'networks')
+
+
+def _list_all_networks():
+    """Return [{slug, ssid, network_dir}] for every known network directory."""
+    networks_dir = _get_networks_dir()
+    result = []
+    if not os.path.isdir(networks_dir):
+        return result
+    for slug in sorted(os.listdir(networks_dir)):
+        if slug.startswith('.'):
+            continue
+        network_dir = os.path.join(networks_dir, slug)
+        if not os.path.isdir(network_dir):
+            continue
+        ssid = slug
+        ssid_file = os.path.join(network_dir, 'ssid.txt')
+        if os.path.exists(ssid_file):
+            try:
+                with open(ssid_file, 'r', encoding='utf-8') as _f:
+                    ssid = _f.read().strip() or slug
+            except IOError:
+                pass
+        result.append({'slug': slug, 'ssid': ssid, 'network_dir': network_dir})
+    return result
+
+
+def _resolve_loot_path(virtual_root, network_rel_path, path):
+    """
+    Resolve a virtual per-network path to a real filesystem path.
+
+    network_rel_path is the subdirectory relative to the network root, e.g.:
+      'loot/data_stolen', 'loot/credentials',
+      'output/scan_results', 'output/vulnerabilities'
+
+    Returns None when the caller should show the network list (path == virtual_root).
+    Raises ValueError on path traversal or invalid slug.
+    """
+    remainder = path[len(virtual_root):].lstrip('/')
+    if not remainder:
+        return None  # show network list
+
+    parts = remainder.split('/', 1)
+    slug = parts[0]
+    subpath = parts[1] if len(parts) > 1 else ''
+
+    # Validate slug: must be alphanumeric + underscores only (mirrors slugify output)
+    if not slug or not all(c.isalnum() or c == '_' for c in slug):
+        raise ValueError(f'Invalid network slug: {slug}')
+
+    networks_dir = _get_networks_dir()
+    category_dir = os.path.join(networks_dir, slug, *network_rel_path.split('/'))
+    actual = os.path.join(category_dir, subpath) if subpath else category_dir
+
+    # Security: path must stay within networks_dir
+    real_actual = os.path.realpath(actual)
+    real_networks = os.path.realpath(networks_dir)
+    if not real_actual.startswith(real_networks + os.sep) and real_actual != real_networks:
+        raise ValueError('Path traversal detected')
+
+    return actual
+
+
+def _network_loot_dirs(network_rel_path, virtual_root):
+    """Return a list-API response listing all networks as virtual directories."""
+    networks = _list_all_networks()
+    dirs = []
+    for n in networks:
+        category_dir = os.path.join(n['network_dir'], *network_rel_path.split('/'))
+        mtime = 0
+        if os.path.isdir(category_dir):
+            try:
+                mtime = os.path.getmtime(category_dir)
+            except OSError:
+                pass
+        dirs.append({
+            'name': n['ssid'],
+            'is_directory': True,
+            'path': f"{virtual_root}/{n['slug']}",
+            'size': 0,
+            'modified': mtime,
+        })
+    return dirs
+
+
 @app.route('/api/files/list')
 def list_files_api():
     """List files in a directory for file management"""
@@ -10610,21 +11491,21 @@ def list_files_api():
         # Map paths to actual directories
         actual_path = ""
         if path.startswith('/data_stolen'):
-            actual_path = shared_data.datastolendir
-            if len(path) > 12:  # More than just '/data_stolen'
-                actual_path = os.path.join(actual_path, path[13:])
+            actual_path = _resolve_loot_path('/data_stolen', 'loot/data_stolen', path)
+            if actual_path is None:
+                return jsonify(_network_loot_dirs('loot/data_stolen', '/data_stolen'))
         elif path.startswith('/scan_results'):
-            actual_path = shared_data.scan_results_dir
-            if len(path) > 13:  # More than just '/scan_results'
-                actual_path = os.path.join(actual_path, path[14:])
+            actual_path = _resolve_loot_path('/scan_results', 'output/scan_results', path)
+            if actual_path is None:
+                return jsonify(_network_loot_dirs('output/scan_results', '/scan_results'))
         elif path.startswith('/crackedpwd'):
-            actual_path = shared_data.crackedpwddir
-            if len(path) > 11:  # More than just '/crackedpwd'
-                actual_path = os.path.join(actual_path, path[12:])
+            actual_path = _resolve_loot_path('/crackedpwd', 'loot/credentials', path)
+            if actual_path is None:
+                return jsonify(_network_loot_dirs('loot/credentials', '/crackedpwd'))
         elif path.startswith('/vulnerabilities'):
-            actual_path = shared_data.vulnerabilities_dir
-            if len(path) > 16:  # More than just '/vulnerabilities'
-                actual_path = os.path.join(actual_path, path[17:])
+            actual_path = _resolve_loot_path('/vulnerabilities', 'output/vulnerabilities', path)
+            if actual_path is None:
+                return jsonify(_network_loot_dirs('output/vulnerabilities', '/vulnerabilities'))
         elif path.startswith('/logs'):
             actual_path = shared_data.datadir + '/logs'
             if len(path) > 5:  # More than just '/logs'
@@ -10665,6 +11546,88 @@ def list_files_api():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/files/preview')
+def preview_file_api():
+    """Preview file contents inline — text, CSV, images"""
+    import mimetypes, base64
+    try:
+        file_path = request.args.get('path')
+        if not file_path:
+            return jsonify({'error': 'File path required'}), 400
+
+        # Map virtual path to actual path
+        actual_path = ''
+        if file_path.startswith('/data_stolen'):
+            resolved = _resolve_loot_path('/data_stolen', 'loot/data_stolen', file_path)
+            if resolved is None:
+                return jsonify({'error': 'Invalid path'}), 400
+            actual_path = resolved
+        elif file_path.startswith('/scan_results'):
+            resolved = _resolve_loot_path('/scan_results', 'output/scan_results', file_path)
+            if resolved is None:
+                return jsonify({'error': 'Invalid path'}), 400
+            actual_path = resolved
+        elif file_path.startswith('/crackedpwd'):
+            resolved = _resolve_loot_path('/crackedpwd', 'loot/credentials', file_path)
+            if resolved is None:
+                return jsonify({'error': 'Invalid path'}), 400
+            actual_path = resolved
+        elif file_path.startswith('/vulnerabilities'):
+            resolved = _resolve_loot_path('/vulnerabilities', 'output/vulnerabilities', file_path)
+            if resolved is None:
+                return jsonify({'error': 'Invalid path'}), 400
+            actual_path = resolved
+        elif file_path.startswith('/logs'):
+            actual_path = shared_data.datadir + '/logs' + file_path[5:]
+        elif file_path.startswith('/backups'):
+            actual_path = shared_data.backupdir + file_path[8:]
+        elif file_path.startswith('/uploads'):
+            actual_path = shared_data.upload_dir + file_path[8:]
+        else:
+            return jsonify({'error': 'Invalid path'}), 400
+
+        if not os.path.isfile(actual_path):
+            return jsonify({'error': 'File not found'}), 404
+
+        # Security: ensure path doesn't escape allowed dirs
+        actual_path = os.path.realpath(actual_path)
+
+        mime_type, _ = mimetypes.guess_type(actual_path)
+        mime_type = mime_type or 'application/octet-stream'
+        file_size = os.path.getsize(actual_path)
+        ext = os.path.splitext(actual_path)[1].lower()
+
+        TEXT_EXTENSIONS = {'.txt', '.log', '.csv', '.json', '.xml', '.yaml', '.yml',
+                           '.md', '.conf', '.cfg', '.ini', '.nmap', '.gnmap', '.sh', '.py'}
+        IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg'}
+
+        if ext in IMAGE_EXTENSIONS:
+            if file_size > 5 * 1024 * 1024:  # 5MB limit for images
+                return jsonify({'type': 'too_large', 'size': file_size, 'name': os.path.basename(actual_path)})
+            with open(actual_path, 'rb') as f:
+                data = base64.b64encode(f.read()).decode('ascii')
+            return jsonify({'type': 'image', 'mime': mime_type, 'data': data, 'name': os.path.basename(actual_path)})
+
+        elif ext in TEXT_EXTENSIONS or (mime_type and mime_type.startswith('text/')):
+            if file_size > 512 * 1024:  # 512KB limit for text
+                # Return first 512KB with truncation notice
+                with open(actual_path, 'r', encoding='utf-8', errors='replace') as f:
+                    content = f.read(512 * 1024)
+                return jsonify({'type': 'text', 'content': content, 'truncated': True,
+                                'size': file_size, 'name': os.path.basename(actual_path)})
+            with open(actual_path, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read()
+            return jsonify({'type': 'text', 'content': content, 'truncated': False,
+                            'size': file_size, 'name': os.path.basename(actual_path)})
+        else:
+            return jsonify({'type': 'binary', 'mime': mime_type,
+                            'size': file_size, 'name': os.path.basename(actual_path)})
+
+    except Exception as e:
+        logger.error(f"Error previewing file: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/files/download')
 def download_file_api():
     """Download a file"""
@@ -10672,17 +11635,29 @@ def download_file_api():
         file_path = request.args.get('path')
         if not file_path:
             return jsonify({'error': 'File path required'}), 400
-        
+
         # Map virtual path to actual path
         actual_path = ""
         if file_path.startswith('/data_stolen'):
-            actual_path = shared_data.datastolendir + file_path[12:]
+            resolved = _resolve_loot_path('/data_stolen', 'loot/data_stolen', file_path)
+            if resolved is None:
+                return jsonify({'error': 'Invalid file path'}), 400
+            actual_path = resolved
         elif file_path.startswith('/scan_results'):
-            actual_path = shared_data.scan_results_dir + file_path[13:]
+            resolved = _resolve_loot_path('/scan_results', 'output/scan_results', file_path)
+            if resolved is None:
+                return jsonify({'error': 'Invalid file path'}), 400
+            actual_path = resolved
         elif file_path.startswith('/crackedpwd'):
-            actual_path = shared_data.crackedpwddir + file_path[11:]
+            resolved = _resolve_loot_path('/crackedpwd', 'loot/credentials', file_path)
+            if resolved is None:
+                return jsonify({'error': 'Invalid file path'}), 400
+            actual_path = resolved
         elif file_path.startswith('/vulnerabilities'):
-            actual_path = shared_data.vulnerabilities_dir + file_path[16:]
+            resolved = _resolve_loot_path('/vulnerabilities', 'output/vulnerabilities', file_path)
+            if resolved is None:
+                return jsonify({'error': 'Invalid file path'}), 400
+            actual_path = resolved
         elif file_path.startswith('/logs'):
             actual_path = shared_data.datadir + '/logs' + file_path[5:]
         elif file_path.startswith('/backups'):
@@ -10691,10 +11666,10 @@ def download_file_api():
             actual_path = shared_data.upload_dir + file_path[8:]
         else:
             return jsonify({'error': 'Invalid file path'}), 400
-        
+
         if not os.path.isfile(actual_path):
             return jsonify({'error': 'File not found'}), 404
-        
+
         return send_from_directory(
             os.path.dirname(actual_path),
             os.path.basename(actual_path),
@@ -10719,13 +11694,25 @@ def delete_file_api():
         # Map virtual path to actual path
         actual_path = ""
         if file_path.startswith('/data_stolen'):
-            actual_path = shared_data.datastolendir + file_path[12:]
+            resolved = _resolve_loot_path('/data_stolen', 'loot/data_stolen', file_path)
+            if resolved is None:
+                return jsonify({'error': 'Invalid file path'}), 400
+            actual_path = resolved
         elif file_path.startswith('/scan_results'):
-            actual_path = shared_data.scan_results_dir + file_path[13:]
+            resolved = _resolve_loot_path('/scan_results', 'output/scan_results', file_path)
+            if resolved is None:
+                return jsonify({'error': 'Invalid file path'}), 400
+            actual_path = resolved
         elif file_path.startswith('/crackedpwd'):
-            actual_path = shared_data.crackedpwddir + file_path[11:]
+            resolved = _resolve_loot_path('/crackedpwd', 'loot/credentials', file_path)
+            if resolved is None:
+                return jsonify({'error': 'Invalid file path'}), 400
+            actual_path = resolved
         elif file_path.startswith('/vulnerabilities'):
-            actual_path = shared_data.vulnerabilities_dir + file_path[16:]
+            resolved = _resolve_loot_path('/vulnerabilities', 'output/vulnerabilities', file_path)
+            if resolved is None:
+                return jsonify({'error': 'Invalid file path'}), 400
+            actual_path = resolved
         elif file_path.startswith('/logs'):
             actual_path = shared_data.datadir + '/logs' + file_path[5:]
         elif file_path.startswith('/backups'):
@@ -10734,10 +11721,10 @@ def delete_file_api():
             actual_path = shared_data.upload_dir + file_path[8:]
         else:
             return jsonify({'error': 'Invalid file path'}), 400
-        
+
         if not os.path.exists(actual_path):
             return jsonify({'error': 'File not found'}), 404
-        
+
         # Delete file or directory
         if os.path.isdir(actual_path):
             import shutil
@@ -13265,7 +14252,7 @@ def get_ai_status():
                 'network_insights': getattr(ai_service, 'network_insights', False),
                 'vulnerability_summaries': getattr(ai_service, 'vulnerability_summaries', False)
             },
-            'configured': bool(getattr(ai_service, 'api_token', None))
+            'configured': bool(getattr(ai_service, 'api_token', None) or getattr(ai_service, 'client', None))
         }
         
         # Include initialization error if present (but skip SDK-related ones)
@@ -13555,6 +14542,113 @@ def remove_ai_token():
 
 
 # ============================================================================
+# PUSHOVER NOTIFICATION ENDPOINTS
+# ============================================================================
+
+@app.route('/api/pushover/keys', methods=['GET'])
+def get_pushover_keys():
+    """Get Pushover key status (without revealing full keys)."""
+    try:
+        from env_manager import EnvManager
+        em = EnvManager()
+        user_key = em.get_env_key("RAGNAR_PUSHOVER_USER_KEY")
+        api_token = em.get_env_key("RAGNAR_PUSHOVER_API_TOKEN")
+        return jsonify({
+            'user_key_configured': bool(user_key),
+            'api_token_configured': bool(api_token),
+            'user_key_preview': f"{user_key[:6]}...{user_key[-4:]}" if user_key and len(user_key) > 10 else None,
+            'api_token_preview': f"{api_token[:6]}...{api_token[-4:]}" if api_token and len(api_token) > 10 else None,
+        })
+    except Exception as e:
+        logger.error(f"Error getting Pushover key status: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pushover/keys', methods=['POST'])
+def save_pushover_keys():
+    """Save Pushover user key and/or API token to .env file."""
+    try:
+        from env_manager import EnvManager
+        em = EnvManager()
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+
+        saved = []
+        user_key = data.get('user_key', '').strip()
+        api_token = data.get('api_token', '').strip()
+
+        if user_key:
+            em.set_env_key("RAGNAR_PUSHOVER_USER_KEY", user_key)
+            saved.append("User Key")
+        if api_token:
+            em.set_env_key("RAGNAR_PUSHOVER_API_TOKEN", api_token)
+            saved.append("API Token")
+
+        if not saved:
+            return jsonify({'error': 'No keys provided'}), 400
+
+        # Auto-enable Pushover if both keys are now set
+        uk = em.get_env_key("RAGNAR_PUSHOVER_USER_KEY")
+        at = em.get_env_key("RAGNAR_PUSHOVER_API_TOKEN")
+        auto_enabled = False
+        if uk and at and not shared_data.config.get('pushover_enabled', False):
+            shared_data.config['pushover_enabled'] = True
+            shared_data.save_config()
+            auto_enabled = True
+
+        return jsonify({
+            'success': True,
+            'message': f"✓ Saved: {', '.join(saved)}",
+            'auto_enabled': auto_enabled,
+            'both_configured': bool(uk and at),
+        })
+    except Exception as e:
+        logger.error(f"Error saving Pushover keys: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pushover/keys', methods=['DELETE'])
+def remove_pushover_keys():
+    """Remove Pushover keys from .env file."""
+    try:
+        from env_manager import EnvManager
+        em = EnvManager()
+        em.delete_env_key("RAGNAR_PUSHOVER_USER_KEY")
+        em.delete_env_key("RAGNAR_PUSHOVER_API_TOKEN")
+        shared_data.config['pushover_enabled'] = False
+        shared_data.save_config()
+        return jsonify({'success': True, 'message': 'Pushover keys removed'})
+    except Exception as e:
+        logger.error(f"Error removing Pushover keys: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pushover/test', methods=['POST'])
+def test_pushover():
+    """Send a test Pushover notification."""
+    try:
+        pushover = getattr(shared_data, '_pushover_service', None)
+        if not pushover:
+            from pushover_service import PushoverService
+            pushover = PushoverService(shared_data)
+            shared_data._pushover_service = pushover
+
+        if not pushover.is_configured():
+            return jsonify({'success': False, 'message': 'Pushover keys not configured. Please save your User Key and API Token first.'}), 400
+
+        result = pushover.send(
+            message="Hello there Viking, are you ready for adventures?",
+            title="Ragnar says",
+            sound="bugle"
+        )
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error testing Pushover: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+# ============================================================================
 # SIGNAL HANDLERS
 # ============================================================================
 
@@ -13774,8 +14868,15 @@ def run_server(host='0.0.0.0', port=8000, ssl_cert=None, ssl_key=None, https_por
         if use_https:
             logger.info("⚠️  Using self-signed certificate - browser will show security warning")
 
-        # Prime synchronized data before clients connect
-        sync_all_counts()
+        # Synchronize counts in the background so the web server binds
+        # immediately instead of waiting for a full DB scan first.
+        def _deferred_sync():
+            try:
+                sync_all_counts()
+                logger.info("Initial sync_all_counts completed")
+            except Exception as e:
+                logger.error(f"Deferred sync_all_counts error: {e}")
+        socketio.start_background_task(_deferred_sync)
 
         # Start background status broadcaster
         socketio.start_background_task(broadcast_status_updates)

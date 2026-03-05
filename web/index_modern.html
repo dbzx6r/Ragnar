@@ -215,7 +215,16 @@
                 width: 100%;
             }
         }
+        /* Toggle switch: show green when ON, regardless of Tailwind purge state */
+        label.toggle-switch > input[type="checkbox"]:checked + div { background-color: #16a34a !important; }
+        /* AI map toggle – uses Ragnar color, not green */
+        #map-ai-toggle-track { background: #475569; border-radius: 9999px; width: 36px; height: 20px; position: relative; cursor: pointer; transition: background 0.2s; }
+        #map-ai-toggle-track.active { background: var(--ragnar-600, #7c3aed); }
+        #map-ai-toggle-track.disabled { opacity: 0.35; cursor: not-allowed; }
+        #map-ai-toggle-knob { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; background: #fff; border-radius: 9999px; transition: transform 0.2s; }
+        #map-ai-toggle-track.active #map-ai-toggle-knob { transform: translateX(16px); }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 </head>
 
 <body class="bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white min-h-screen">
@@ -247,8 +256,14 @@
                     <button onclick="showTab('network')" class="nav-btn px-4 py-2 rounded-lg hover:bg-slate-700 transition-colors" data-tab="network">
                         Network
                     </button>
+                    <button onclick="showTab('network-map')" class="nav-btn px-4 py-2 rounded-lg hover:bg-slate-700 transition-colors" data-tab="network-map">
+                        Map
+                    </button>
                     <button onclick="showTab('discovered')" class="nav-btn px-4 py-2 rounded-lg hover:bg-slate-700 transition-colors" data-tab="discovered">
                         Discovered
+                    </button>
+                    <button onclick="showTab('credentials')" class="nav-btn px-4 py-2 rounded-lg hover:bg-slate-700 transition-colors" data-tab="credentials">
+                        Credentials
                     </button>
                     <button id="pentest-nav-btn" onclick="showTab('pentest')"
                             class="nav-btn px-4 py-2 rounded-lg transition-colors pentest-nav-btn hidden"
@@ -313,7 +328,9 @@
             <div class="px-2 pt-2 pb-3 space-y-1">
                 <button onclick="showTab('dashboard')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Dashboard</button>
                 <button onclick="showTab('network')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Network</button>
+                <button onclick="showTab('network-map')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Network Map</button>
                 <button onclick="showTab('discovered')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Discovered</button>
+                <button onclick="showTab('credentials')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Credentials</button>
                 <button onclick="showTab('pentest')"
                         id="mobile-pentest-nav"
                         class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700 pentest-nav-btn hidden"
@@ -500,8 +517,8 @@
                                     <p class="text-gray-400 text-sm">Automation Control</p>
                                     <p class="text-xs text-gray-500">Start or stop the orchestrator</p>
                                 </div>
-                                <button id="automation-toggle-btn" class="w-full sm:w-auto px-4 py-2 rounded-lg font-semibold bg-orange-600 hover:bg-orange-500 text-white transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 focus:ring-offset-slate-900" data-action="stop">
-                                    Disable Automation
+                                <button id="automation-toggle-btn" class="w-full sm:w-auto px-4 py-2 rounded-lg font-semibold bg-green-600 hover:bg-green-500 text-white transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 focus:ring-offset-slate-900" data-action="start">
+                                    Enable Automation
                                 </button>
                             </div>
                         </div>
@@ -688,7 +705,22 @@
                     </div>
                 </div>
             </div>
-            
+
+            <!-- Report Export Bar -->
+            <div class="glass rounded-xl p-4 mb-6 flex items-center justify-between">
+                <div>
+                    <span class="font-semibold">Scan Report</span>
+                    <span class="text-gray-400 text-sm ml-2">Export a full HTML report of all findings</span>
+                </div>
+                <button onclick="exportScanReport()" id="export-report-btn"
+                    class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-colors text-sm flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-4-4m4 4l4-4m6 4H6"></path>
+                    </svg>
+                    Export Report
+                </button>
+            </div>
+
             <!-- Pentest Mode Hint -->
             <div id="manual-mode-hint" class="glass rounded-xl p-6 mb-8">
                 <div class="flex items-start space-x-4">
@@ -828,6 +860,142 @@
             </div>
         </div>
         
+        <!-- Network Map Tab -->
+        <div id="network-map-tab" class="tab-content hidden">
+            <div class="glass rounded-xl p-6">
+                <!-- Header row: title left, controls right -->
+                <div class="flex items-center justify-between mb-3">
+                    <div>
+                        <h2 class="text-2xl font-bold">Network Map</h2>
+                        <p class="text-sm text-gray-400">Interactive topology map with device classification</p>
+                    </div>
+                    <div class="flex items-center gap-3 shrink-0">
+                        <!-- AI toggle -->
+                        <div id="map-ai-toggle-wrapper" class="flex items-center gap-2" title="AI not available – enable in Settings">
+                            <span class="text-xs text-gray-400 whitespace-nowrap">AI Classify</span>
+                            <!-- Spinner shown during AI work -->
+                            <svg id="map-ai-spinner" class="hidden animate-spin h-4 w-4" style="color:#7c3aed" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                            </svg>
+                            <div id="map-ai-toggle-track" class="disabled" onclick="onMapAiToggleClick()">
+                                <div id="map-ai-toggle-knob"></div>
+                            </div>
+                        </div>
+                        <!-- Refresh button -->
+                        <button onclick="refreshNetworkMap()" class="bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-4 py-2 rounded-lg transition-colors text-sm whitespace-nowrap shrink-0">
+                            Refresh
+                        </button>
+                    </div>
+                </div>
+                <!-- Device type legend (own row beneath header) -->
+                <div id="map-legend" class="flex flex-wrap items-center gap-3 text-xs text-gray-400 mb-3"></div>
+                <!-- Subnet manager (collapsible) -->
+                <div id="subnet-manager" class="mb-3">
+                    <button onclick="toggleSubnetPanel()" class="text-sm text-green-400 hover:text-green-300 flex items-center gap-1.5 mb-2 transition-colors font-medium">
+                        <svg id="subnet-chevron" class="w-4 h-4 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                        <span>Scan Subnets</span>
+                        <span id="subnet-count" class="bg-green-900/50 text-green-300 text-xs px-1.5 rounded-full">0</span>
+                    </button>
+                    <div id="subnet-panel" class="hidden bg-slate-800/50 rounded-lg p-3 text-sm space-y-2">
+                        <p class="text-xs text-gray-500">Add extra subnets so Ragnar discovers devices behind other routers/APs.</p>
+                        <div id="subnet-primary" class="text-xs text-gray-500"></div>
+                        <div id="subnet-list" class="space-y-1"></div>
+                        <div class="flex gap-2">
+                            <input id="subnet-input" type="text" placeholder="e.g. 10.0.0.0/24" class="flex-1 px-3 py-1.5 rounded bg-slate-700 border border-slate-600 text-sm focus:border-Ragnar-500 focus:outline-none">
+                            <button onclick="addScanSubnet()" class="bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-3 py-1.5 rounded text-sm whitespace-nowrap">Add</button>
+                        </div>
+                        <p id="subnet-error" class="text-xs text-red-400 hidden"></p>
+                        <!-- Scan log -->
+                        <div class="mt-3 border-t border-slate-700 pt-2">
+                            <p class="text-xs text-gray-500 font-medium mb-1">Scan Log</p>
+                            <div id="subnet-scan-log" class="max-h-40 overflow-y-auto space-y-0.5 text-xs font-mono bg-slate-900/60 rounded p-2">
+                                <p class="text-gray-600 italic">No scan data yet — waiting for next scan cycle.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Tooltip -->
+                <div id="map-tooltip" class="absolute z-50 bg-slate-800 border border-slate-600 rounded-lg p-3 text-sm pointer-events-none hidden max-w-xs"></div>
+                <!-- SVG canvas -->
+                <div id="network-map-container" class="w-full rounded-lg bg-slate-950 border border-slate-700" style="height:800px;position:relative;">
+                    <div id="network-map-loading" class="flex items-center justify-center h-full text-gray-400">
+                        <p>Loading network map...</p>
+                    </div>
+                    <svg id="network-map-svg" class="w-full h-full" style="display:none;"></svg>
+                </div>
+                <p class="text-xs text-gray-500 mt-2">Click a node to open host details. Scroll to zoom. Drag to pan.</p>
+            </div>
+        </div>
+
+        <!-- Credentials Tab -->
+        <div id="credentials-tab" class="tab-content hidden">
+            <div class="glass rounded-xl p-6">
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6">
+                    <div>
+                        <h2 class="text-2xl font-bold mb-1">Credentials</h2>
+                        <p class="text-sm text-gray-400">All discovered credentials across all services</p>
+                    </div>
+                    <div class="flex gap-2 mt-4 sm:mt-0">
+                        <button onclick="exportCredentialsCSV()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-colors text-sm">
+                            Export CSV
+                        </button>
+                        <button onclick="loadCredentials(true)" class="bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-4 py-2 rounded-lg transition-colors text-sm">
+                            Refresh
+                        </button>
+                    </div>
+                </div>
+                <!-- Stats row -->
+                <div id="cred-stats" class="grid grid-cols-3 sm:grid-cols-7 gap-3 mb-6"></div>
+
+                <!-- Filters -->
+                <div class="flex flex-col sm:flex-row gap-3 mb-4">
+                    <div class="relative flex-1">
+                        <svg class="w-4 h-4 text-gray-400 pointer-events-none" style="position:absolute;right:0.75rem;top:50%;transform:translateY(-50%);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 1 0 5 11a6 6 0 0 0 12 0z"></path>
+                        </svg>
+                        <input id="cred-ip-search" type="text" placeholder="Filter by IP..." oninput="onCredSearch(this.value)"
+                            class="w-full bg-slate-800 border border-slate-600 rounded-lg py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-Ragnar-500" style="padding-left:0.75rem;padding-right:2.5rem;">
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <button onclick="filterCredsByService('all')" data-svc="all" class="cred-svc-btn bg-Ragnar-600 text-white px-3 py-2 rounded-lg text-sm transition-colors">All</button>
+                        <button onclick="filterCredsByService('ssh')" data-svc="ssh" class="cred-svc-btn bg-slate-700 hover:bg-slate-600 text-white px-3 py-2 rounded-lg text-sm transition-colors">SSH</button>
+                        <button onclick="filterCredsByService('smb')" data-svc="smb" class="cred-svc-btn bg-slate-700 hover:bg-slate-600 text-white px-3 py-2 rounded-lg text-sm transition-colors">SMB</button>
+                        <button onclick="filterCredsByService('ftp')" data-svc="ftp" class="cred-svc-btn bg-slate-700 hover:bg-slate-600 text-white px-3 py-2 rounded-lg text-sm transition-colors">FTP</button>
+                        <button onclick="filterCredsByService('telnet')" data-svc="telnet" class="cred-svc-btn bg-slate-700 hover:bg-slate-600 text-white px-3 py-2 rounded-lg text-sm transition-colors">Telnet</button>
+                        <button onclick="filterCredsByService('rdp')" data-svc="rdp" class="cred-svc-btn bg-slate-700 hover:bg-slate-600 text-white px-3 py-2 rounded-lg text-sm transition-colors">RDP</button>
+                        <button onclick="filterCredsByService('sql')" data-svc="sql" class="cred-svc-btn bg-slate-700 hover:bg-slate-600 text-white px-3 py-2 rounded-lg text-sm transition-colors">SQL</button>
+                    </div>
+                </div>
+
+                <!-- Table -->
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm" style="min-width:640px;">
+                        <thead>
+                            <tr class="border-b border-slate-700">
+                                <th onclick="sortCredsBy('ip')" class="text-left py-3 px-4 text-gray-400 font-medium cursor-pointer hover:text-white select-none whitespace-nowrap">
+                                    IP <span id="cred-sort-ip" class="text-xs"></span>
+                                </th>
+                                <th onclick="sortCredsBy('service')" class="text-left py-3 px-4 text-gray-400 font-medium cursor-pointer hover:text-white select-none whitespace-nowrap">
+                                    Service <span id="cred-sort-service" class="text-xs"></span>
+                                </th>
+                                <th class="text-left py-3 px-4 text-gray-400 font-medium whitespace-nowrap">Port</th>
+                                <th onclick="sortCredsBy('username')" class="text-left py-3 px-4 text-gray-400 font-medium cursor-pointer hover:text-white select-none whitespace-nowrap">
+                                    Username <span id="cred-sort-username" class="text-xs"></span>
+                                </th>
+                                <th class="text-left py-3 px-4 text-gray-400 font-medium whitespace-nowrap">Password</th>
+                                <th class="text-left py-3 px-4 text-gray-400 font-medium whitespace-nowrap">Copy</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cred-table-body">
+                            <tr><td colspan="6" class="py-8 text-center text-gray-400">Loading credentials...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div id="cred-table-count" class="text-sm text-gray-400 mt-3"></div>
+            </div>
+        </div>
+
         <!-- Connect Tab -->
         <div id="connect-tab" class="tab-content hidden">
             <div class="glass rounded-xl p-6">
@@ -1513,7 +1681,7 @@
             
             <!-- Attack Logs Section -->
             <div class="glass rounded-xl p-6">
-                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6">
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4">
                     <div>
                         <h2 class="text-2xl font-bold mb-2">Attack Logs</h2>
                         <p class="text-sm text-gray-400">Detailed attack activity per host</p>
@@ -1536,6 +1704,37 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
                             </svg>
                             Refresh
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Sort / Search Row -->
+                <div class="flex flex-col sm:flex-row gap-3 mb-6">
+                    <!-- IP search -->
+                    <div class="relative flex-1">
+                        <svg class="w-4 h-4 text-gray-400 pointer-events-none" style="position:absolute;right:0.75rem;top:50%;transform:translateY(-50%);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 1 0 5 11a6 6 0 0 0 12 0z"></path>
+                        </svg>
+                        <input id="attack-ip-search" type="text" placeholder="Filter by IP address..." oninput="onAttackIPSearch(this.value)"
+                            class="w-full bg-slate-800 border border-slate-600 rounded-lg py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-Ragnar-500" style="padding-left:0.75rem;padding-right:2.5rem;">
+                    </div>
+                    <!-- Network / SSID dropdown -->
+                    <div class="flex items-center gap-2">
+                        <label class="text-sm text-gray-400 whitespace-nowrap">Network:</label>
+                        <select id="attack-network-filter" onchange="filterAttackByNetwork(this.value)"
+                            class="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-Ragnar-500">
+                            <option value="all">All Networks</option>
+                        </select>
+                    </div>
+                    <!-- Group by toggle -->
+                    <div class="flex items-center gap-1 bg-slate-800 border border-slate-600 rounded-lg p-1">
+                        <button onclick="setAttackGroupBy('ip')" id="attack-groupby-ip"
+                            class="attack-groupby-btn px-3 py-1 rounded text-sm transition-colors bg-Ragnar-600 text-white" data-groupby="ip">
+                            Group by IP
+                        </button>
+                        <button onclick="setAttackGroupBy('network')" id="attack-groupby-network"
+                            class="attack-groupby-btn px-3 py-1 rounded text-sm transition-colors text-gray-400 hover:text-white" data-groupby="network">
+                            Group by Network
                         </button>
                     </div>
                 </div>
@@ -1835,10 +2034,31 @@
                     
                     <!-- File List -->
                     <div class="lg:col-span-2">
-                        <div class="flex items-center justify-between mb-3">
-                            <h3 class="text-lg font-semibold">Files</h3>
-                            <div class="text-sm text-gray-400">
-                                <span id="current-path">/</span>
+                        <div class="flex flex-col gap-2 mb-3">
+                            <div class="flex items-center justify-between">
+                                <h3 class="text-lg font-semibold">Files</h3>
+                                <div class="text-sm text-gray-400">
+                                    <span id="current-path">/</span>
+                                </div>
+                            </div>
+                            <!-- File search + sort controls -->
+                            <div class="flex flex-col sm:flex-row gap-2">
+                                <div class="relative flex-1">
+                                    <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 1 0 5 11a6 6 0 0 0 12 0z"></path>
+                                    </svg>
+                                    <input id="file-search" type="text" placeholder="Search files..." oninput="onFileSearch(this.value)"
+                                        class="w-full bg-slate-800 border border-slate-600 rounded-lg pl-9 pr-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-Ragnar-500">
+                                </div>
+                                <div class="flex items-center gap-1 bg-slate-800 border border-slate-600 rounded-lg p-1 text-xs">
+                                    <span class="text-gray-400 px-1">Sort:</span>
+                                    <button onclick="setFileSort('name')" id="file-sort-name" data-sort="name"
+                                        class="file-sort-btn px-2 py-1 rounded transition-colors bg-Ragnar-600 text-white">Name</button>
+                                    <button onclick="setFileSort('date')" id="file-sort-date" data-sort="date"
+                                        class="file-sort-btn px-2 py-1 rounded transition-colors text-gray-400 hover:text-white">Date</button>
+                                    <button onclick="setFileSort('size')" id="file-sort-size" data-sort="size"
+                                        class="file-sort-btn px-2 py-1 rounded transition-colors text-gray-400 hover:text-white">Size</button>
+                                </div>
                             </div>
                         </div>
                         <div class="glass-card h-96 overflow-y-auto scrollbar-thin">
@@ -1849,6 +2069,32 @@
                     </div>
                 </div>
                 
+            </div>
+
+            <!-- File Preview Modal -->
+            <div id="file-preview-modal" class="fixed inset-0 bg-black bg-opacity-75 hidden items-center justify-center z-50 p-4">
+                <div class="glass rounded-xl w-full max-w-4xl flex flex-col overflow-hidden" style="max-height:calc(100vh - 2rem)">
+                    <!-- Modal header -->
+                    <div class="flex items-center justify-between p-4 border-b border-slate-700 flex-shrink-0">
+                        <div class="flex items-center gap-3">
+                            <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                            </svg>
+                            <span id="preview-filename" class="font-semibold truncate max-w-md"></span>
+                            <span id="preview-truncated-badge" class="hidden text-xs bg-yellow-700 text-yellow-200 px-2 py-0.5 rounded">Truncated — file too large</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button id="preview-download-btn" onclick="" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-sm transition-colors">Download</button>
+                            <button onclick="closeFilePreview()" class="p-1.5 hover:bg-slate-700 rounded-lg transition-colors">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <!-- Modal content -->
+                    <div id="preview-content" class="flex-1 overflow-y-auto p-4 min-h-0"></div>
+                </div>
             </div>
 
             <!-- File Operations Modal -->
@@ -3540,6 +3786,111 @@
                     </div>
                 </div>
 
+                <!-- Pushover Notifications Section -->
+                <div class="mb-8">
+                    <h3 class="text-xl font-semibold mb-4 text-Ragnar-400">Pushover Notifications</h3>
+                    <div class="glass rounded-lg p-4">
+                        <div class="flex flex-col gap-4 sm:flex-row sm:items-start mb-4">
+                            <svg class="w-10 h-10 text-cyan-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path>
+                            </svg>
+                            <div class="flex-1">
+                                <h4 class="font-medium text-lg mb-2">Push Notifications</h4>
+                                <p class="text-sm text-gray-400 mb-4">
+                                    Get real-time push notifications on your phone via <a href="https://pushover.net/" target="_blank" class="text-cyan-400 hover:text-cyan-300 underline">Pushover</a> when Ragnar discovers new devices, vulnerabilities, or credentials.
+                                </p>
+                                <div class="space-y-3">
+                                    <!-- Enable toggle -->
+                                    <div>
+                                        <label class="flex items-center space-x-3 cursor-pointer">
+                                            <input type="checkbox" id="pushover-enabled-toggle" onchange="togglePushoverEnabled()" class="w-5 h-5 rounded border-gray-600 bg-gray-700 text-gray-600 focus:ring-0">
+                                            <span class="text-sm font-medium">Enable Pushover Notifications</span>
+                                        </label>
+                                        <p class="text-xs text-gray-500 ml-0 sm:ml-8 mt-1">Send push notifications to your phone when events occur</p>
+                                    </div>
+                                    <!-- User Key -->
+                                    <div>
+                                        <label for="pushover-user-key" class="block text-sm font-medium text-gray-300 mb-2">Pushover User Key</label>
+                                        <input type="password" id="pushover-user-key" placeholder="Your user key..."
+                                               class="w-full bg-slate-700 border border-slate-600 text-white py-2 px-3 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent">
+                                    </div>
+                                    <!-- API Token -->
+                                    <div>
+                                        <label for="pushover-api-token" class="block text-sm font-medium text-gray-300 mb-2">Pushover API Token / App Key</label>
+                                        <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+                                            <input type="password" id="pushover-api-token" placeholder="Your app token..."
+                                                   class="flex-1 w-full bg-slate-700 border border-slate-600 text-white py-2 px-3 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent">
+                                            <button onclick="savePushoverKeys()" class="bg-cyan-600 hover:bg-cyan-700 text-white px-4 py-2 rounded-lg transition-colors whitespace-nowrap w-full sm:w-auto">
+                                                Save Keys
+                                            </button>
+                                        </div>
+                                        <p class="text-xs text-gray-500 mt-1">
+                                            Get your keys from <a href="https://pushover.net/" target="_blank" class="text-cyan-400 hover:text-cyan-300 underline">pushover.net</a> — create an application to get the API Token.
+                                        </p>
+                                    </div>
+                                    <!-- Status -->
+                                    <div id="pushover-config-status" class="hidden p-3 rounded-lg text-sm">
+                                        <span id="pushover-config-status-message"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Notification triggers -->
+                        <div class="border-t border-slate-700 pt-4 mt-4">
+                            <h4 class="font-medium text-sm text-gray-300 mb-3">Notify me when:</h4>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <label class="flex items-center space-x-3 cursor-pointer">
+                                    <input type="checkbox" id="pushover-notify-new-device" onchange="savePushoverTriggers()" class="w-4 h-4 rounded border-gray-600 bg-gray-700 text-gray-600 focus:ring-0">
+                                    <div>
+                                        <span class="text-sm font-medium">New Device Discovered</span>
+                                        <p class="text-xs text-gray-500">A device appears on the network for the first time</p>
+                                    </div>
+                                </label>
+                                <label class="flex items-center space-x-3 cursor-pointer">
+                                    <input type="checkbox" id="pushover-notify-new-vuln" onchange="savePushoverTriggers()" class="w-4 h-4 rounded border-gray-600 bg-gray-700 text-gray-600 focus:ring-0">
+                                    <div>
+                                        <span class="text-sm font-medium">New Vulnerability Found</span>
+                                        <p class="text-xs text-gray-500">A new CVE or security issue is identified</p>
+                                    </div>
+                                </label>
+                                <label class="flex items-center space-x-3 cursor-pointer">
+                                    <input type="checkbox" id="pushover-notify-new-cred" onchange="savePushoverTriggers()" class="w-4 h-4 rounded border-gray-600 bg-gray-700 text-gray-600 focus:ring-0">
+                                    <div>
+                                        <span class="text-sm font-medium">New Credential Captured</span>
+                                        <p class="text-xs text-gray-500">A username/password is cracked or captured</p>
+                                    </div>
+                                </label>
+                                <label class="flex items-center space-x-3 cursor-pointer">
+                                    <input type="checkbox" id="pushover-notify-device-lost" onchange="savePushoverTriggers()" class="w-4 h-4 rounded border-gray-600 bg-gray-700 text-gray-600 focus:ring-0">
+                                    <div>
+                                        <span class="text-sm font-medium">Device Goes Offline</span>
+                                        <p class="text-xs text-gray-500">A previously seen device disappears from the network</p>
+                                    </div>
+                                </label>
+                                <label class="flex items-center space-x-3 cursor-pointer">
+                                    <input type="checkbox" id="pushover-notify-device-back-online" onchange="savePushoverTriggers()" class="w-4 h-4 rounded border-gray-600 bg-gray-700 text-gray-600 focus:ring-0">
+                                    <div>
+                                        <span class="text-sm font-medium">Device Back Online</span>
+                                        <p class="text-xs text-gray-500">A known device returns after going offline</p>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Test button -->
+                        <div class="border-t border-slate-700 pt-4 mt-4 flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                            <button onclick="testPushover()" class="bg-cyan-700 hover:bg-cyan-600 text-white px-4 py-2 rounded-lg transition-colors flex items-center gap-2">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path>
+                                </svg>
+                                Send Test Notification
+                            </button>
+                            <span class="text-xs text-gray-500">Sends "Hello there Viking, are you ready for adventures?" to your device</span>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Hardware Profile Configuration Section -->
                 <div class="mb-8">
                     <h3 class="text-xl font-semibold mb-4 text-Ragnar-400">Hardware Resource Configuration</h3>
@@ -3670,8 +4021,71 @@
         </div>
     </div>
 
+    <!-- Host Detail Panel -->
+    <div id="host-detail-overlay" class="fixed inset-0 bg-black bg-opacity-50 hidden z-40" onclick="closeHostPanel()"></div>
+    <div id="host-detail-panel" class="fixed top-0 right-0 h-full w-full sm:w-2/3 lg:w-1/2 xl:w-2/5 bg-slate-900 border-l border-slate-700 shadow-2xl z-50 transform translate-x-full transition-transform duration-300 overflow-y-auto">
+        <div class="p-6">
+            <!-- Header -->
+            <div class="flex items-center justify-between mb-6">
+                <div>
+                    <h2 id="hdp-ip" class="text-2xl font-bold font-mono"></h2>
+                    <p id="hdp-hostname" class="text-gray-400 text-sm mt-1"></p>
+                </div>
+                <button onclick="closeHostPanel()" class="p-2 hover:bg-slate-700 rounded-lg transition-colors">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Status / Meta -->
+            <div class="grid grid-cols-2 gap-3 mb-6">
+                <div class="bg-slate-800 rounded-lg p-3">
+                    <div class="text-xs text-gray-400 mb-1">Status</div>
+                    <div id="hdp-status" class="font-semibold"></div>
+                </div>
+                <div class="bg-slate-800 rounded-lg p-3">
+                    <div class="text-xs text-gray-400 mb-1">MAC</div>
+                    <div id="hdp-mac" class="font-mono text-sm"></div>
+                </div>
+                <div class="bg-slate-800 rounded-lg p-3">
+                    <div class="text-xs text-gray-400 mb-1">Last Seen</div>
+                    <div id="hdp-lastseen" class="text-sm"></div>
+                </div>
+                <div class="bg-slate-800 rounded-lg p-3">
+                    <div class="text-xs text-gray-400 mb-1">Open Ports</div>
+                    <div id="hdp-portcount" class="font-semibold"></div>
+                </div>
+            </div>
+
+            <!-- Open Ports -->
+            <div class="mb-6">
+                <h3 class="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-2">Open Ports</h3>
+                <div id="hdp-ports" class="flex flex-wrap gap-2"></div>
+            </div>
+
+            <!-- Credentials -->
+            <div class="mb-6">
+                <h3 class="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-2">Credentials Found</h3>
+                <div id="hdp-creds" class="space-y-2"></div>
+            </div>
+
+            <!-- Attack History -->
+            <div class="mb-6">
+                <h3 class="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-2">Attack History</h3>
+                <div id="hdp-attacks" class="space-y-2 max-h-64 overflow-y-auto"></div>
+            </div>
+
+            <!-- Vulnerability Summary -->
+            <div id="hdp-vuln-section" class="mb-6 hidden">
+                <h3 class="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-2">Vulnerability Notes</h3>
+                <pre id="hdp-vuln" class="bg-slate-800 rounded-lg p-3 text-xs text-gray-300 overflow-x-auto whitespace-pre-wrap max-h-48 overflow-y-auto"></pre>
+            </div>
+        </div>
+    </div>
+
     <!-- JavaScript -->
-    <script src="/web/scripts/ragnar_modern.js?v=20251127"></script>
-    
+    <script src="/web/scripts/ragnar_modern.js?v=20260305"></script>
+
 </body>
 </html>

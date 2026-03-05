@@ -796,6 +796,65 @@ class NetworkScanner:
         except Exception as e:
             self.logger.error(f"Error in get_network: {e}")
 
+    def get_gateway_info(self):
+        """Collect gateway IP, MAC, vendor, interface, and subnet CIDR.
+
+        Stores the result on shared_data.gateway_info so the topology API
+        can place the router at the center of the network map.
+        """
+        info = {"gateway_ip": None, "gateway_mac": None, "gateway_vendor": None,
+                "interface": None, "subnet": None, "ragnar_ip": None}
+        try:
+            if netifaces is None:
+                return info
+            gws = netifaces.gateways()
+            gw_tuple = gws.get("default", {}).get(netifaces.AF_INET)
+            if not gw_tuple:
+                return info
+            info["gateway_ip"] = gw_tuple[0]
+            info["interface"] = gw_tuple[1]
+
+            iface_addrs = netifaces.ifaddresses(gw_tuple[1]).get(netifaces.AF_INET)
+            if iface_addrs:
+                my_ip = iface_addrs[0]["addr"]
+                netmask = iface_addrs[0]["netmask"]
+                cidr = sum(bin(int(x)).count("1") for x in netmask.split("."))
+                info["ragnar_ip"] = my_ip
+                info["subnet"] = str(ipaddress.IPv4Network(f"{my_ip}/{cidr}", strict=False))
+
+            # Resolve gateway MAC from kernel ARP cache
+            try:
+                result = subprocess.run(
+                    ["ip", "neigh", "show", info["gateway_ip"]],
+                    capture_output=True, text=True, timeout=5
+                )
+                for line in result.stdout.strip().splitlines():
+                    parts = line.split()
+                    # Format: 192.168.1.1 dev wlan0 lladdr aa:bb:cc:dd:ee:ff ...
+                    if "lladdr" in parts:
+                        idx = parts.index("lladdr")
+                        if idx + 1 < len(parts):
+                            info["gateway_mac"] = parts[idx + 1]
+                            break
+            except Exception:
+                pass
+
+            # Look up vendor from DB if we have the MAC
+            if info["gateway_mac"]:
+                try:
+                    db = get_db()
+                    host = db.get_host(info["gateway_mac"])
+                    if host:
+                        info["gateway_vendor"] = host.get("vendor", "")
+                except Exception:
+                    pass
+
+            self.shared_data.gateway_info = info
+            self.logger.info(f"Gateway info: {info['gateway_ip']} (MAC={info['gateway_mac']}) via {info['interface']}")
+        except Exception as e:
+            self.logger.debug(f"Could not collect gateway info: {e}")
+        return info
+
     def get_mac_address(self, ip, hostname):
         """
         Retrieves the MAC address for the given IP address and hostname.
@@ -1359,6 +1418,7 @@ class NetworkScanner:
                 job_descriptor = f" for {job.ssid} ({self.arp_scan_interface})"
             self.logger.info(f"Starting Network Scanner{job_descriptor}")
             network = self.get_network()
+            self.get_gateway_info()
             self.shared_data.bjornstatustext2 = str(network)
             portstart = self.shared_data.portstart
             portend = self.shared_data.portend
@@ -1408,7 +1468,92 @@ class NetworkScanner:
                         writer.writerow([ip, hostname, alive, mac] + [str(port) if port in ports else '' for port in all_ports])
 
             self.update_netkb(netkbfile, netkb_data, alive_macs)
-            
+
+            # Log primary-subnet result
+            primary_host_count = len(ip_data.ip_list) if ip_data else 0
+            self.shared_data.append_subnet_scan_log(
+                primary_net or 'primary',
+                'ok',
+                f"Primary scan complete — {primary_host_count} device(s) found",
+                devices=primary_host_count,
+            )
+
+            # ----------------------------------------------------------
+            # Extra-subnet scanning: scan additional user-configured CIDRs
+            # so that devices behind other routers / APs appear on the map.
+            # ARP is Layer-2 and won't reach remote subnets, but nmap -Pn
+            # works as long as a route exists (e.g. via the gateway).
+            # ----------------------------------------------------------
+            extra_subnets = getattr(self.shared_data, 'scan_subnets', None) or []
+            if not extra_subnets:
+                extra_subnets = self.shared_data.config.get('scan_subnets', [])
+            primary_net = str(network) if network else None
+            for extra_cidr in extra_subnets:
+                extra_cidr = str(extra_cidr).strip()
+                if not extra_cidr:
+                    continue
+                # Validate CIDR and skip if it's the same as the primary network
+                try:
+                    extra_net = ipaddress.ip_network(extra_cidr, strict=False)
+                    if str(extra_net) == primary_net:
+                        self.logger.debug(f"Skipping extra subnet {extra_cidr} — same as primary network")
+                        self.shared_data.append_subnet_scan_log(
+                            extra_cidr, 'skip',
+                            'Skipped — same as primary subnet',
+                        )
+                        continue
+                except ValueError:
+                    self.logger.warning(f"Invalid extra subnet CIDR '{extra_cidr}' — skipping")
+                    self.shared_data.append_subnet_scan_log(
+                        extra_cidr, 'error',
+                        f'Invalid CIDR "{extra_cidr}"',
+                    )
+                    continue
+
+                self.logger.info(f"🌐 Scanning extra subnet: {extra_net}")
+                self.shared_data.append_subnet_scan_log(
+                    str(extra_net), 'info',
+                    f'Scanning {extra_net}…',
+                )
+                try:
+                    extra_results = self.run_nmap_network_scan(
+                        str(extra_net),
+                        portstart,
+                        portend,
+                        extra_ports,
+                    )
+                    # Merge extra-subnet hosts into netkb_data so they persist in the DB
+                    for ip, data in extra_results.items():
+                        hostname = data.get('hostname', '')
+                        mac = data.get('mac', '') or gma(ip=ip)
+                        ports_found = data.get('open_ports', [])
+                        netkb_data.append([mac, ip, hostname, ports_found])
+                        alive_macs.add(mac)
+                    found = len(extra_results)
+                    self.logger.info(f"✅ Extra subnet {extra_net}: {found} hosts found")
+                    if found > 0:
+                        self.shared_data.append_subnet_scan_log(
+                            str(extra_net), 'ok',
+                            f'{found} device(s) found on {extra_net}',
+                            devices=found,
+                        )
+                    else:
+                        self.shared_data.append_subnet_scan_log(
+                            str(extra_net), 'error',
+                            f'{extra_net} — no devices responded',
+                            devices=0,
+                        )
+                except Exception as e:
+                    self.logger.error(f"Extra subnet scan failed for {extra_net}: {e}")
+                    self.shared_data.append_subnet_scan_log(
+                        str(extra_net), 'error',
+                        f'Scan failed for {extra_net}: {e}',
+                    )
+
+            # Re-run netkb update with merged data (primary + extra subnets)
+            if extra_subnets:
+                self.update_netkb(netkbfile, netkb_data, alive_macs)
+
             # Store fresh scan results in memory for immediate orchestrator access
             # This eliminates race conditions with CSV file writes
             try:
