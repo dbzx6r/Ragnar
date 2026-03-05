@@ -39,8 +39,12 @@ _VENDOR_RULES = {
         "prosafe",
     ],
     # Phones
+    # NOTE: "apple" is intentionally NOT here — Apple, Inc. makes phones,
+    # TVs, speakers, watches, laptops and tablets; the vendor string alone
+    # cannot distinguish them.  Apple devices are classified via hostname
+    # hints, port signatures, and AI fallback instead.
     "phone": [
-        "apple", "samsung electro", "google pixel", "oneplus", "xiaomi",
+        "samsung electro", "google pixel", "oneplus", "xiaomi",
         "huawei device", "oppo", "vivo", "realme", "motorola",
         "nokia", "sony mobile", "lg electronics", "honor",
     ],
@@ -188,8 +192,11 @@ def _classify_by_ports(ports):
     # Chromecast / smart TV casting
     if 8008 in port_set and 8009 in port_set:
         return "smart_tv"
-    # AirPlay → Apple TV / smart speakers
+    # AirPlay → Apple TV / HomePod (port 7000 = AirPlay, 3689 = DAAP)
     if 7000 in port_set and 5353 in port_set:
+        return "smart_tv"
+    # Apple TV often exposes AirPlay alone on port 7000
+    if 7000 in port_set and 3689 in port_set:
         return "smart_tv"
     # Sonos / smart speaker (UPnP + HTTP)
     if 1400 in port_set:
@@ -266,6 +273,8 @@ DEVICE_ICONS = {
     "vehicle":      "M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z",
     # Ragnar
     "ragnar":       "M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z",
+    # Apple (generic — when specific product can't be determined)
+    "apple":        "M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.81-1.31.05-2.31-1.32-3.15-2.55C4.22 16 2.97 12.11 4.71 9.5c.87-1.3 2.41-2.13 4.08-2.15 1.29-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83l.04.03zM13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z",
     # Unknown
     "unknown":      "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25z",
 }
@@ -296,6 +305,7 @@ DEVICE_TYPE_LABELS = {
     "gaming": "Game Console",
     "vehicle": "Vehicle/EV Charger",
     "ragnar": "Ragnar",
+    "apple": "Apple",
     "unknown": "Unknown",
 }
 
@@ -324,7 +334,8 @@ DEVICE_TYPE_COLORS = {
     "media": "#ec4899",        # pink
     "gaming": "#a855f7",       # violet
     "vehicle": "#0d9488",     # dark teal
-    "ragnar": "#0ea5e9",       # sky (Ragnar brand)
+    "ragnar": "#16a34a",       # green (Ragnar brand)
+    "apple": "#a3a3a3",        # silver/gray (Apple brand)
     "unknown": "#64748b",      # slate
 }
 
@@ -360,6 +371,13 @@ def classify_device(vendor, ports, gateway_ip=None, device_ip=None):
                 device_type = dtype
                 confidence = 0.8
                 break
+
+        # Apple, Inc. makes phones, TVs, speakers, watches, laptops, tablets —
+        # the vendor string alone cannot distinguish them.  Set low confidence
+        # so hostname / port / AI refinement takes over.
+        if vendor_lower.startswith("apple") and device_type is None:
+            device_type = "apple"
+            confidence = 0.4  # low enough for AI / hostname to override
 
     # Pass 2: port-based classification (refine or override)
     port_type = _classify_by_ports(ports)
@@ -434,6 +452,12 @@ def classify_device_ai(vendor, ports, hostname, mac, ai_service=None,
             "google-home": "speaker", "homepod": "speaker",
             "bosch-wat": "appliance", "bosch-wt": "appliance",
             "appletv": "smart_tv", "edvinsappletv": "smart_tv",
+            "apple-tv": "smart_tv",
+            "homepod": "speaker", "apple-homepod": "speaker",
+            "macbook": "laptop", "imac": "workstation", "mac-mini": "workstation",
+            "mac-pro": "workstation", "mac-studio": "workstation",
+            "iphone": "phone", "ipad": "tablet",
+            "apple-watch": "wearable", "applewatch": "wearable",
         }
         for hint, dtype in _STRONG_HOSTNAME_HINTS.items():
             if hint in hostname_lower:
@@ -454,6 +478,7 @@ def classify_device_ai(vendor, ports, hostname, mac, ai_service=None,
                 "iphone": "phone", "android": "phone", "galaxy": "phone", "pixel": "phone",
                 "ipad": "tablet", "tab": "tablet", "kindle": "tablet",
                 "macbook": "laptop", "thinkpad": "laptop", "laptop": "laptop",
+                "imac": "workstation", "mac-mini": "workstation",
                 "xbox": "gaming", "playstation": "gaming", "ps5": "gaming",
                 "nintendo": "gaming",
                 "printer": "printer", "epson": "printer", "brother": "printer",

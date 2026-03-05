@@ -15242,7 +15242,7 @@ function _buildMapLegend(deviceColors, deviceLabels) {
     const el = document.getElementById('map-legend');
     if (!el) return;
     el.innerHTML = '';
-    const order = ['router', 'access_point', 'extender', 'switch', 'ragnar', 'laptop', 'workstation', 'server', 'nas', 'sbc', 'phone', 'tablet', 'wearable', 'printer', 'camera', 'smart_tv', 'speaker', 'doorbell', 'thermostat', 'appliance', 'iot', 'media', 'gaming', 'vehicle', 'unknown'];
+    const order = ['router', 'access_point', 'extender', 'switch', 'ragnar', 'laptop', 'workstation', 'server', 'nas', 'sbc', 'phone', 'tablet', 'wearable', 'printer', 'camera', 'smart_tv', 'speaker', 'doorbell', 'thermostat', 'appliance', 'iot', 'media', 'gaming', 'vehicle', 'apple', 'unknown'];
     order.forEach(t => {
         const color = deviceColors[t];
         const label = deviceLabels[t];
