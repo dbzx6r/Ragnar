@@ -110,18 +110,6 @@ def start_pisugar_listener():
 
 
 def main():
-    # If ragnar.service is active, don't run — Ragnar handles its own buttons
-    try:
-        result = subprocess.run(
-            ['systemctl', 'is-active', 'ragnar.service'],
-            capture_output=True, text=True, timeout=5
-        )
-        if result.stdout.strip() == 'active':
-            log.info("ragnar.service is active — Ragnar handles KEY1 itself. Exiting.")
-            sys.exit(0)
-    except Exception:
-        pass  # if check fails, proceed anyway
-
     gpio_ok = start_gpio_listener()
     pisugar_ok = start_pisugar_listener()
 
