@@ -138,6 +138,7 @@ SEP_SCAN_COMMAND = ['sudo', 'sep-scan']
 MAC_REGEX = re.compile(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$')
 PWN_INSTALL_SCRIPT = os.path.join(shared_data.currentdir, 'scripts', 'install_pwnagotchi.sh')
 PWN_SERVICE_FILE = '/etc/systemd/system/pwnagotchi.service'
+PWN_CONFIG_FILE = '/etc/pwnagotchi/config.toml'
 PWN_SWAP_DELAY_SECONDS = 1
 PWN_INSTALL_STALE_SECONDS = 600  # Treat installer as stale after 10 minutes
 PWN_SWITCH_STALE_SECONDS = 60  # Consider switch stuck after 60 seconds
@@ -7165,6 +7166,259 @@ def swap_to_pwnagotchi_mode():
     except Exception as e:
         logger.error(f"Error scheduling Pwnagotchi swap: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/pwnagotchi/config')
+def get_pwnagotchi_config():
+    """Read the Pwnagotchi TOML config and return structured settings."""
+    try:
+        if not os.path.isfile(PWN_CONFIG_FILE):
+            return jsonify({'success': False, 'error': 'Pwnagotchi config not found. Install Pwnagotchi first.'}), 404
+
+        try:
+            import tomlkit
+            with open(PWN_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                doc = tomlkit.parse(f.read())
+        except ImportError:
+            # Fallback: basic TOML parser for simple key=value configs
+            doc = _parse_toml_basic(PWN_CONFIG_FILE)
+        except Exception as exc:
+            logger.error(f"Failed to parse Pwnagotchi config: {exc}")
+            return jsonify({'success': False, 'error': f'Failed to parse config: {exc}'}), 500
+
+        # Extract the settings we expose in the UI
+        main = doc.get('main', {})
+        ui = doc.get('ui', {})
+        ui_display = ui.get('display', {})
+        ui_web = ui.get('web', {})
+        personality = doc.get('personality', {})
+        plugins = main.get('plugins', {})
+
+        # Parse whitelist (list of SSIDs/BSSIDs)
+        raw_whitelist = main.get('whitelist', [])
+        if isinstance(raw_whitelist, list):
+            whitelist_str = ', '.join(str(s) for s in raw_whitelist)
+        else:
+            whitelist_str = str(raw_whitelist)
+
+        # Parse channels (list of ints)
+        raw_channels = personality.get('channels', [])
+        if isinstance(raw_channels, list):
+            channels_str = ', '.join(str(c) for c in raw_channels)
+        else:
+            channels_str = str(raw_channels)
+
+        config = {
+            'main.name': str(main.get('name', 'pwnagotchi')),
+            'main.whitelist': whitelist_str,
+            'personality.advertise': bool(personality.get('advertise', False)),
+            'personality.deauth': bool(personality.get('deauth', True)),
+            'personality.associate': bool(personality.get('associate', True)),
+            'personality.min_rssi': int(personality.get('min_rssi', -200)),
+            'personality.channels': channels_str,
+            'ui.invert': bool(ui.get('invert', False)),
+            'ui.display.enabled': bool(ui_display.get('enabled', True)),
+            'ui.display.type': str(ui_display.get('type', 'waveshare_4')),
+            'ui.display.rotation': int(ui_display.get('rotation', 180)),
+            'ui.web.enabled': bool(ui_web.get('enabled', True)),
+            'ui.web.address': str(ui_web.get('address', '0.0.0.0')),
+            'ui.web.username': str(ui_web.get('username', 'ragnar')),
+            'ui.web.password': str(ui_web.get('password', 'ragnar')),
+            'ui.web.port': int(ui_web.get('port', 8080)),
+            'main.plugins.grid.enabled': bool(plugins.get('grid', {}).get('enabled', False)),
+            'main.plugins.fix_services.enabled': bool(plugins.get('fix_services', {}).get('enabled', False)),
+            'main.plugins.auto-tune.enabled': bool(plugins.get('auto-tune', {}).get('enabled', True)),
+            'main.plugins.webcfg.enabled': bool(plugins.get('webcfg', {}).get('enabled', True)),
+            'main.plugins.memtemp.enabled': bool(plugins.get('memtemp', {}).get('enabled', False)),
+        }
+
+        return jsonify({'success': True, 'config': config})
+    except Exception as e:
+        logger.error(f"Error reading Pwnagotchi config: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/pwnagotchi/config', methods=['POST'])
+def save_pwnagotchi_config():
+    """Update specific settings in the Pwnagotchi TOML config."""
+    try:
+        if not os.path.isfile(PWN_CONFIG_FILE):
+            return jsonify({'success': False, 'error': 'Pwnagotchi config not found. Install Pwnagotchi first.'}), 404
+
+        data = request.get_json(silent=True)
+        if not data or 'config' not in data:
+            return jsonify({'success': False, 'error': 'Missing config payload'}), 400
+
+        updates = data['config']
+        if not isinstance(updates, dict):
+            return jsonify({'success': False, 'error': 'Config must be a dict'}), 400
+
+        # Whitelist of allowed settings to prevent arbitrary file writes
+        ALLOWED_KEYS = {
+            'main.name': str,
+            'main.whitelist': str,       # comma-separated → converted to list
+            'personality.advertise': bool,
+            'personality.deauth': bool,
+            'personality.associate': bool,
+            'personality.min_rssi': int,
+            'personality.channels': str,  # comma-separated → converted to list
+            'ui.invert': bool,
+            'ui.display.enabled': bool,
+            'ui.display.rotation': int,
+            'ui.display.type': str,
+            'ui.web.username': str,
+            'ui.web.password': str,
+            'ui.web.port': int,
+            'main.plugins.grid.enabled': bool,
+            'main.plugins.fix_services.enabled': bool,
+            'main.plugins.auto-tune.enabled': bool,
+            'main.plugins.webcfg.enabled': bool,
+            'main.plugins.memtemp.enabled': bool,
+        }
+
+        # Validate keys and types
+        validated = {}
+        for key, value in updates.items():
+            if key not in ALLOWED_KEYS:
+                continue  # silently skip unknown keys
+            expected_type = ALLOWED_KEYS[key]
+            if expected_type == bool:
+                validated[key] = bool(value)
+            elif expected_type == int:
+                validated[key] = int(value)
+            else:
+                validated[key] = str(value).strip()
+
+        if not validated:
+            return jsonify({'success': False, 'error': 'No valid settings in payload'}), 400
+
+        # Validate specific value ranges
+        if 'ui.display.rotation' in validated and validated['ui.display.rotation'] not in (0, 90, 180, 270):
+            return jsonify({'success': False, 'error': 'Rotation must be 0, 90, 180, or 270'}), 400
+        if 'ui.web.port' in validated:
+            port = validated['ui.web.port']
+            if port < 1024 or port > 65535:
+                return jsonify({'success': False, 'error': 'Web port must be between 1024 and 65535'}), 400
+        if 'main.name' in validated:
+            name = validated['main.name']
+            if not name or len(name) > 32 or not re.match(r'^[a-zA-Z0-9_-]+$', name):
+                return jsonify({'success': False, 'error': 'Name must be 1-32 alphanumeric characters (plus - and _)'}), 400
+        if 'personality.min_rssi' in validated:
+            rssi = validated['personality.min_rssi']
+            if rssi < -200 or rssi > 0:
+                return jsonify({'success': False, 'error': 'Min RSSI must be between -200 and 0'}), 400
+
+        # Convert comma-separated strings to TOML lists
+        if 'main.whitelist' in validated:
+            raw = validated['main.whitelist']
+            validated['main.whitelist'] = [s.strip() for s in raw.split(',') if s.strip()] if raw.strip() else []
+        if 'personality.channels' in validated:
+            raw = validated['personality.channels']
+            if raw.strip():
+                try:
+                    validated['personality.channels'] = [int(c.strip()) for c in raw.split(',') if c.strip()]
+                except ValueError:
+                    return jsonify({'success': False, 'error': 'Channels must be comma-separated numbers (e.g. 1, 6, 11)'}), 400
+            else:
+                validated['personality.channels'] = []
+
+        try:
+            import tomlkit
+            with open(PWN_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                doc = tomlkit.parse(f.read())
+
+            for dotted_key, value in validated.items():
+                _set_toml_value(doc, dotted_key, value)
+
+            with open(PWN_CONFIG_FILE, 'w', encoding='utf-8') as f:
+                f.write(tomlkit.dumps(doc))
+        except ImportError:
+            # Fallback: use the shell helper from install script
+            script_path = os.path.join(shared_data.currentdir, 'scripts', 'install_pwnagotchi.sh')
+            for dotted_key, value in validated.items():
+                _set_toml_value_fallback(dotted_key, value)
+
+        logger.info(f"Pwnagotchi config updated: {list(validated.keys())}")
+        return jsonify({'success': True, 'message': f'Updated {len(validated)} setting(s)', 'updated': list(validated.keys())})
+
+    except Exception as e:
+        logger.error(f"Error saving Pwnagotchi config: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _set_toml_value(doc, dotted_key, value):
+    """Set a nested value in a tomlkit document using dotted key notation."""
+    import tomlkit
+    keys = dotted_key.split('.')
+    d = doc
+    for k in keys[:-1]:
+        if k not in d:
+            d[k] = tomlkit.table()
+        d = d[k]
+    d[keys[-1]] = value
+
+
+def _set_toml_value_fallback(dotted_key, value):
+    """Fallback: use Python inline script to update a TOML value when tomlkit is unavailable."""
+    if isinstance(value, bool):
+        val_str = 'true' if value else 'false'
+    elif isinstance(value, int):
+        val_str = str(value)
+    else:
+        val_str = value
+    try:
+        subprocess.run(
+            ['sudo', 'python3', '-c',
+             f"import tomlkit; f=open('{PWN_CONFIG_FILE}','r'); d=tomlkit.parse(f.read()); f.close(); "
+             f"exec(\"keys='{dotted_key}'.split('.');o=d\\nfor k in keys[:-1]:\\n if k not in o: o[k]=tomlkit.table()\\n o=o[k]\\no[keys[-1]]={repr(value)}\")"
+             f"; f=open('{PWN_CONFIG_FILE}','w'); f.write(tomlkit.dumps(d)); f.close()"],
+            capture_output=True, text=True, timeout=10
+        )
+    except Exception as exc:
+        logger.error(f"Fallback TOML write failed for {dotted_key}: {exc}")
+
+
+def _parse_toml_basic(filepath):
+    """Minimal TOML parser for reading simple config files when tomlkit is unavailable."""
+    result = {}
+    current_section = result
+    section_path = []
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                # Section header
+                m = re.match(r'^\[([^\]]+)\]$', line)
+                if m:
+                    section_path = m.group(1).split('.')
+                    current_section = result
+                    for part in section_path:
+                        if part not in current_section:
+                            current_section[part] = {}
+                        current_section = current_section[part]
+                    continue
+                # Key = value
+                m = re.match(r'^(\w+)\s*=\s*(.+)$', line)
+                if m:
+                    key = m.group(1)
+                    val = m.group(2).strip()
+                    if val.startswith('"') and val.endswith('"'):
+                        val = val[1:-1]
+                    elif val == 'true':
+                        val = True
+                    elif val == 'false':
+                        val = False
+                    else:
+                        try:
+                            val = int(val)
+                        except ValueError:
+                            pass
+                    current_section[key] = val
+    except Exception as exc:
+        logger.error(f"Basic TOML parse failed: {exc}")
+    return result
 
 
 @app.route('/api/kill', methods=['POST'])

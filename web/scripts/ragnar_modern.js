@@ -3741,6 +3741,16 @@ function initializePwnUI() {
     updatePwnButtons();
     resetPwnLogState();
     refreshPwnagotchiStatus({ silent: true });
+
+    // Pwnagotchi config card buttons
+    const cfgReloadBtn = document.getElementById('pwn-config-reload-btn');
+    if (cfgReloadBtn) {
+        cfgReloadBtn.addEventListener('click', () => loadPwnConfig());
+    }
+    const cfgSaveBtn = document.getElementById('pwn-config-save-btn');
+    if (cfgSaveBtn) {
+        cfgSaveBtn.addEventListener('click', () => savePwnConfig());
+    }
 }
 
 async function refreshPwnagotchiStatus(options = {}) {
@@ -3849,6 +3859,16 @@ function updatePwnButtons() {
     if (swapCard) {
         swapCard.style.display = pwnStatus.installed ? '' : 'none';
     }
+    // Show config card only when installed
+    const configCard = document.getElementById('pwn-config-card');
+    if (configCard) {
+        const wasHidden = configCard.style.display === 'none';
+        configCard.style.display = pwnStatus.installed ? '' : 'none';
+        if (wasHidden && pwnStatus.installed && !configCard._loaded) {
+            configCard._loaded = true;
+            loadPwnConfig();
+        }
+    }
 
     const installBtn = document.getElementById('pwn-install-btn');
     if (installBtn) {
@@ -3932,6 +3952,115 @@ function updatePwnButtons() {
             hint = 'Switch scheduled. Wait for the service hand-off to complete.';
         }
         swapHint.textContent = hint;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Pwnagotchi TOML Config — Load / Save
+// ---------------------------------------------------------------------------
+
+async function loadPwnConfig() {
+    const alert = document.getElementById('pwn-config-alert');
+    try {
+        const response = await fetchAPI('/api/pwnagotchi/config');
+        if (!response || !response.success) {
+            _showPwnConfigAlert(alert, response?.error || 'Failed to load config', 'error');
+            return;
+        }
+        const cfg = response.config;
+        _setPwnCfgValue('pwn-cfg-name', cfg['main.name']);
+        _setPwnCfgValue('pwn-cfg-whitelist', cfg['main.whitelist']);
+        _setPwnCfgChecked('pwn-cfg-deauth', cfg['personality.deauth']);
+        _setPwnCfgChecked('pwn-cfg-associate', cfg['personality.associate']);
+        _setPwnCfgChecked('pwn-cfg-advertise', cfg['personality.advertise']);
+        _setPwnCfgValue('pwn-cfg-min-rssi', String(cfg['personality.min_rssi']));
+        _setPwnCfgValue('pwn-cfg-channels', cfg['personality.channels']);
+        _setPwnCfgChecked('pwn-cfg-display-enabled', cfg['ui.display.enabled']);
+        _setPwnCfgChecked('pwn-cfg-invert', cfg['ui.invert']);
+        _setPwnCfgValue('pwn-cfg-rotation', String(cfg['ui.display.rotation']));
+        _setPwnCfgValue('pwn-cfg-display-type', cfg['ui.display.type']);
+        _setPwnCfgValue('pwn-cfg-web-user', cfg['ui.web.username']);
+        _setPwnCfgValue('pwn-cfg-web-pass', cfg['ui.web.password']);
+        _setPwnCfgValue('pwn-cfg-web-port', String(cfg['ui.web.port']));
+        _setPwnCfgChecked('pwn-cfg-auto-tune', cfg['main.plugins.auto-tune.enabled']);
+        _setPwnCfgChecked('pwn-cfg-webcfg', cfg['main.plugins.webcfg.enabled']);
+        _setPwnCfgChecked('pwn-cfg-memtemp', cfg['main.plugins.memtemp.enabled']);
+        _setPwnCfgChecked('pwn-cfg-grid', cfg['main.plugins.grid.enabled']);
+        _setPwnCfgChecked('pwn-cfg-fix-services', cfg['main.plugins.fix_services.enabled']);
+        _showPwnConfigAlert(alert, 'Configuration loaded', 'success');
+        setTimeout(() => { if (alert) alert.classList.add('hidden'); }, 2000);
+    } catch (error) {
+        console.error('Error loading Pwnagotchi config:', error);
+        _showPwnConfigAlert(alert, `Load failed: ${error.message}`, 'error');
+    }
+}
+
+async function savePwnConfig() {
+    const alert = document.getElementById('pwn-config-alert');
+    const saveBtn = document.getElementById('pwn-config-save-btn');
+    try {
+        if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving...'; }
+
+        const config = {
+            'main.name': document.getElementById('pwn-cfg-name')?.value || 'pwnagotchi',
+            'main.whitelist': document.getElementById('pwn-cfg-whitelist')?.value || '',
+            'personality.deauth': document.getElementById('pwn-cfg-deauth')?.checked || false,
+            'personality.associate': document.getElementById('pwn-cfg-associate')?.checked || false,
+            'personality.advertise': document.getElementById('pwn-cfg-advertise')?.checked || false,
+            'personality.min_rssi': parseInt(document.getElementById('pwn-cfg-min-rssi')?.value || '-200', 10),
+            'personality.channels': document.getElementById('pwn-cfg-channels')?.value || '',
+            'ui.display.enabled': document.getElementById('pwn-cfg-display-enabled')?.checked || false,
+            'ui.invert': document.getElementById('pwn-cfg-invert')?.checked || false,
+            'ui.display.rotation': parseInt(document.getElementById('pwn-cfg-rotation')?.value || '180', 10),
+            'ui.display.type': document.getElementById('pwn-cfg-display-type')?.value || 'waveshare_4',
+            'ui.web.username': document.getElementById('pwn-cfg-web-user')?.value || 'ragnar',
+            'ui.web.password': document.getElementById('pwn-cfg-web-pass')?.value || 'ragnar',
+            'ui.web.port': parseInt(document.getElementById('pwn-cfg-web-port')?.value || '8080', 10),
+            'main.plugins.auto-tune.enabled': document.getElementById('pwn-cfg-auto-tune')?.checked || false,
+            'main.plugins.webcfg.enabled': document.getElementById('pwn-cfg-webcfg')?.checked || false,
+            'main.plugins.memtemp.enabled': document.getElementById('pwn-cfg-memtemp')?.checked || false,
+            'main.plugins.grid.enabled': document.getElementById('pwn-cfg-grid')?.checked || false,
+            'main.plugins.fix_services.enabled': document.getElementById('pwn-cfg-fix-services')?.checked || false,
+        };
+
+        const response = await fetchAPI('/api/pwnagotchi/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ config })
+        });
+
+        if (response && response.success) {
+            _showPwnConfigAlert(alert, `Saved ${response.updated?.length || 0} setting(s). Changes apply on next Pwnagotchi start.`, 'success');
+            addConsoleMessage('Pwnagotchi config saved', 'info');
+        } else {
+            _showPwnConfigAlert(alert, response?.error || 'Save failed', 'error');
+        }
+    } catch (error) {
+        console.error('Error saving Pwnagotchi config:', error);
+        _showPwnConfigAlert(alert, `Save failed: ${error.message}`, 'error');
+    } finally {
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save Changes'; }
+    }
+}
+
+function _setPwnCfgValue(id, val) {
+    const el = document.getElementById(id);
+    if (el) el.value = val ?? '';
+}
+
+function _setPwnCfgChecked(id, val) {
+    const el = document.getElementById(id);
+    if (el) el.checked = Boolean(val);
+}
+
+function _showPwnConfigAlert(el, msg, type) {
+    if (!el) return;
+    el.classList.remove('hidden');
+    el.textContent = msg;
+    if (type === 'success') {
+        el.className = 'mb-4 p-3 rounded-lg text-sm bg-green-900/40 text-green-300 border border-green-700';
+    } else {
+        el.className = 'mb-4 p-3 rounded-lg text-sm bg-red-900/40 text-red-300 border border-red-700';
     }
 }
 
