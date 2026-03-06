@@ -7188,9 +7188,10 @@ def get_pwnagotchi_config():
 
         # Extract the settings we expose in the UI
         main = doc.get('main', {})
-        ui_display = doc.get('ui', {}).get('display', {})
-        ui_web = doc.get('ui', {}).get('web', {})
-        ui_font = doc.get('ui', {}).get('font', {})
+        ui = doc.get('ui', {})
+        ui_display = ui.get('display', {})
+        ui_web = ui.get('web', {})
+        ui_font = ui.get('font', {})
         personality = doc.get('personality', {})
         plugins_grid = main.get('plugins', {}).get('grid', {})
         plugins_fix = main.get('plugins', {}).get('fix_services', {})
@@ -7199,10 +7200,10 @@ def get_pwnagotchi_config():
             'main.name': str(main.get('name', 'pwnagotchi')),
             'main.iface': str(main.get('iface', 'wlan0')),
             'main.mon_iface': str(main.get('mon_iface', 'wlan0mon')),
+            'ui.invert': bool(ui.get('invert', False)),
             'ui.display.enabled': bool(ui_display.get('enabled', True)),
             'ui.display.type': str(ui_display.get('type', 'waveshare_4')),
             'ui.display.rotation': int(ui_display.get('rotation', 180)),
-            'ui.display.color': str(ui_display.get('color', 'black')),
             'ui.web.enabled': bool(ui_web.get('enabled', True)),
             'ui.web.address': str(ui_web.get('address', '0.0.0.0')),
             'ui.web.username': str(ui_web.get('username', 'ragnar')),
@@ -7238,7 +7239,7 @@ def save_pwnagotchi_config():
         # Whitelist of allowed settings to prevent arbitrary file writes
         ALLOWED_KEYS = {
             'main.name': str,
-            'ui.display.color': str,
+            'ui.invert': bool,
             'ui.display.rotation': int,
             'ui.display.type': str,
             'ui.web.username': str,
@@ -7267,8 +7268,6 @@ def save_pwnagotchi_config():
             return jsonify({'success': False, 'error': 'No valid settings in payload'}), 400
 
         # Validate specific value ranges
-        if 'ui.display.color' in validated and validated['ui.display.color'] not in ('black', 'white'):
-            return jsonify({'success': False, 'error': 'Display color must be "black" or "white"'}), 400
         if 'ui.display.rotation' in validated and validated['ui.display.rotation'] not in (0, 90, 180, 270):
             return jsonify({'success': False, 'error': 'Rotation must be 0, 90, 180, or 270'}), 400
         if 'ui.web.port' in validated:
