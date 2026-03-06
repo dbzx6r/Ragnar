@@ -111,7 +111,8 @@ class RaspberryPi:
         else:
             # SPI device, bus = 0, device = 0
             self.SPI.open(0, 0)
-            self.SPI.max_speed_hz = 4000000
+            # Lower clock for signal integrity when PiSugar is stacked on GPIO header
+            self.SPI.max_speed_hz = 2000000
             self.SPI.mode = 0b00
         return 0
 
