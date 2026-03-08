@@ -1219,11 +1219,14 @@ class Display:
 
         def _state_tuple():
             sd = self.shared_data
+            # ragnarstatustext2 is set by schedule_update_shared_data as e.g.
+            # "WiFi: Tango Down", "AP: 2 clients", "AP: No clients"
+            net_text = getattr(sd, "ragnarstatustext2", "") or ""
             return (
-                getattr(sd, "wifi_connected",    False),
-                getattr(sd, "current_ssid",      ""),
-                getattr(sd, "ap_mode_active",    False),
-                getattr(sd, "ragnarstatustext",  "IDLE"),
+                getattr(sd, "wifi_connected",   False),
+                net_text,
+                getattr(sd, "ap_mode_active",   False),
+                getattr(sd, "ragnarstatustext", "IDLE"),
             )
 
         def _ring_colour(wifi_on, ap_on, status):
@@ -1288,12 +1291,13 @@ class Display:
                 sx = 60
             draw.text((sx, 182), st, font=font_status, fill=s_col)
 
-            # SSID / AP label
+            # SSID / AP label — net_text is e.g. "WiFi: Tango Down" or "AP: 2 clients"
             if ap_on:
-                net_label = "AP MODE"
+                net_label = ssid if ssid.startswith("AP") else "AP MODE"
                 net_col   = C_AMBER
-            elif ssid:
-                net_label = ssid
+            elif wifi_on:
+                # Strip the "WiFi: " prefix if present for a cleaner label
+                net_label = ssid.removeprefix("WiFi: ") if ssid else "Connected"
                 net_col   = C_GRAY
             else:
                 net_label = "NOT CONNECTED"
@@ -1319,6 +1323,8 @@ class Display:
                 if state != _last_state:
                     wifi_on, ssid, ap_on, status_text = state
                     frame = _render_frame(wifi_on, ssid, ap_on, status_text)
+                    # Mirror horizontally to correct physical display orientation
+                    frame = frame.transpose(_Image.Transpose.FLIP_LEFT_RIGHT)
                     self.epd_helper.display_partial(frame)
                     _last_state = state
 
