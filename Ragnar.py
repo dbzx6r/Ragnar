@@ -53,13 +53,6 @@ class Ragnar:
         self.wifi_manager = WiFiManager(shared_data)
         self.wpa_sec = WpaSecIntegration(shared_data) if WpaSecIntegration else None
 
-        # Restore any stale incognito hostname/MAC state from previous run
-        try:
-            from actions.device_disguise import restore_on_startup
-            restore_on_startup(shared_data)
-        except Exception as _e:
-            logger.warning(f"restore_on_startup skipped: {_e}")
-
         # Set reference to this instance in shared_data for other modules
         self.shared_data.ragnar_instance = self
         self.shared_data.headless_mode = False

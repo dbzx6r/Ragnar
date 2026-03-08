@@ -1141,29 +1141,6 @@ class Display:
             ]
             self._draw_stat_rows(draw, y, stats)
 
-    @staticmethod
-    def _apply_incognito_mask(img):
-        """Overlay an anonymous mask on the viking's face. Scales to any image size."""
-        try:
-            masked = img.convert('RGB')
-            d = ImageDraw.Draw(masked)
-            w = masked.width
-            # All coordinates defined on a 28px reference, scaled to actual size
-            s = w / 28.0
-            def px(v): return int(v * s)
-            # Oval face mask
-            d.ellipse([px(9), px(8), px(19), px(15)], fill='white', outline='black')
-            # Eyes (2x2 pixel blocks scaled)
-            eye_sz = max(1, px(1))
-            d.rectangle([px(11), px(10), px(11)+eye_sz, px(10)+eye_sz], fill='black')
-            d.rectangle([px(16), px(10), px(16)+eye_sz, px(10)+eye_sz], fill='black')
-            # Smile points
-            for pt in [(11, 13), (12, 14), (14, 14), (16, 14), (17, 13)]:
-                d.point((px(pt[0]), px(pt[1])), fill='black')
-            return masked.convert(img.mode)
-        except Exception:
-            return img  # fallback: return original if anything goes wrong
-
     def run(self):
         """Main loop for updating the EPD display with shared data."""
         self.manual_mode_txt = ""
@@ -1252,8 +1229,6 @@ class Display:
                     image.paste(self.shared_data.connected, (int(104 * self.scale_factor_x), int(3 * self.scale_factor_y)))
                 if self.shared_data.usb_active:
                     image.paste(self.shared_data.usb, (int(90 * self.scale_factor_x), int(4 * self.scale_factor_y)))
-                if self.shared_data.config.get('incognito_mode_enabled', False):
-                    pass  # incognito indicated via viking mask (see ragnarstatusimage below)
                 if (getattr(self.shared_data, 'captive_portal_detected', False)
                         and not getattr(self.shared_data, 'captive_portal_authenticated', False)):
                     # Show "PORTAL" in the header when behind an unauthenticated captive portal
@@ -1304,8 +1279,6 @@ class Display:
 
                 self.shared_data.update_ragnarstatus()
                 status_img = self.shared_data.ragnarstatusimage
-                if self.shared_data.config.get('incognito_mode_enabled', False):
-                    status_img = self._apply_incognito_mask(status_img)
                 image.paste(status_img, (int(3 * sx), int(60 * sy * ys)))
                 draw.text((int(35 * sx), int(65 * sy * ys)), self.shared_data.ragnarstatustext, font=self.shared_data.font_arial9, fill=0)
                 draw.text((int(35 * sx), int(75 * sy * ys)), self.shared_data.ragnarstatustext2, font=self.shared_data.font_arial9, fill=0)
@@ -1325,8 +1298,6 @@ class Display:
 
                 if self.main_image is not None:
                     main_img = self.main_image
-                    if self.shared_data.config.get('incognito_mode_enabled', False):
-                        main_img = self._apply_incognito_mask(main_img)
                     image.paste(main_img, (self.shared_data.x_center1, self.shared_data.y_bottom1))
                 else:
                     logger.error("Main image not found in shared_data.")

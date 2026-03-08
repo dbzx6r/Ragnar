@@ -525,7 +525,6 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeRouterScannerToggle();
     initializeMQTTScannerToggle();
     initializeSNMPScannerToggle();
-    initializeIncognitoToggle();
     initializeTsharkToggle();
     initializeNgrepToggle();
     initializeNucleiToggle();
@@ -4653,66 +4652,6 @@ function initializeSNMPScannerToggle() {
         const checkbox = document.getElementById('snmp-scanner-enabled');
         if (checkbox) checkbox.checked = data.snmp_scanner_enabled !== false;
     }).catch(() => {});
-}
-
-// ── Incognito Mode ────────────────────────────────────────────────────────────
-
-function toggleIncognitoMode() {
-    const checkbox = document.getElementById('incognito-mode-enabled');
-    if (!checkbox) return;
-    postAPI('/api/config', { incognito_mode_enabled: checkbox.checked }).then(() => {
-        showNotification(
-            checkbox.checked ? 'Incognito Mode enabled — disguising as iPhone' : 'Incognito Mode disabled — restoring identity',
-            checkbox.checked ? 'success' : 'info'
-        );
-    }).catch(() => showNotification('Failed to update Incognito Mode setting', 'error'));
-}
-
-function initializeIncognitoToggle() {
-    fetchAPI('/api/config').then(data => {
-        if (!data) return;
-        const checkbox = document.getElementById('incognito-mode-enabled');
-        if (checkbox) checkbox.checked = data.incognito_mode_enabled === true;
-        const awayCheckbox = document.getElementById('auto-incognito-on-away');
-        if (awayCheckbox) awayCheckbox.checked = data.auto_incognito_on_away === true;
-        const homeInput = document.getElementById('home-network-ssid');
-        if (homeInput) homeInput.value = data.home_network_ssid || '';
-    }).catch(() => {});
-}
-
-let _homeNetworkSaveTimer = null;
-function saveHomeNetwork() {
-    clearTimeout(_homeNetworkSaveTimer);
-    _homeNetworkSaveTimer = setTimeout(() => {
-        const input = document.getElementById('home-network-ssid');
-        if (!input) return;
-        postAPI('/api/config', { home_network_ssid: input.value.trim() })
-            .catch(() => showNotification('Failed to save home network', 'error'));
-    }, 600);
-}
-
-function toggleAutoIncognito() {
-    const checkbox = document.getElementById('auto-incognito-on-away');
-    if (!checkbox) return;
-    postAPI('/api/config', { auto_incognito_on_away: checkbox.checked }).then(() => {
-        showNotification(
-            checkbox.checked ? 'Auto-Incognito Away Mode enabled' : 'Auto-Incognito Away Mode disabled',
-            checkbox.checked ? 'success' : 'info'
-        );
-    }).catch(() => showNotification('Failed to update Auto-Incognito setting', 'error'));
-}
-
-function setHomeNetworkToCurrent() {
-    fetchAPI('/api/status').then(data => {
-        if (!data) return;
-        const ssid = data.connected_ssid || data.current_ssid || data.wifi_ssid || data.ssid || '';
-        if (!ssid) { showNotification('No active WiFi connection detected', 'warning'); return; }
-        const input = document.getElementById('home-network-ssid');
-        if (input) { input.value = ssid; }
-        postAPI('/api/config', { home_network_ssid: ssid }).then(() => {
-            showNotification(`Home network set to "${ssid}"`, 'success');
-        }).catch(() => showNotification('Failed to save home network', 'error'));
-    }).catch(() => showNotification('Could not fetch current network', 'error'));
 }
 
 // ── tshark Capture ────────────────────────────────────────────────────────────
