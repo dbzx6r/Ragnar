@@ -469,6 +469,7 @@ function epdTypeToSizeKey(epd_type) {
     if (epd_type.startsWith('epd2in7')) return '2in7';
     if (epd_type.startsWith('epd2in9')) return '2in9';
     if (epd_type.startsWith('epd3in7')) return '3in7';
+    if (epd_type === 'st7789v') return '2in0_tft';
     return epd_type; // fallback: return as-is
 }
 
@@ -478,7 +479,8 @@ const displaySelectOptions = {
         { value: '2in13', label: '2.13" e-Paper (122x250)' },
         { value: '2in7', label: '2.7" e-Paper (176x264)' },
         { value: '2in9', label: '2.9" e-Paper (128x296)' },
-        { value: '3in7', label: '3.7" e-Paper (280x480)' }
+        { value: '3in7', label: '3.7" e-Paper (280x480)' },
+        { value: '2in0_tft', label: '2.0" ST7789V TFT LCD (240x320)' }
     ],
     screen_reversed: [
         { value: 'false', label: 'Normal orientation' },

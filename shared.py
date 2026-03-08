@@ -58,10 +58,11 @@ DESIGN_REF_HEIGHT = 250  # All layout coordinates are designed for this height
 
 # Map web UI size keys to default driver names
 SIZE_KEY_TO_DEFAULT_DRIVER = {
-    "2in13": "epd2in13_V4",
-    "2in7":  "epd2in7_V2",
-    "2in9":  "epd2in9_V2",
-    "3in7":  "epd3in7",
+    "2in13":    "epd2in13_V4",
+    "2in7":     "epd2in7_V2",
+    "2in9":     "epd2in9_V2",
+    "3in7":     "epd3in7",
+    "2in0_tft": "st7789v",
 }
 
 def resolve_epd_type(size_key, current_epd_type=None):
@@ -93,6 +94,8 @@ DISPLAY_PROFILES = {
     "epd2in13_V2": {"ref_width": DESIGN_REF_WIDTH, "ref_height": DESIGN_REF_HEIGHT, "default_flip": False},
     "epd2in13_V3": {"ref_width": DESIGN_REF_WIDTH, "ref_height": DESIGN_REF_HEIGHT, "default_flip": True},
     "epd2in13_V4": {"ref_width": DESIGN_REF_WIDTH, "ref_height": DESIGN_REF_HEIGHT, "default_flip": False},
+    # ST7789V 2.0" 240x320 colour TFT LCD
+    "st7789v":     {"ref_width": DESIGN_REF_WIDTH, "ref_height": DESIGN_REF_HEIGHT, "default_flip": False},
 }
 
 
