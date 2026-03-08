@@ -216,7 +216,13 @@
             }
         }
         /* Toggle switch: show green when ON, regardless of Tailwind purge state */
-        label > input[type="checkbox"]:checked + div { background-color: #16a34a !important; }
+        label.toggle-switch > input[type="checkbox"]:checked + div { background-color: #16a34a !important; }
+        /* AI map toggle – uses Ragnar color, not green */
+        #map-ai-toggle-track { background: #475569; border-radius: 9999px; width: 36px; height: 20px; position: relative; cursor: pointer; transition: background 0.2s; }
+        #map-ai-toggle-track.active { background: var(--ragnar-600, #7c3aed); }
+        #map-ai-toggle-track.disabled { opacity: 0.35; cursor: not-allowed; }
+        #map-ai-toggle-knob { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; background: #fff; border-radius: 9999px; transition: transform 0.2s; }
+        #map-ai-toggle-track.active #map-ai-toggle-knob { transform: translateX(16px); }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 </head>
@@ -349,20 +355,6 @@
         
         <!-- Dashboard Tab -->
         <div id="dashboard-tab" class="tab-content">
-            <!-- Report Export Bar -->
-            <div class="glass rounded-xl p-4 mb-6 flex items-center justify-between">
-                <div>
-                    <span class="font-semibold">Scan Report</span>
-                    <span class="text-gray-400 text-sm ml-2">Export a full HTML report of all findings</span>
-                </div>
-                <button onclick="exportScanReport()" id="export-report-btn"
-                    class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-colors text-sm flex items-center gap-2">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-4-4m4 4l4-4m6 4H6"></path>
-                    </svg>
-                    Export Report
-                </button>
-            </div>
             <!-- Stats Grid -->
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-8">
                 <!-- Targets Card -->
@@ -525,8 +517,8 @@
                                     <p class="text-gray-400 text-sm">Automation Control</p>
                                     <p class="text-xs text-gray-500">Start or stop the orchestrator</p>
                                 </div>
-                                <button id="automation-toggle-btn" class="w-full sm:w-auto px-4 py-2 rounded-lg font-semibold bg-orange-600 hover:bg-orange-500 text-white transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 focus:ring-offset-slate-900" data-action="stop">
-                                    Disable Automation
+                                <button id="automation-toggle-btn" class="w-full sm:w-auto px-4 py-2 rounded-lg font-semibold bg-green-600 hover:bg-green-500 text-white transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 focus:ring-offset-slate-900" data-action="start">
+                                    Enable Automation
                                 </button>
                             </div>
                         </div>
@@ -713,7 +705,22 @@
                     </div>
                 </div>
             </div>
-            
+
+            <!-- Report Export Bar -->
+            <div class="glass rounded-xl p-4 mb-6 flex items-center justify-between">
+                <div>
+                    <span class="font-semibold">Scan Report</span>
+                    <span class="text-gray-400 text-sm ml-2">Export a full HTML report of all findings</span>
+                </div>
+                <button onclick="exportScanReport()" id="export-report-btn"
+                    class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-colors text-sm flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-4-4m4 4l4-4m6 4H6"></path>
+                    </svg>
+                    Export Report
+                </button>
+            </div>
+
             <!-- Pentest Mode Hint -->
             <div id="manual-mode-hint" class="glass rounded-xl p-6 mb-8">
                 <div class="flex items-start space-x-4">
@@ -853,21 +860,72 @@
             </div>
         </div>
         
-        <!-- Activity Feed Card (end of dashboard tab) -->
-        <div class="mt-6 glass rounded-xl p-6">
-            <div class="flex items-center justify-between mb-4">
-                <div class="flex items-center gap-3">
-                    <svg class="w-5 h-5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-                    </svg>
-                    <h3 class="text-lg font-semibold">Live Activity</h3>
+        <!-- Network Map Tab -->
+        <div id="network-map-tab" class="tab-content hidden">
+            <div class="glass rounded-xl p-6">
+                <!-- Header row: title left, controls right -->
+                <div class="flex items-center justify-between mb-3">
+                    <div>
+                        <h2 class="text-2xl font-bold">Network Map</h2>
+                        <p class="text-sm text-gray-400">Interactive topology map with device classification</p>
+                    </div>
+                    <div class="flex items-center gap-3 shrink-0">
+                        <!-- AI toggle -->
+                        <div id="map-ai-toggle-wrapper" class="flex items-center gap-2" title="AI not available – enable in Settings">
+                            <span class="text-xs text-gray-400 whitespace-nowrap">AI Classify</span>
+                            <!-- Spinner shown during AI work -->
+                            <svg id="map-ai-spinner" class="hidden animate-spin h-4 w-4" style="color:#7c3aed" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                            </svg>
+                            <div id="map-ai-toggle-track" class="disabled" onclick="onMapAiToggleClick()">
+                                <div id="map-ai-toggle-knob"></div>
+                            </div>
+                        </div>
+                        <!-- Refresh button -->
+                        <button onclick="refreshNetworkMap()" class="bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-4 py-2 rounded-lg transition-colors text-sm whitespace-nowrap shrink-0">
+                            Refresh
+                        </button>
+                    </div>
                 </div>
-                <span id="activity-feed-count" class="text-xs text-gray-500"></span>
+                <!-- Device type legend (own row beneath header) -->
+                <div id="map-legend" class="flex flex-wrap items-center gap-3 text-xs text-gray-400 mb-3"></div>
+                <!-- Subnet manager (collapsible) -->
+                <div id="subnet-manager" class="mb-3">
+                    <button onclick="toggleSubnetPanel()" class="text-sm text-green-400 hover:text-green-300 flex items-center gap-1.5 mb-2 transition-colors font-medium">
+                        <svg id="subnet-chevron" class="w-4 h-4 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                        <span>Scan Subnets</span>
+                        <span id="subnet-count" class="bg-green-900/50 text-green-300 text-xs px-1.5 rounded-full">0</span>
+                    </button>
+                    <div id="subnet-panel" class="hidden bg-slate-800/50 rounded-lg p-3 text-sm space-y-2">
+                        <p class="text-xs text-gray-500">Add extra subnets so Ragnar discovers devices behind other routers/APs.</p>
+                        <div id="subnet-primary" class="text-xs text-gray-500"></div>
+                        <div id="subnet-list" class="space-y-1"></div>
+                        <div class="flex gap-2">
+                            <input id="subnet-input" type="text" placeholder="e.g. 10.0.0.0/24" class="flex-1 px-3 py-1.5 rounded bg-slate-700 border border-slate-600 text-sm focus:border-Ragnar-500 focus:outline-none">
+                            <button onclick="addScanSubnet()" class="bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-3 py-1.5 rounded text-sm whitespace-nowrap">Add</button>
+                        </div>
+                        <p id="subnet-error" class="text-xs text-red-400 hidden"></p>
+                        <!-- Scan log -->
+                        <div class="mt-3 border-t border-slate-700 pt-2">
+                            <p class="text-xs text-gray-500 font-medium mb-1">Scan Log</p>
+                            <div id="subnet-scan-log" class="max-h-40 overflow-y-auto space-y-0.5 text-xs font-mono bg-slate-900/60 rounded p-2">
+                                <p class="text-gray-600 italic">No scan data yet — waiting for next scan cycle.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Tooltip -->
+                <div id="map-tooltip" class="absolute z-50 bg-slate-800 border border-slate-600 rounded-lg p-3 text-sm pointer-events-none hidden max-w-xs"></div>
+                <!-- SVG canvas -->
+                <div id="network-map-container" class="w-full rounded-lg bg-slate-950 border border-slate-700" style="height:800px;position:relative;">
+                    <div id="network-map-loading" class="flex items-center justify-center h-full text-gray-400">
+                        <p>Loading network map...</p>
+                    </div>
+                    <svg id="network-map-svg" class="w-full h-full" style="display:none;"></svg>
+                </div>
+                <p class="text-xs text-gray-500 mt-2">Click a node to open host details. Scroll to zoom. Drag to pan.</p>
             </div>
-            <div id="activity-feed-list" class="space-y-1 overflow-y-auto" style="max-height: 280px;">
-                <p class="text-gray-500 text-sm text-center py-6">No activity yet — events will appear here as Ragnar works.</p>
-            </div>
-        </div>
         </div>
 
         <!-- Credentials Tab -->
@@ -887,7 +945,6 @@
                         </button>
                     </div>
                 </div>
-
                 <!-- Stats row -->
                 <div id="cred-stats" class="grid grid-cols-3 sm:grid-cols-7 gap-3 mb-6"></div>
 
@@ -913,21 +970,21 @@
 
                 <!-- Table -->
                 <div class="overflow-x-auto">
-                    <table class="w-full text-sm">
+                    <table class="w-full text-sm" style="min-width:640px;">
                         <thead>
                             <tr class="border-b border-slate-700">
-                                <th onclick="sortCredsBy('ip')" class="text-left py-3 px-4 text-gray-400 font-medium cursor-pointer hover:text-white select-none">
+                                <th onclick="sortCredsBy('ip')" class="text-left py-3 px-4 text-gray-400 font-medium cursor-pointer hover:text-white select-none whitespace-nowrap">
                                     IP <span id="cred-sort-ip" class="text-xs"></span>
                                 </th>
-                                <th onclick="sortCredsBy('service')" class="text-left py-3 px-4 text-gray-400 font-medium cursor-pointer hover:text-white select-none">
+                                <th onclick="sortCredsBy('service')" class="text-left py-3 px-4 text-gray-400 font-medium cursor-pointer hover:text-white select-none whitespace-nowrap">
                                     Service <span id="cred-sort-service" class="text-xs"></span>
                                 </th>
-                                <th class="text-left py-3 px-4 text-gray-400 font-medium">Port</th>
-                                <th onclick="sortCredsBy('username')" class="text-left py-3 px-4 text-gray-400 font-medium cursor-pointer hover:text-white select-none">
+                                <th class="text-left py-3 px-4 text-gray-400 font-medium whitespace-nowrap">Port</th>
+                                <th onclick="sortCredsBy('username')" class="text-left py-3 px-4 text-gray-400 font-medium cursor-pointer hover:text-white select-none whitespace-nowrap">
                                     Username <span id="cred-sort-username" class="text-xs"></span>
                                 </th>
-                                <th class="text-left py-3 px-4 text-gray-400 font-medium">Password</th>
-                                <th class="text-left py-3 px-4 text-gray-400 font-medium">Copy</th>
+                                <th class="text-left py-3 px-4 text-gray-400 font-medium whitespace-nowrap">Password</th>
+                                <th class="text-left py-3 px-4 text-gray-400 font-medium whitespace-nowrap">Copy</th>
                             </tr>
                         </thead>
                         <tbody id="cred-table-body">
@@ -936,40 +993,6 @@
                     </table>
                 </div>
                 <div id="cred-table-count" class="text-sm text-gray-400 mt-3"></div>
-            </div>
-        </div>
-
-        <!-- Network Map Tab -->
-        <div id="network-map-tab" class="tab-content hidden">
-            <div class="glass rounded-xl p-6">
-                <div class="flex items-center justify-between mb-4">
-                    <div>
-                        <h2 class="text-2xl font-bold">Network Map</h2>
-                        <p class="text-sm text-gray-400">Interactive force-directed graph of discovered hosts</p>
-                    </div>
-                    <div class="flex items-center gap-4">
-                        <!-- Legend -->
-                        <div class="flex items-center gap-3 text-xs text-gray-400">
-                            <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-full bg-slate-500"></span> No data</span>
-                            <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-full bg-green-500"></span> Low</span>
-                            <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-full bg-amber-500"></span> Medium</span>
-                            <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-full bg-red-500"></span> High</span>
-                        </div>
-                        <button onclick="refreshNetworkMap()" class="bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-4 py-2 rounded-lg transition-colors text-sm">
-                            Refresh
-                        </button>
-                    </div>
-                </div>
-                <!-- Tooltip -->
-                <div id="map-tooltip" class="absolute z-50 bg-slate-800 border border-slate-600 rounded-lg p-3 text-sm pointer-events-none hidden max-w-xs"></div>
-                <!-- SVG canvas -->
-                <div id="network-map-container" class="w-full rounded-lg bg-slate-950 border border-slate-700" style="height:600px;position:relative;">
-                    <div id="network-map-loading" class="flex items-center justify-center h-full text-gray-400">
-                        <p>Loading network map...</p>
-                    </div>
-                    <svg id="network-map-svg" class="w-full h-full" style="display:none;"></svg>
-                </div>
-                <p class="text-xs text-gray-500 mt-2">Click a node to open host details. Scroll to zoom. Drag to pan.</p>
             </div>
         </div>
 
@@ -1066,8 +1089,8 @@
                                         <p class="text-[11px] text-gray-500">Choose whether Ragnar chases every adapter or locks onto one.</p>
                                     </div>
                                     <div id="wifi-multi-mode-buttons" class="flex gap-2">
-                                        <button type="button" data-mode="single" class="text-xs font-semibold px-3 py-1 rounded-full border border-slate-600 bg-slate-800 text-gray-300 transition-all">Single Focus</button>
-                                        <button type="button" data-mode="multi" class="text-xs font-semibold px-3 py-1 rounded-full border border-slate-600 bg-slate-800 text-gray-300 transition-all">All Adapters</button>
+                                        <button type="button" data-mode="multi" class="text-xs font-semibold px-3 py-1 rounded-full border border-slate-600 bg-slate-800 text-gray-300 transition-all">Single Focus</button>
+                                        <button type="button" data-mode="single" class="text-xs font-semibold px-3 py-1 rounded-full border border-slate-600 bg-slate-800 text-gray-300 transition-all">All Adapters</button>
                                     </div>
                                 </div>
                                 <div id="wifi-multi-focus-controls" class="mt-3 hidden">
@@ -1075,7 +1098,7 @@
                                     <select id="wifi-multi-focus-select" class="mt-2 w-full bg-slate-950/70 border border-slate-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-Ragnar-500">
                                         <option value="">Loading adapters…</option>
                                     </select>
-                                    <p class="text-[11px] text-gray-500 mt-2">Only this adapter drives discovery when Single Focus is active.</p>
+                                    <p class="text-[11px] text-gray-500 mt-2">Only this adapter drives discovery when All Adapters mode is active.</p>
                                 </div>
                             </div>
                             <div id="wifi-multi-interface-list" class="mt-4 space-y-3">
@@ -1658,7 +1681,7 @@
             
             <!-- Attack Logs Section -->
             <div class="glass rounded-xl p-6">
-                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6">
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4">
                     <div>
                         <h2 class="text-2xl font-bold mb-2">Attack Logs</h2>
                         <p class="text-sm text-gray-400">Detailed attack activity per host</p>
@@ -1681,6 +1704,37 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
                             </svg>
                             Refresh
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Sort / Search Row -->
+                <div class="flex flex-col sm:flex-row gap-3 mb-6">
+                    <!-- IP search -->
+                    <div class="relative flex-1">
+                        <svg class="w-4 h-4 text-gray-400 pointer-events-none" style="position:absolute;right:0.75rem;top:50%;transform:translateY(-50%);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 1 0 5 11a6 6 0 0 0 12 0z"></path>
+                        </svg>
+                        <input id="attack-ip-search" type="text" placeholder="Filter by IP address..." oninput="onAttackIPSearch(this.value)"
+                            class="w-full bg-slate-800 border border-slate-600 rounded-lg py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-Ragnar-500" style="padding-left:0.75rem;padding-right:2.5rem;">
+                    </div>
+                    <!-- Network / SSID dropdown -->
+                    <div class="flex items-center gap-2">
+                        <label class="text-sm text-gray-400 whitespace-nowrap">Network:</label>
+                        <select id="attack-network-filter" onchange="filterAttackByNetwork(this.value)"
+                            class="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-Ragnar-500">
+                            <option value="all">All Networks</option>
+                        </select>
+                    </div>
+                    <!-- Group by toggle -->
+                    <div class="flex items-center gap-1 bg-slate-800 border border-slate-600 rounded-lg p-1">
+                        <button onclick="setAttackGroupBy('ip')" id="attack-groupby-ip"
+                            class="attack-groupby-btn px-3 py-1 rounded text-sm transition-colors bg-Ragnar-600 text-white" data-groupby="ip">
+                            Group by IP
+                        </button>
+                        <button onclick="setAttackGroupBy('network')" id="attack-groupby-network"
+                            class="attack-groupby-btn px-3 py-1 rounded text-sm transition-colors text-gray-400 hover:text-white" data-groupby="network">
+                            Group by Network
                         </button>
                     </div>
                 </div>
@@ -1980,10 +2034,31 @@
                     
                     <!-- File List -->
                     <div class="lg:col-span-2">
-                        <div class="flex items-center justify-between mb-3">
-                            <h3 class="text-lg font-semibold">Files</h3>
-                            <div class="text-sm text-gray-400">
-                                <span id="current-path">/</span>
+                        <div class="flex flex-col gap-2 mb-3">
+                            <div class="flex items-center justify-between">
+                                <h3 class="text-lg font-semibold">Files</h3>
+                                <div class="text-sm text-gray-400">
+                                    <span id="current-path">/</span>
+                                </div>
+                            </div>
+                            <!-- File search + sort controls -->
+                            <div class="flex flex-col sm:flex-row gap-2">
+                                <div class="relative flex-1">
+                                    <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 1 0 5 11a6 6 0 0 0 12 0z"></path>
+                                    </svg>
+                                    <input id="file-search" type="text" placeholder="Search files..." oninput="onFileSearch(this.value)"
+                                        class="w-full bg-slate-800 border border-slate-600 rounded-lg pl-9 pr-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-Ragnar-500">
+                                </div>
+                                <div class="flex items-center gap-1 bg-slate-800 border border-slate-600 rounded-lg p-1 text-xs">
+                                    <span class="text-gray-400 px-1">Sort:</span>
+                                    <button onclick="setFileSort('name')" id="file-sort-name" data-sort="name"
+                                        class="file-sort-btn px-2 py-1 rounded transition-colors bg-Ragnar-600 text-white">Name</button>
+                                    <button onclick="setFileSort('date')" id="file-sort-date" data-sort="date"
+                                        class="file-sort-btn px-2 py-1 rounded transition-colors text-gray-400 hover:text-white">Date</button>
+                                    <button onclick="setFileSort('size')" id="file-sort-size" data-sort="size"
+                                        class="file-sort-btn px-2 py-1 rounded transition-colors text-gray-400 hover:text-white">Size</button>
+                                </div>
                             </div>
                         </div>
                         <div class="glass-card h-96 overflow-y-auto scrollbar-thin">
@@ -3524,201 +3599,6 @@
                                 Disabled for headless installations. Pwnagotchi requires an e-paper display.
                             </div>
                         </div>
-
-                        <!-- wpa-sec Toggle Card -->
-                        <div class="glass rounded-lg p-4">
-                            <div class="flex items-center justify-between mb-3">
-                                <h4 class="font-medium">wpa-sec Integration</h4>
-                                <label class="relative inline-flex items-center cursor-pointer">
-                                    <input type="checkbox" id="wpasec-enabled" class="sr-only peer" onchange="toggleWpaSecVisibility()">
-                                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-cyan-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-600"></div>
-                                </label>
-                            </div>
-                            <div class="text-sm text-gray-400 mb-3">
-                                Automatically import cracked WiFi passwords from wpa-sec.stanev.org into Ragnar's known networks.
-                            </div>
-                            <div class="text-xs text-gray-500">
-                                Toggle to show/hide wpa-sec configuration options below
-                            </div>
-                        </div>
-
-                        <!-- Aggressive Mode Toggle Card -->
-                        <div class="glass rounded-lg p-4 border border-red-900/40">
-                            <div class="flex items-center justify-between mb-3">
-                                <h4 class="font-medium text-red-300">Aggressive Mode</h4>
-                                <label class="relative inline-flex items-center cursor-pointer">
-                                    <input type="checkbox" id="aggressive-mode-enabled" class="sr-only peer" onchange="toggleAggressiveMode()">
-                                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-red-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600"></div>
-                                </label>
-                            </div>
-                            <div class="text-sm text-gray-400 mb-3">
-                                Faster scans, shorter retry delays, and immediate network entry. Applies a performance preset to all timing settings.
-                            </div>
-                            <div class="text-xs text-gray-500">
-                                Scan interval 60s · Vuln scan 180s · Retry delays 60/120s · Attacks new networks immediately
-                            </div>
-                        </div>
-
-                        <div class="glass rounded-lg p-4">
-                            <div class="flex items-center justify-between mb-3">
-                                <h4 class="font-medium">IP Camera Scanner</h4>
-                                <label class="relative inline-flex items-center cursor-pointer">
-                                    <input type="checkbox" id="ipcam-enabled" class="sr-only peer" onchange="toggleIpCamEnabled()">
-                                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-cyan-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-600"></div>
-                                </label>
-                            </div>
-                            <div class="text-sm text-gray-400 mb-3">
-                                Auto-discover IP cameras (port 554/RTSP), test default credentials, and save a snapshot to Data Stolen.
-                            </div>
-                            <div class="text-xs text-gray-500">
-                                Supports Hikvision, Dahua, Axis, Foscam, Amcrest, Reolink, and generic cameras
-                            </div>
-                        </div>
-
-                        <div class="glass rounded-lg p-4">
-                            <div class="flex items-center justify-between mb-3">
-                                <h4 class="font-medium">Router Admin Scanner</h4>
-                                <label class="relative inline-flex items-center cursor-pointer">
-                                    <input type="checkbox" id="router-scanner-enabled" class="sr-only peer" onchange="toggleRouterScannerEnabled()">
-                                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-cyan-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-600"></div>
-                                </label>
-                            </div>
-                            <div class="text-sm text-gray-400 mb-3">
-                                Target the default gateway with brand-specific default credentials (Netgear, TP-Link, Asus, Cisco, etc.). Saves admin page dump to Data Stolen.
-                            </div>
-                            <div class="text-xs text-gray-500">
-                                Runs once per network · Tries HTTP/HTTPS on common admin ports
-                            </div>
-                        </div>
-
-                        <div class="glass rounded-lg p-4">
-                            <div class="flex items-center justify-between mb-3">
-                                <h4 class="font-medium">MQTT Subscriber</h4>
-                                <label class="relative inline-flex items-center cursor-pointer">
-                                    <input type="checkbox" id="mqtt-scanner-enabled" class="sr-only peer" onchange="toggleMQTTScannerEnabled()">
-                                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-cyan-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-600"></div>
-                                </label>
-                            </div>
-                            <div class="text-sm text-gray-400 mb-3">
-                                Connect to open MQTT brokers (port 1883) and passively collect IoT messages — smart home states, sensor data, device commands.
-                            </div>
-                            <div class="text-xs text-gray-500">
-                                Records for 30s · Saves topic list and sample payloads · Requires paho-mqtt
-                            </div>
-                        </div>
-
-                        <div class="glass rounded-lg p-4">
-                            <div class="flex items-center justify-between mb-3">
-                                <h4 class="font-medium">SNMP Scanner</h4>
-                                <label class="relative inline-flex items-center cursor-pointer">
-                                    <input type="checkbox" id="snmp-scanner-enabled" class="sr-only peer" onchange="toggleSNMPScannerEnabled()">
-                                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-cyan-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-600"></div>
-                                </label>
-                            </div>
-                            <div class="text-sm text-gray-400 mb-3">
-                                Try public/private SNMP community strings on port 161. Extracts device names, interfaces, and ARP tables that reveal other devices on the LAN.
-                            </div>
-                            <div class="text-xs text-gray-500">
-                                Uses snmpwalk (pre-installed) · Saves full MIB dump to Data Stolen
-                            </div>
-                        </div>
-
-                        <div class="glass rounded-lg p-4" style="border:1px solid rgba(168,85,247,0.25);background:rgba(88,28,135,0.15);">
-                            <div class="flex items-center justify-between mb-3">
-                                <h4 class="font-medium" style="display:flex;align-items:center;gap:0.4rem;">
-                                    <span style="font-size:1rem;">🕵️</span> Incognito Mode
-                                </h4>
-                                <label class="relative inline-flex items-center cursor-pointer">
-                                    <input type="checkbox" id="incognito-mode-enabled" class="sr-only peer" onchange="toggleIncognitoMode()">
-                                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all" style="peer-checked:background-color:#9333ea;" onload="this.style.backgroundColor = document.getElementById('incognito-mode-enabled').checked ? '#9333ea' : ''"></div>
-                                </label>
-                            </div>
-                            <div class="text-sm text-gray-400 mb-3">
-                                Disguise Ragnar as an iPhone on the network. Spoofs MAC address to an Apple OUI, sets hostname to iPhone, and broadcasts iPhone.local via mDNS.
-                            </div>
-                            <div class="text-xs text-gray-500">
-                                Requires root · Modifies wlan0 MAC · Restores original identity when disabled
-                            </div>
-                        </div>
-
-                        <!-- Auto-Incognito on Away Networks -->
-                        <div class="glass rounded-lg p-4" style="border:1px solid rgba(168,85,247,0.25);background:rgba(88,28,135,0.15);">
-                            <div class="flex items-center justify-between mb-3">
-                                <h4 class="font-medium" style="display:flex;align-items:center;gap:0.4rem;">
-                                    <span style="font-size:1rem;">🏠</span> Auto-Incognito Away Mode
-                                </h4>
-                                <label class="relative inline-flex items-center cursor-pointer">
-                                    <input type="checkbox" id="auto-incognito-on-away" class="sr-only peer" onchange="toggleAutoIncognito()">
-                                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
-                                </label>
-                            </div>
-                            <div class="text-sm text-gray-400 mb-3">
-                                Automatically enable Incognito Mode on any network that isn't your home network, and disable it when you return home.
-                            </div>
-                            <div class="flex items-center gap-2 mt-2">
-                                <input type="text" id="home-network-ssid" placeholder="Home network SSID" class="flex-1 rounded px-3 py-1.5 text-sm bg-gray-800 border border-gray-600 text-white focus:outline-none focus:border-purple-500" oninput="saveHomeNetwork()">
-                                <button onclick="setHomeNetworkToCurrent()" class="text-xs px-3 py-1.5 rounded bg-purple-700 hover:bg-purple-600 text-white whitespace-nowrap">Use Current</button>
-                            </div>
-                            <div class="text-xs text-gray-500 mt-2">
-                                Leave SSID blank to disable auto-incognito · Changes apply on next network switch
-                            </div>
-                        </div>
-
-                        <!-- Advanced Tools Section -->
-                        <div class="col-span-full mt-2 mb-1">
-                            <div style="border-top:1px solid rgba(255,255,255,0.08);padding-top:1rem;">
-                                <h3 class="text-xl font-semibold mb-4 text-Ragnar-400">Advanced Traffic &amp; Vulnerability Tools</h3>
-                                <p class="text-xs text-yellow-400" style="margin-bottom:0.75rem;">⚠️ Recommended for Pi 5 / 8 GB+ hardware. Can be enabled on lower-powered devices — monitor for instability.</p>
-                            </div>
-                        </div>
-
-                        <div class="glass rounded-lg p-4">
-                            <div class="flex items-center justify-between mb-3">
-                                <h4 class="font-medium">tshark Capture</h4>
-                                <label class="relative inline-flex items-center cursor-pointer">
-                                    <input type="checkbox" id="tshark-enabled" class="sr-only peer" onchange="toggleTsharkEnabled()">
-                                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-cyan-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-600"></div>
-                                </label>
-                            </div>
-                            <div class="text-sm text-gray-400 mb-3">
-                                Run a short tshark packet capture on each network and save a pcap to Data Stolen for offline analysis.
-                            </div>
-                            <div class="text-xs text-gray-500">
-                                Requires tshark (Wireshark CLI) · Captures 30s · Pi 5 / 8 GB+ recommended
-                            </div>
-                        </div>
-
-                        <div class="glass rounded-lg p-4">
-                            <div class="flex items-center justify-between mb-3">
-                                <h4 class="font-medium">ngrep Traffic Search</h4>
-                                <label class="relative inline-flex items-center cursor-pointer">
-                                    <input type="checkbox" id="ngrep-enabled" class="sr-only peer" onchange="toggleNgrepEnabled()">
-                                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-cyan-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-600"></div>
-                                </label>
-                            </div>
-                            <div class="text-sm text-gray-400 mb-3">
-                                Passively search live traffic for plaintext credentials, tokens, and sensitive strings using pattern matching.
-                            </div>
-                            <div class="text-xs text-gray-500">
-                                Requires ngrep · Scans HTTP, FTP, Telnet, POP3 · Pi 5 / 8 GB+ recommended
-                            </div>
-                        </div>
-
-                        <div class="glass rounded-lg p-4">
-                            <div class="flex items-center justify-between mb-3">
-                                <h4 class="font-medium">Nuclei Scanner</h4>
-                                <label class="relative inline-flex items-center cursor-pointer">
-                                    <input type="checkbox" id="nuclei-enabled" class="sr-only peer" onchange="toggleNucleiEnabled()">
-                                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-cyan-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-600"></div>
-                                </label>
-                            </div>
-                            <div class="text-sm text-gray-400 mb-3">
-                                Run Nuclei vulnerability templates against discovered hosts. Detects CVEs, misconfigs, exposed panels, and default credentials.
-                            </div>
-                            <div class="text-xs text-gray-500">
-                                Requires nuclei · Community templates · Pi 5 / 8 GB+ recommended
-                            </div>
-                        </div>
                         
                     </div>
                 </div>
@@ -3828,6 +3708,189 @@
                             <p id="pwn-swap-hint" class="text-xs text-gray-500 mt-3">Ragnar UI becomes unavailable once the service stops. Keep SSH access handy before swapping.</p>
                         </div>
                     </div>
+
+                    <!-- Pwnagotchi Configuration Card -->
+                    <div id="pwn-config-card" class="glass rounded-lg p-4 mt-4" style="display: none;">
+                        <div class="flex items-center justify-between mb-4">
+                            <div>
+                                <h4 class="font-medium text-lg">Pwnagotchi Configuration</h4>
+                                <p class="text-xs text-gray-500 mt-1">Edit <code class="text-fuchsia-300">/etc/pwnagotchi/config.toml</code> — changes take effect on next Pwnagotchi start.</p>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <button id="pwn-config-reload-btn" class="bg-slate-700 hover:bg-slate-600 text-white text-sm px-3 py-1.5 rounded-lg transition-colors" title="Reload from file">
+                                    <svg class="w-4 h-4 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                                    Reload
+                                </button>
+                                <button id="pwn-config-save-btn" class="bg-fuchsia-600 hover:bg-fuchsia-700 text-white text-sm px-4 py-1.5 rounded-lg transition-colors">
+                                    Save Changes
+                                </button>
+                            </div>
+                        </div>
+                        <div id="pwn-config-alert" class="hidden mb-4 p-3 rounded-lg text-sm"></div>
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            <!-- Identity & Personality -->
+                            <div class="space-y-3">
+                                <h5 class="text-sm font-semibold text-fuchsia-300 uppercase tracking-wide">Identity</h5>
+                                <div>
+                                    <label class="block text-xs text-gray-400 mb-1">Device Name</label>
+                                    <input id="pwn-cfg-name" type="text" maxlength="32" pattern="[a-zA-Z0-9_-]+" class="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white focus:border-fuchsia-500 focus:outline-none" placeholder="RagnarPwn">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-400 mb-1">Whitelist (SSIDs/BSSIDs)</label>
+                                    <input id="pwn-cfg-whitelist" type="text" class="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white focus:border-fuchsia-500 focus:outline-none" placeholder="MyHomeWiFi, 00:11:22:33:44:55">
+                                    <p class="text-xs text-gray-500 mt-1">Comma-separated networks to ignore</p>
+                                </div>
+                                <h5 class="text-sm font-semibold text-fuchsia-300 uppercase tracking-wide pt-2">Personality</h5>
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <label class="text-xs text-gray-400">Deauth Attacks</label>
+                                        <p class="text-xs text-gray-500">Send deauth to capture handshakes</p>
+                                    </div>
+                                    <label class="relative inline-flex items-center cursor-pointer">
+                                        <input type="checkbox" id="pwn-cfg-deauth" class="sr-only peer">
+                                        <div class="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-fuchsia-600"></div>
+                                    </label>
+                                </div>
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <label class="text-xs text-gray-400">Associate</label>
+                                        <p class="text-xs text-gray-500">Connect to APs to gather data</p>
+                                    </div>
+                                    <label class="relative inline-flex items-center cursor-pointer">
+                                        <input type="checkbox" id="pwn-cfg-associate" class="sr-only peer">
+                                        <div class="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-fuchsia-600"></div>
+                                    </label>
+                                </div>
+                                <div class="flex items-center justify-between">
+                                    <label class="text-xs text-gray-400">Advertise</label>
+                                    <label class="relative inline-flex items-center cursor-pointer">
+                                        <input type="checkbox" id="pwn-cfg-advertise" class="sr-only peer">
+                                        <div class="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-fuchsia-600"></div>
+                                    </label>
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-400 mb-1">Min RSSI (dBm)</label>
+                                    <input id="pwn-cfg-min-rssi" type="number" min="-200" max="0" class="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white focus:border-fuchsia-500 focus:outline-none" placeholder="-200">
+                                    <p class="text-xs text-gray-500 mt-1">-200 = no limit, -75 = nearby only</p>
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-400 mb-1">Channels</label>
+                                    <input id="pwn-cfg-channels" type="text" class="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white focus:border-fuchsia-500 focus:outline-none" placeholder="1, 6, 11">
+                                    <p class="text-xs text-gray-500 mt-1">Comma-separated, empty = all channels</p>
+                                </div>
+                            </div>
+                            <!-- Display -->
+                            <div class="space-y-3">
+                                <h5 class="text-sm font-semibold text-fuchsia-300 uppercase tracking-wide">Display</h5>
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <label class="text-xs text-gray-400">Display Enabled</label>
+                                        <p class="text-xs text-gray-500">Activate the physical e-ink screen</p>
+                                    </div>
+                                    <label class="relative inline-flex items-center cursor-pointer">
+                                        <input type="checkbox" id="pwn-cfg-display-enabled" class="sr-only peer">
+                                        <div class="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-fuchsia-600"></div>
+                                    </label>
+                                </div>
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <label class="text-xs text-gray-400">Invert Display</label>
+                                        <p class="text-xs text-gray-500">White background (default is black)</p>
+                                    </div>
+                                    <label class="relative inline-flex items-center cursor-pointer">
+                                        <input type="checkbox" id="pwn-cfg-invert" class="sr-only peer">
+                                        <div class="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-fuchsia-600"></div>
+                                    </label>
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-400 mb-1">Rotation</label>
+                                    <select id="pwn-cfg-rotation" class="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white focus:border-fuchsia-500 focus:outline-none">
+                                        <option value="0">0°</option>
+                                        <option value="90">90°</option>
+                                        <option value="180">180°</option>
+                                        <option value="270">270°</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-400 mb-1">Display Type</label>
+                                    <select id="pwn-cfg-display-type" class="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white focus:border-fuchsia-500 focus:outline-none">
+                                        <option value="waveshare_4">Waveshare 2.13" v4</option>
+                                        <option value="waveshare_3">Waveshare 2.13" v3</option>
+                                        <option value="waveshare_2">Waveshare 2.13" v2</option>
+                                        <option value="waveshare_1">Waveshare 2.13" v1</option>
+                                        <option value="waveshare2in7">Waveshare 2.7"</option>
+                                        <option value="waveshare2in7_v2">Waveshare 2.7" V2</option>
+                                        <option value="waveshare2in7b">Waveshare 2.7" B</option>
+                                        <option value="waveshare2in7b_v2">Waveshare 2.7" B V2</option>
+                                        <option value="waveshare2in9">Waveshare 2.9"</option>
+                                        <option value="waveshare2in9_v2">Waveshare 2.9" V2</option>
+                                        <option value="waveshare3in7">Waveshare 3.7"</option>
+                                        <option value="waveshare1in54">Waveshare 1.54"</option>
+                                        <option value="waveshare1in54_v2">Waveshare 1.54" V2</option>
+                                        <option value="inky">Inky pHAT</option>
+                                        <option value="papirus">Papirus</option>
+                                        <option value="oledhat">OLED HAT</option>
+                                        <option value="lcdhat">LCD HAT</option>
+                                        <option value="dfrobot_2">DFRobot v2</option>
+                                        <option value="gc9a01">GC9A01 1.28" Round TFT (240x240)</option>
+                                        <option value="gc9a01">GC9A01 1.28" Round TFT (240x240)</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <!-- Web UI & Plugins -->
+                            <div class="space-y-3">
+                                <h5 class="text-sm font-semibold text-fuchsia-300 uppercase tracking-wide">Web UI</h5>
+                                <div>
+                                    <label class="block text-xs text-gray-400 mb-1">Username</label>
+                                    <input id="pwn-cfg-web-user" type="text" class="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white focus:border-fuchsia-500 focus:outline-none" placeholder="ragnar">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-400 mb-1">Password</label>
+                                    <input id="pwn-cfg-web-pass" type="password" class="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white focus:border-fuchsia-500 focus:outline-none" placeholder="ragnar">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-gray-400 mb-1">Port</label>
+                                    <input id="pwn-cfg-web-port" type="number" min="1024" max="65535" class="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white focus:border-fuchsia-500 focus:outline-none" placeholder="8080">
+                                </div>
+                                <h5 class="text-sm font-semibold text-fuchsia-300 uppercase tracking-wide pt-2">Plugins</h5>
+                                <div class="flex items-center justify-between">
+                                    <label class="text-xs text-gray-400">Auto-Tune</label>
+                                    <label class="relative inline-flex items-center cursor-pointer">
+                                        <input type="checkbox" id="pwn-cfg-auto-tune" class="sr-only peer">
+                                        <div class="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-fuchsia-600"></div>
+                                    </label>
+                                </div>
+                                <div class="flex items-center justify-between">
+                                    <label class="text-xs text-gray-400">Web Config (webcfg)</label>
+                                    <label class="relative inline-flex items-center cursor-pointer">
+                                        <input type="checkbox" id="pwn-cfg-webcfg" class="sr-only peer">
+                                        <div class="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-fuchsia-600"></div>
+                                    </label>
+                                </div>
+                                <div class="flex items-center justify-between">
+                                    <label class="text-xs text-gray-400">Mem/Temp Display</label>
+                                    <label class="relative inline-flex items-center cursor-pointer">
+                                        <input type="checkbox" id="pwn-cfg-memtemp" class="sr-only peer">
+                                        <div class="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-fuchsia-600"></div>
+                                    </label>
+                                </div>
+                                <div class="flex items-center justify-between">
+                                    <label class="text-xs text-gray-400">Grid Plugin</label>
+                                    <label class="relative inline-flex items-center cursor-pointer">
+                                        <input type="checkbox" id="pwn-cfg-grid" class="sr-only peer">
+                                        <div class="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-fuchsia-600"></div>
+                                    </label>
+                                </div>
+                                <div class="flex items-center justify-between">
+                                    <label class="text-xs text-gray-400">Fix Services</label>
+                                    <label class="relative inline-flex items-center cursor-pointer">
+                                        <input type="checkbox" id="pwn-cfg-fix-services" class="sr-only peer">
+                                        <div class="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-fuchsia-600"></div>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                     <div id="pwn-status-alert" class="hidden mt-4 p-4 rounded-lg border border-slate-700 bg-slate-900 text-sm text-gray-200">
                         Awaiting first status update...
                     </div>
@@ -3852,110 +3915,7 @@
                     </div>
                 </div>
                 
-                <!-- wpa-sec Section -->
-                <div id="wpasec-section" class="mb-8" style="display: none;">
-                    <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between mb-4">
-                        <div>
-                            <h3 class="text-xl font-semibold text-Ragnar-400">wpa-sec Integration</h3>
-                            <p class="text-sm text-gray-400 mt-1">Automatically import cracked WiFi passwords from <a href="https://wpa-sec.stanev.org" target="_blank" class="text-cyan-400 hover:underline">wpa-sec.stanev.org</a> into Ragnar's known networks list.</p>
-                        </div>
-                        <div class="flex items-center gap-3">
-                            <span id="wpasec-status-badge" class="text-xs font-semibold uppercase tracking-wide px-3 py-1 rounded-full bg-slate-700 text-slate-200">Disabled</span>
-                            <button onclick="pollWpaSecNow()" class="bg-cyan-700 hover:bg-cyan-600 text-white px-4 py-2 rounded-lg transition-colors text-sm">
-                                Poll Now
-                            </button>
-                        </div>
-                    </div>
-                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                        <!-- Config card -->
-                        <div class="glass rounded-lg p-4">
-                            <h4 class="font-medium text-lg mb-4">Configuration</h4>
-                            <div class="space-y-4">
-                                <div>
-                                    <label class="flex items-center space-x-3 cursor-pointer mb-1">
-                                        <input type="checkbox" id="wpasec-auto-connect" class="w-5 h-5 rounded border-gray-600 text-cyan-600 focus:ring-cyan-500 focus:ring-offset-gray-900">
-                                        <span class="text-sm font-medium">Enable (active polling)</span>
-                                    </label>
-                                    <p class="text-xs text-gray-500 ml-8">Start the background poller — polls wpa-sec on the interval below</p>
-                                </div>
-                                <div>
-                                    <label class="block text-sm text-gray-400 mb-1">API Key</label>
-                                    <input type="password" id="wpasec-api-key" placeholder="Your wpa-sec API key"
-                                           class="w-full px-4 py-2 rounded-lg bg-slate-700 border border-slate-600 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 text-sm font-mono">
-                                    <p class="text-xs text-gray-500 mt-1">Get your key from <a href="https://wpa-sec.stanev.org" target="_blank" class="text-cyan-400 hover:underline">wpa-sec.stanev.org</a> → account → API Key</p>
-                                </div>
-                                <div>
-                                    <label class="block text-sm text-gray-400 mb-1">Poll Interval (seconds)</label>
-                                    <input type="number" id="wpasec-poll-interval" min="300" max="86400" value="3600"
-                                           class="w-full px-4 py-2 rounded-lg bg-slate-700 border border-slate-600 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 text-sm">
-                                    <p class="text-xs text-gray-500 mt-1">Default: 3600 (1 hour). Minimum: 300 (5 min)</p>
-                                </div>
-                                <div>
-                                    <label class="block text-sm text-gray-400 mb-1">Network Priority</label>
-                                    <input type="number" id="wpasec-priority" min="1" max="10" value="5"
-                                           class="w-full px-4 py-2 rounded-lg bg-slate-700 border border-slate-600 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 text-sm">
-                                    <p class="text-xs text-gray-500 mt-1">Priority assigned to auto-added networks (1–10)</p>
-                                </div>
-                                <div>
-                                    <label class="flex items-center space-x-3 cursor-pointer">
-                                        <input type="checkbox" id="wpasec-auto-connect-toggle" class="w-5 h-5 rounded border-gray-600 text-cyan-600 focus:ring-cyan-500 focus:ring-offset-gray-900" checked>
-                                        <span class="text-sm font-medium">Auto-add to Known Networks</span>
-                                    </label>
-                                    <p class="text-xs text-gray-500 ml-8 mt-1">When a password is found, automatically add it so Ragnar can connect</p>
-                                </div>
-                                <button onclick="saveWpaSecConfig()" class="w-full bg-cyan-700 hover:bg-cyan-600 text-white py-2 px-4 rounded-lg transition-colors font-medium">
-                                    Save wpa-sec Settings
-                                </button>
-                            </div>
-                        </div>
-                        <!-- Status / last poll card -->
-                        <div class="glass rounded-lg p-4">
-                            <h4 class="font-medium text-lg mb-4">Status</h4>
-                            <div class="space-y-3 text-sm text-gray-300">
-                                <div class="flex justify-between">
-                                    <span class="text-gray-400">Poller Active</span>
-                                    <span id="wpasec-status-active" class="font-semibold text-slate-200">—</span>
-                                </div>
-                                <div class="flex justify-between">
-                                    <span class="text-gray-400">Last Poll Result</span>
-                                    <span id="wpasec-last-result" class="font-semibold text-slate-200">Never polled</span>
-                                </div>
-                                <div class="flex justify-between">
-                                    <span class="text-gray-400">Networks Added</span>
-                                    <span id="wpasec-networks-added" class="font-semibold text-cyan-400">—</span>
-                                </div>
-                            </div>
-                            <div class="mt-4 p-3 bg-slate-900/60 rounded-lg border border-slate-700 text-xs text-gray-400">
-                                <p class="font-medium text-gray-300 mb-1">How it works</p>
-                                <ol class="list-decimal list-inside space-y-1">
-                                    <li>Pwnagotchi (or manual upload) captures WPA handshakes and uploads them to wpa-sec</li>
-                                    <li>wpa-sec cracks the password</li>
-                                    <li>Ragnar polls the wpa-sec API and imports the cracked password</li>
-                                    <li>Next time Ragnar sees that network, it connects automatically</li>
-                                </ol>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Imported Networks List -->
-                    <div class="glass rounded-lg p-4 mt-4">
-                        <div class="flex items-center justify-between mb-3">
-                            <div>
-                                <h4 class="font-medium text-lg">Imported Networks</h4>
-                                <p class="text-xs text-gray-500 mt-0.5">Networks added to Ragnar's known list via wpa-sec</p>
-                            </div>
-                            <div class="flex items-center gap-2">
-                                <span id="wpasec-import-count" class="text-xs font-semibold px-2 py-1 rounded-full bg-cyan-900/40 text-cyan-300 border border-cyan-700/50">0 networks</span>
-                                <button onclick="loadWpaSecImported()" class="bg-slate-700 hover:bg-slate-600 text-white text-sm px-3 py-1.5 rounded-lg transition-colors">
-                                    Refresh
-                                </button>
-                            </div>
-                        </div>
-                        <div id="wpasec-imported-list" class="bg-slate-950/70 border border-slate-800 rounded-lg overflow-y-auto" style="max-height: 260px;">
-                            <p class="text-gray-500 text-sm p-4 text-center">No networks imported yet — click Poll Now to fetch from wpa-sec.</p>
-                        </div>
-                    </div>
-                </div>
+                <!-- AI Configuration Section -->
                 <div class="mb-8">
                     <h3 class="text-xl font-semibold mb-4 text-Ragnar-400">AI Integration</h3>
                     <div class="glass rounded-lg p-4">
@@ -4005,6 +3965,111 @@
                                     <p><strong class="text-gray-300">Cost:</strong> AI features consume OpenAI API credits based on usage. Monitor your usage at OpenAI's platform.</p>
                                 </div>
                             </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Pushover Notifications Section -->
+                <div class="mb-8">
+                    <h3 class="text-xl font-semibold mb-4 text-Ragnar-400">Pushover Notifications</h3>
+                    <div class="glass rounded-lg p-4">
+                        <div class="flex flex-col gap-4 sm:flex-row sm:items-start mb-4">
+                            <svg class="w-10 h-10 text-cyan-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path>
+                            </svg>
+                            <div class="flex-1">
+                                <h4 class="font-medium text-lg mb-2">Push Notifications</h4>
+                                <p class="text-sm text-gray-400 mb-4">
+                                    Get real-time push notifications on your phone via <a href="https://pushover.net/" target="_blank" class="text-cyan-400 hover:text-cyan-300 underline">Pushover</a> when Ragnar discovers new devices, vulnerabilities, or credentials.
+                                </p>
+                                <div class="space-y-3">
+                                    <!-- Enable toggle -->
+                                    <div>
+                                        <label class="flex items-center space-x-3 cursor-pointer">
+                                            <input type="checkbox" id="pushover-enabled-toggle" onchange="togglePushoverEnabled()" class="w-5 h-5 rounded border-gray-600 bg-gray-700 text-gray-600 focus:ring-0">
+                                            <span class="text-sm font-medium">Enable Pushover Notifications</span>
+                                        </label>
+                                        <p class="text-xs text-gray-500 ml-0 sm:ml-8 mt-1">Send push notifications to your phone when events occur</p>
+                                    </div>
+                                    <!-- User Key -->
+                                    <div>
+                                        <label for="pushover-user-key" class="block text-sm font-medium text-gray-300 mb-2">Pushover User Key</label>
+                                        <input type="password" id="pushover-user-key" placeholder="Your user key..."
+                                               class="w-full bg-slate-700 border border-slate-600 text-white py-2 px-3 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent">
+                                    </div>
+                                    <!-- API Token -->
+                                    <div>
+                                        <label for="pushover-api-token" class="block text-sm font-medium text-gray-300 mb-2">Pushover API Token / App Key</label>
+                                        <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+                                            <input type="password" id="pushover-api-token" placeholder="Your app token..."
+                                                   class="flex-1 w-full bg-slate-700 border border-slate-600 text-white py-2 px-3 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent">
+                                            <button onclick="savePushoverKeys()" class="bg-cyan-600 hover:bg-cyan-700 text-white px-4 py-2 rounded-lg transition-colors whitespace-nowrap w-full sm:w-auto">
+                                                Save Keys
+                                            </button>
+                                        </div>
+                                        <p class="text-xs text-gray-500 mt-1">
+                                            Get your keys from <a href="https://pushover.net/" target="_blank" class="text-cyan-400 hover:text-cyan-300 underline">pushover.net</a> — create an application to get the API Token.
+                                        </p>
+                                    </div>
+                                    <!-- Status -->
+                                    <div id="pushover-config-status" class="hidden p-3 rounded-lg text-sm">
+                                        <span id="pushover-config-status-message"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Notification triggers -->
+                        <div class="border-t border-slate-700 pt-4 mt-4">
+                            <h4 class="font-medium text-sm text-gray-300 mb-3">Notify me when:</h4>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <label class="flex items-center space-x-3 cursor-pointer">
+                                    <input type="checkbox" id="pushover-notify-new-device" onchange="savePushoverTriggers()" class="w-4 h-4 rounded border-gray-600 bg-gray-700 text-gray-600 focus:ring-0">
+                                    <div>
+                                        <span class="text-sm font-medium">New Device Discovered</span>
+                                        <p class="text-xs text-gray-500">A device appears on the network for the first time</p>
+                                    </div>
+                                </label>
+                                <label class="flex items-center space-x-3 cursor-pointer">
+                                    <input type="checkbox" id="pushover-notify-new-vuln" onchange="savePushoverTriggers()" class="w-4 h-4 rounded border-gray-600 bg-gray-700 text-gray-600 focus:ring-0">
+                                    <div>
+                                        <span class="text-sm font-medium">New Vulnerability Found</span>
+                                        <p class="text-xs text-gray-500">A new CVE or security issue is identified</p>
+                                    </div>
+                                </label>
+                                <label class="flex items-center space-x-3 cursor-pointer">
+                                    <input type="checkbox" id="pushover-notify-new-cred" onchange="savePushoverTriggers()" class="w-4 h-4 rounded border-gray-600 bg-gray-700 text-gray-600 focus:ring-0">
+                                    <div>
+                                        <span class="text-sm font-medium">New Credential Captured</span>
+                                        <p class="text-xs text-gray-500">A username/password is cracked or captured</p>
+                                    </div>
+                                </label>
+                                <label class="flex items-center space-x-3 cursor-pointer">
+                                    <input type="checkbox" id="pushover-notify-device-lost" onchange="savePushoverTriggers()" class="w-4 h-4 rounded border-gray-600 bg-gray-700 text-gray-600 focus:ring-0">
+                                    <div>
+                                        <span class="text-sm font-medium">Device Goes Offline</span>
+                                        <p class="text-xs text-gray-500">A previously seen device disappears from the network</p>
+                                    </div>
+                                </label>
+                                <label class="flex items-center space-x-3 cursor-pointer">
+                                    <input type="checkbox" id="pushover-notify-device-back-online" onchange="savePushoverTriggers()" class="w-4 h-4 rounded border-gray-600 bg-gray-700 text-gray-600 focus:ring-0">
+                                    <div>
+                                        <span class="text-sm font-medium">Device Back Online</span>
+                                        <p class="text-xs text-gray-500">A known device returns after going offline</p>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- Test button -->
+                        <div class="border-t border-slate-700 pt-4 mt-4 flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                            <button onclick="testPushover()" class="bg-cyan-700 hover:bg-cyan-600 text-white px-4 py-2 rounded-lg transition-colors flex items-center gap-2">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path>
+                                </svg>
+                                Send Test Notification
+                            </button>
+                            <span class="text-xs text-gray-500">Sends "Hello there Viking, are you ready for adventures?" to your device</span>
                         </div>
                     </div>
                 </div>
@@ -4203,7 +4268,7 @@
     </div>
 
     <!-- JavaScript -->
-    <script src="/web/scripts/ragnar_modern.js?v=20251127"></script>
+    <script src="/web/scripts/ragnar_modern.js?v=20260305"></script>
 
 </body>
 </html>
