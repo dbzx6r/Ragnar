@@ -1406,10 +1406,10 @@ class Display:
             draw.text((rx1, panel_y),      tgt_label1, font=font_side, fill=C_GRAY)
             draw.text((rx2, panel_y + 16), tgt_label2, font=font_side, fill=C_GREEN)
 
-            # Status text — auto-shrink to fit circle width
+            # Status text — same size as info line below (font_ssid / 14px)
             st = (status_text or "IDLE").upper()
             s_col = _status_col(wifi_on, ap_on, status_text)
-            f_st  = _status_font(st)
+            f_st  = font_ssid
             try:
                 sb = f_st.getbbox(st)
                 sx = (SIZE - (sb[2] - sb[0])) // 2
