@@ -30,7 +30,6 @@ import subprocess
 from init_shared import shared_data
 from display import Display, handle_exit_display
 from comment import Commentaireia
-from webapp_modern import run_server, handle_exit as handle_exit_web
 from orchestrator import Orchestrator
 from logger import Logger
 from wifi_manager import WiFiManager
@@ -109,7 +108,11 @@ class Ragnar:
             
             if not self.shared_data.manual_mode:
                 self.check_and_start_orchestrator()
-            time.sleep(10)  # Main loop idle waiting
+            # Sleep in 1-second chunks so should_exit is checked quickly
+            for _ in range(10):
+                if self.shared_data.should_exit:
+                    break
+                time.sleep(1)
         
         logger.info("Ragnar main loop exited")
 
@@ -134,13 +137,16 @@ class Ragnar:
 
     def start_orchestrator(self):
         """Start the orchestrator thread."""
+        # Always clear manual mode so the main loop will auto-start
+        # the orchestrator when Wi-Fi becomes available
+        self.shared_data.manual_mode = False
+        self.shared_data.orchestrator_should_exit = False
+
         # Use Wi-Fi manager's connection check
         if self.wifi_manager.check_wifi_connection():
             self.shared_data.wifi_connected = True
             if self.orchestrator_thread is None or not self.orchestrator_thread.is_alive():
                 logger.info("Starting Orchestrator thread...")
-                self.shared_data.orchestrator_should_exit = False
-                self.shared_data.manual_mode = False
                 self.orchestrator = Orchestrator()
                 self.orchestrator_thread = threading.Thread(target=self.orchestrator.run)
                 self.orchestrator_thread.start()
@@ -148,7 +154,7 @@ class Ragnar:
             else:
                 logger.info("Orchestrator thread is already running.")
         else:
-            logger.warning("Cannot start Orchestrator: Wi-Fi is not connected.")
+            logger.warning("Cannot start Orchestrator yet: Wi-Fi is not connected. Will auto-start when connected.")
 
     def stop_orchestrator(self):
         """Stop the orchestrator thread."""
@@ -157,7 +163,7 @@ class Ragnar:
         if self.orchestrator_thread is not None and self.orchestrator_thread.is_alive():
             logger.info("Stopping Orchestrator thread...")
             self.shared_data.orchestrator_should_exit = True
-            self.orchestrator_thread.join()
+            self.orchestrator_thread.join(timeout=3)
             logger.info("Orchestrator thread stopped.")
             self.shared_data.ragnarorch_status = "IDLE"
             self.shared_data.ragnarstatustext2 = ""
@@ -270,18 +276,42 @@ if __name__ == "__main__":
         logger.info("Loading shared data config...")
         shared_data.load_config()
 
+        # Always reset pwnagotchi_mode on Ragnar startup so Ragnar
+        # is the canonical mode after every boot / service restart.
+        shared_data.config['pwnagotchi_mode'] = 'ragnar'
+        shared_data.config['pwnagotchi_last_status'] = 'Ragnar service is running'
+        shared_data.save_config()
+
         # Clean up leftover pwnagotchi state (mon0, services)
+        # Run all cleanup commands in parallel to avoid sequential timeouts
         logger.info("Cleaning up leftover pwnagotchi state...")
-        try:
-            subprocess.run(['ip', 'link', 'set', 'mon0', 'down'], capture_output=True, timeout=5)
-            subprocess.run(['iw', 'mon0', 'del'], capture_output=True, timeout=5)
-        except Exception:
-            pass
-        try:
-            subprocess.run(['systemctl', 'stop', 'pwnagotchi'], capture_output=True, timeout=10)
-            subprocess.run(['systemctl', 'stop', 'bettercap'], capture_output=True, timeout=10)
-        except Exception:
-            pass
+        cleanup_cmds = [
+            (['ip', 'link', 'set', 'mon0', 'down'], 5),
+            (['iw', 'mon0', 'del'], 5),
+            (['systemctl', 'stop', 'pwnagotchi'], 10),
+            (['systemctl', 'stop', 'bettercap'], 10),
+            (['systemctl', 'stop', 'ragnar-swap-button'], 5),
+        ]
+        cleanup_procs = []
+        for cmd, _ in cleanup_cmds:
+            try:
+                cleanup_procs.append(
+                    (cmd, subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+                )
+            except Exception:
+                pass
+        # Wait for all with a single combined timeout (10s max instead of 30s sequential)
+        for cmd, proc in cleanup_procs:
+            try:
+                proc.wait(timeout=10)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+
+        # wipe_epd stays as ExecStartPre (separate process) to avoid GPIO conflicts
+        # with the Display's EPDHelper instance that shares the same pins.
 
         logger.info("Starting display thread...")
         shared_data.display_should_exit = False  # Initialize display should_exit
@@ -300,6 +330,7 @@ if __name__ == "__main__":
 
         if shared_data.config["websrv"]:
             logger.info("Starting the web server...")
+            from webapp_modern import run_server
             web_thread = threading.Thread(target=run_server)
             web_thread.start()
         else:

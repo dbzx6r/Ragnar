@@ -147,12 +147,12 @@ function displayCredentials(data) {
         const pwDisplay = r.password ? `<span class="font-mono">${escapeHtml(r.password)}</span>` : '<span class="text-gray-500 italic">none</span>';
         const safePw = r.password ? escapeHtml(r.password).replace(/'/g, '&#39;') : '';
         return `<tr class="border-b border-slate-800 hover:bg-slate-800 transition-colors">
-            <td class="py-3 px-4 font-mono text-sm">${escapeHtml(r.ip || '—')}</td>
-            <td class="py-3 px-4"><span class="px-2 py-0.5 rounded text-xs font-semibold uppercase ${badge}">${escapeHtml(r.service)}</span></td>
-            <td class="py-3 px-4 text-gray-400">${port}</td>
-            <td class="py-3 px-4 font-mono">${escapeHtml(r.username || '—')}</td>
-            <td class="py-3 px-4">${pwDisplay}</td>
-            <td class="py-3 px-4">
+            <td class="py-3 px-4 font-mono text-sm whitespace-nowrap">${escapeHtml(r.ip || '—')}</td>
+            <td class="py-3 px-4 whitespace-nowrap"><span class="px-2 py-0.5 rounded text-xs font-semibold uppercase ${badge}">${escapeHtml(r.service)}</span></td>
+            <td class="py-3 px-4 text-gray-400 whitespace-nowrap">${port}</td>
+            <td class="py-3 px-4 font-mono whitespace-nowrap">${escapeHtml(r.username || '—')}</td>
+            <td class="py-3 px-4 whitespace-nowrap">${pwDisplay}</td>
+            <td class="py-3 px-4 whitespace-nowrap">
                 ${r.password ? `<button onclick="copyCredToClipboard('${safePw}')" class="text-xs text-blue-400 hover:text-blue-300 px-2 py-1 rounded hover:bg-slate-700 transition-colors" title="Copy password">Copy</button>` : ''}
             </td>
         </tr>`;
@@ -524,15 +524,6 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeThreatIntelFilters();
     initializePwnUI();
     initializePwnagotchiVisibility();
-    initializeWpaSecVisibility();
-    initializeIpCamToggle();
-    initializeRouterScannerToggle();
-    initializeMQTTScannerToggle();
-    initializeSNMPScannerToggle();
-    initializeTsharkToggle();
-    initializeNgrepToggle();
-    initializeNucleiToggle();
-    initializeAggressiveMode();
     handleHeadlessMode();
 
 });
@@ -821,12 +812,6 @@ function setupAutoRefresh() {
             loadDashboardData();
         }
     }, 20000); // Every 20 seconds when on dashboard (reduced from 15s)
-
-    // Activity feed — refresh every 10s when on dashboard
-    autoRefreshIntervals.activityFeed = setInterval(() => {
-        if (currentTab === 'dashboard') loadActivityFeed();
-    }, 10000);
-    loadActivityFeed(); // Load immediately on page open
     
     // Set up periodic update checking
     autoRefreshIntervals.updates = setInterval(() => {
@@ -1101,11 +1086,11 @@ async function loadTabData(tabName) {
         case 'adv-vuln':
             loadAdvancedVulnData(); // Non-blocking - tab shows immediately, data fills in
             break;
+        case 'network-map':
+            if (!_mapInitialized) { loadNetworkMap(); }
+            break;
         case 'credentials':
             loadCredentials();
-            break;
-        case 'network-map':
-            if (!_mapInitialized) { _mapInitialized = true; loadNetworkMap(); }
             break;
     }
 }
@@ -1136,7 +1121,14 @@ async function loadDashboardData() {
         if (data) {
             // Update status block immediately
             updateDashboardStatus(data);
-            await refreshDashboardStatsForCurrentSelection({ forceRefresh: true, fallbackData: data });
+            // Only fetch network-specific stats if a specific network is selected;
+            // otherwise /api/dashboard/quick already has the correct data (instant).
+            const { network } = getSelectedDashboardNetworkKey();
+            if (network) {
+                await refreshDashboardStatsForCurrentSelection({ forceRefresh: true, fallbackData: data });
+            } else {
+                updateDashboardStats(data);
+            }
         }
         
         // Load AI insights if configured
@@ -2791,6 +2783,9 @@ async function loadLootData() {
 
 // Attack Logs Functions
 let currentAttackFilter = 'all';
+let currentAttackGroupBy = 'ip';
+let currentAttackNetworkFilter = 'all';
+let currentAttackIPSearch = '';
 let attackLogsCache = null;
 let attackLogsETag = null;
 let attackLogsInFlight = null;
@@ -2882,6 +2877,116 @@ async function refreshAttackLogs() {
     await loadAttackLogs({ force: true });
 }
 
+function setAttackGroupBy(groupBy) {
+    currentAttackGroupBy = groupBy;
+    document.querySelectorAll('.attack-groupby-btn').forEach(btn => {
+        const isActive = btn.getAttribute('data-groupby') === groupBy;
+        btn.classList.toggle('bg-Ragnar-600', isActive);
+        btn.classList.toggle('text-white', isActive);
+        btn.classList.toggle('text-gray-400', !isActive);
+        btn.classList.toggle('hover:text-white', !isActive);
+    });
+    if (attackLogsCache) displayAttackLogs(attackLogsCache);
+}
+
+function filterAttackByNetwork(network) {
+    currentAttackNetworkFilter = network;
+    if (attackLogsCache) displayAttackLogs(attackLogsCache);
+}
+
+function onAttackIPSearch(value) {
+    currentAttackIPSearch = value.trim().toLowerCase();
+    if (attackLogsCache) displayAttackLogs(attackLogsCache);
+}
+
+function _updateAttackNetworkDropdown(networks) {
+    const select = document.getElementById('attack-network-filter');
+    if (!select) return;
+    const current = select.value;
+    // Rebuild options preserving selection
+    select.innerHTML = '<option value="all">All Networks</option>';
+    (networks || []).forEach(n => {
+        const opt = document.createElement('option');
+        opt.value = n;
+        opt.textContent = n === 'unknown' ? 'Unknown Network' : n;
+        if (n === current) opt.selected = true;
+        select.appendChild(opt);
+    });
+}
+
+function _buildAttackHostBlock(ip, hostLogs) {
+    const successCount = hostLogs.filter(l => l.status === 'success').length;
+    const failedCount  = hostLogs.filter(l => l.status === 'failed').length;
+    const timeoutCount = hostLogs.filter(l => l.status === 'timeout').length;
+    const safeId = ip.replace(/[^a-zA-Z0-9]/g, '-');
+
+    let html = `
+        <div class="bg-slate-800 bg-opacity-50 rounded-lg border border-slate-700 overflow-hidden">
+            <div class="px-4 py-3 bg-slate-900 bg-opacity-50 flex items-center justify-between cursor-pointer hover:bg-opacity-70 transition-colors" onclick="toggleAttackHost('${safeId}')">
+                <div class="flex items-center space-x-3">
+                    <svg class="w-5 h-5 text-Ragnar-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path>
+                    </svg>
+                    <span class="font-semibold text-lg">${ip}</span>
+                    <span class="text-sm text-gray-400">(${hostLogs.length} attacks)</span>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <span class="text-sm text-green-400">✓ ${successCount}</span>
+                    <span class="text-sm text-red-400">✗ ${failedCount}</span>
+                    <span class="text-sm text-yellow-400">⏱ ${timeoutCount}</span>
+                    <svg id="attack-chevron-${safeId}" class="w-5 h-5 text-gray-400 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                    </svg>
+                </div>
+            </div>
+            <div id="attack-host-${safeId}" class="hidden px-4 py-3 space-y-2">
+    `;
+
+    hostLogs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    hostLogs.forEach(log => {
+        const statusColors = {
+            'success': 'bg-green-900 bg-opacity-30 border-green-500',
+            'failed':  'bg-red-900 bg-opacity-30 border-red-500',
+            'timeout': 'bg-yellow-900 bg-opacity-30 border-yellow-500'
+        };
+        const statusIcons      = { 'success': '✓', 'failed': '✗', 'timeout': '⏱' };
+        const statusTextColors = { 'success': 'text-green-400', 'failed': 'text-red-400', 'timeout': 'text-yellow-400' };
+
+        const colorClass = statusColors[log.status]     || 'bg-gray-900 bg-opacity-30 border-gray-500';
+        const icon       = statusIcons[log.status]      || '•';
+        const textColor  = statusTextColors[log.status] || 'text-gray-400';
+
+        html += `
+            <div class="border-l-4 ${colorClass} p-3 rounded-r-lg">
+                <div class="flex items-start justify-between">
+                    <div class="flex-1">
+                        <div class="flex items-center space-x-2 mb-1">
+                            <span class="font-semibold ${textColor}">${icon} ${log.attack_type}</span>
+                            ${log.target_port ? `<span class="text-xs text-gray-400">Port ${log.target_port}</span>` : ''}
+                            <span class="text-xs text-gray-500">${log.timestamp}</span>
+                        </div>
+                        ${log.message ? `<p class="text-sm text-gray-300 mb-2">${escapeHtml(log.message)}</p>` : ''}
+                        ${Object.keys(log.details || {}).length > 0 ? `
+                            <div class="text-xs space-y-1 mt-2">
+                                ${Object.entries(log.details).map(([key, value]) => `
+                                    <div class="flex items-center space-x-2">
+                                        <span class="text-gray-500">${key}:</span>
+                                        <span class="text-gray-300 font-mono">${escapeHtml(String(value))}</span>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+
+    html += `</div></div>`;
+    return html;
+}
+
 function displayAttackLogs(data) {
     if (!data || !data.attack_logs) {
         document.getElementById('attack-logs-container').innerHTML = `
@@ -2894,149 +2999,117 @@ function displayAttackLogs(data) {
         `;
         return;
     }
-    
+
     // Update statistics
     document.getElementById('attack-stat-total').textContent = data.total_count || 0;
     document.getElementById('attack-stat-success').textContent = data.success_count || 0;
     document.getElementById('attack-stat-failed').textContent = data.failed_count || 0;
-    
-    // Calculate timeout count
     const timeoutCount = data.attack_logs.filter(log => log.status === 'timeout').length;
     document.getElementById('attack-stat-timeout').textContent = timeoutCount;
-    
-    // Filter logs based on current filter
+
+    // Populate network dropdown from available_networks returned by the API
+    _updateAttackNetworkDropdown(data.available_networks || []);
+
+    // Apply status filter
     let logs = data.attack_logs;
     if (currentAttackFilter !== 'all') {
         logs = logs.filter(log => log.status === currentAttackFilter);
     }
-    
+
+    // Apply network filter
+    if (currentAttackNetworkFilter !== 'all') {
+        logs = logs.filter(log => (log.network_ssid || 'unknown') === currentAttackNetworkFilter);
+    }
+
+    // Apply IP search filter
+    if (currentAttackIPSearch) {
+        logs = logs.filter(log => (log.target_ip || '').toLowerCase().includes(currentAttackIPSearch));
+    }
+
     if (logs.length === 0) {
         document.getElementById('attack-logs-container').innerHTML = `
             <div class="text-center text-gray-400 py-8">
                 <svg class="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
                 </svg>
-                <p>No ${currentAttackFilter === 'all' ? '' : currentAttackFilter} attacks found</p>
+                <p>No attacks match the current filters</p>
             </div>
         `;
         return;
     }
-    
-    // Group logs by IP address
-    const logsByIP = {};
-    logs.forEach(log => {
-        const ip = log.target_ip || 'Unknown';
-        if (!logsByIP[ip]) {
-            logsByIP[ip] = [];
-        }
-        logsByIP[ip].push(log);
-    });
-    
-    // Sort IPs
-    const sortedIPs = Object.keys(logsByIP).sort();
-    
-    // Build HTML
+
     let html = '<div class="space-y-4">';
-    
-    sortedIPs.forEach(ip => {
-        const hostLogs = logsByIP[ip];
-        const successCount = hostLogs.filter(l => l.status === 'success').length;
-        const failedCount = hostLogs.filter(l => l.status === 'failed').length;
-        const timeoutCount = hostLogs.filter(l => l.status === 'timeout').length;
-        
-        html += `
-            <div class="bg-slate-800 bg-opacity-50 rounded-lg border border-slate-700 overflow-hidden">
-                <div class="px-4 py-3 bg-slate-900 bg-opacity-50 flex items-center justify-between cursor-pointer hover:bg-opacity-70 transition-colors" onclick="toggleAttackHost('${ip}')">
-                    <div class="flex items-center space-x-3">
-                        <svg class="w-5 h-5 text-Ragnar-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path>
-                        </svg>
-                        <span class="font-semibold text-lg">${ip}</span>
-                        <span class="text-sm text-gray-400">(${hostLogs.length} attacks)</span>
-                    </div>
-                    <div class="flex items-center space-x-4">
-                        <span class="text-sm text-green-400">✓ ${successCount}</span>
-                        <span class="text-sm text-red-400">✗ ${failedCount}</span>
-                        <span class="text-sm text-yellow-400">⏱ ${timeoutCount}</span>
-                        <svg id="attack-chevron-${ip.replace(/\./g, '-')}" class="w-5 h-5 text-gray-400 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                        </svg>
-                    </div>
-                </div>
-                <div id="attack-host-${ip.replace(/\./g, '-')}" class="hidden px-4 py-3 space-y-2">
-        `;
-        
-        // Sort logs by timestamp (most recent first)
-        hostLogs.sort((a, b) => {
-            return new Date(b.timestamp) - new Date(a.timestamp);
+
+    if (currentAttackGroupBy === 'network') {
+        // --- Group by Network (SSID), then sub-group by IP ---
+        const logsByNetwork = {};
+        logs.forEach(log => {
+            const net = log.network_ssid || 'unknown';
+            if (!logsByNetwork[net]) logsByNetwork[net] = {};
+            const ip = log.target_ip || 'Unknown';
+            if (!logsByNetwork[net][ip]) logsByNetwork[net][ip] = [];
+            logsByNetwork[net][ip].push(log);
         });
-        
-        hostLogs.forEach(log => {
-            const statusColors = {
-                'success': 'bg-green-900 bg-opacity-30 border-green-500',
-                'failed': 'bg-red-900 bg-opacity-30 border-red-500',
-                'timeout': 'bg-yellow-900 bg-opacity-30 border-yellow-500'
-            };
-            
-            const statusIcons = {
-                'success': '✓',
-                'failed': '✗',
-                'timeout': '⏱'
-            };
-            
-            const statusTextColors = {
-                'success': 'text-green-400',
-                'failed': 'text-red-400',
-                'timeout': 'text-yellow-400'
-            };
-            
-            const colorClass = statusColors[log.status] || 'bg-gray-900 bg-opacity-30 border-gray-500';
-            const icon = statusIcons[log.status] || '•';
-            const textColor = statusTextColors[log.status] || 'text-gray-400';
-            
+
+        Object.keys(logsByNetwork).sort().forEach(net => {
+            const netId = net.replace(/[^a-zA-Z0-9]/g, '-');
+            const netLogs = Object.values(logsByNetwork[net]).flat();
+            const netSuccess = netLogs.filter(l => l.status === 'success').length;
+            const netFailed  = netLogs.filter(l => l.status === 'failed').length;
+            const netTimeout = netLogs.filter(l => l.status === 'timeout').length;
+            const ipCount = Object.keys(logsByNetwork[net]).length;
+
             html += `
-                <div class="border-l-4 ${colorClass} p-3 rounded-r-lg">
-                    <div class="flex items-start justify-between">
-                        <div class="flex-1">
-                            <div class="flex items-center space-x-2 mb-1">
-                                <span class="font-semibold ${textColor}">${icon} ${log.attack_type}</span>
-                                ${log.target_port ? `<span class="text-xs text-gray-400">Port ${log.target_port}</span>` : ''}
-                                <span class="text-xs text-gray-500">${log.timestamp}</span>
-                            </div>
-                            ${log.message ? `<p class="text-sm text-gray-300 mb-2">${escapeHtml(log.message)}</p>` : ''}
-                            ${Object.keys(log.details || {}).length > 0 ? `
-                                <div class="text-xs space-y-1 mt-2">
-                                    ${Object.entries(log.details).map(([key, value]) => `
-                                        <div class="flex items-center space-x-2">
-                                            <span class="text-gray-500">${key}:</span>
-                                            <span class="text-gray-300 font-mono">${escapeHtml(String(value))}</span>
-                                        </div>
-                                    `).join('')}
-                                </div>
-                            ` : ''}
+                <div class="bg-slate-900 bg-opacity-60 rounded-xl border border-slate-600 overflow-hidden">
+                    <div class="px-4 py-3 bg-slate-900 flex items-center justify-between cursor-pointer hover:bg-slate-800 transition-colors" onclick="toggleAttackHost('net-${netId}')">
+                        <div class="flex items-center space-x-3">
+                            <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"></path>
+                            </svg>
+                            <span class="font-bold text-blue-300">${escapeHtml(net === 'unknown' ? 'Unknown Network' : net)}</span>
+                            <span class="text-sm text-gray-400">${ipCount} host${ipCount !== 1 ? 's' : ''} · ${netLogs.length} attack${netLogs.length !== 1 ? 's' : ''}</span>
+                        </div>
+                        <div class="flex items-center space-x-4">
+                            <span class="text-sm text-green-400">✓ ${netSuccess}</span>
+                            <span class="text-sm text-red-400">✗ ${netFailed}</span>
+                            <span class="text-sm text-yellow-400">⏱ ${netTimeout}</span>
+                            <svg id="attack-chevron-net-${netId}" class="w-5 h-5 text-gray-400 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                            </svg>
                         </div>
                     </div>
-                </div>
+                    <div id="attack-host-net-${netId}" class="hidden px-4 py-3 space-y-3">
             `;
+
+            Object.keys(logsByNetwork[net]).sort().forEach(ip => {
+                html += _buildAttackHostBlock(ip, logsByNetwork[net][ip]);
+            });
+
+            html += `</div></div>`;
         });
-        
-        html += `
-                </div>
-            </div>
-        `;
-    });
-    
+
+    } else {
+        // --- Default: Group by IP ---
+        const logsByIP = {};
+        logs.forEach(log => {
+            const ip = log.target_ip || 'Unknown';
+            if (!logsByIP[ip]) logsByIP[ip] = [];
+            logsByIP[ip].push(log);
+        });
+
+        Object.keys(logsByIP).sort().forEach(ip => {
+            html += _buildAttackHostBlock(ip, logsByIP[ip]);
+        });
+    }
+
     html += '</div>';
-    
     document.getElementById('attack-logs-container').innerHTML = html;
 }
 
-function toggleAttackHost(ip) {
-    const containerId = `attack-host-${ip.replace(/\./g, '-')}`;
-    const chevronId = `attack-chevron-${ip.replace(/\./g, '-')}`;
-    const container = document.getElementById(containerId);
-    const chevron = document.getElementById(chevronId);
-    
+function toggleAttackHost(safeId) {
+    const container = document.getElementById(`attack-host-${safeId}`);
+    const chevron   = document.getElementById(`attack-chevron-${safeId}`);
+    if (!container || !chevron) return;
     if (container.classList.contains('hidden')) {
         container.classList.remove('hidden');
         chevron.classList.add('rotate-180');
@@ -3261,6 +3334,9 @@ async function loadConfigData() {
 
         // Load AI configuration
         loadAIConfiguration(config);
+
+        // Load Pushover configuration
+        loadPushoverConfiguration(config);
 
         // Load hardware profiles
         await loadHardwareProfiles();
@@ -3671,6 +3747,16 @@ function initializePwnUI() {
     updatePwnButtons();
     resetPwnLogState();
     refreshPwnagotchiStatus({ silent: true });
+
+    // Pwnagotchi config card buttons
+    const cfgReloadBtn = document.getElementById('pwn-config-reload-btn');
+    if (cfgReloadBtn) {
+        cfgReloadBtn.addEventListener('click', () => loadPwnConfig());
+    }
+    const cfgSaveBtn = document.getElementById('pwn-config-save-btn');
+    if (cfgSaveBtn) {
+        cfgSaveBtn.addEventListener('click', () => savePwnConfig());
+    }
 }
 
 async function refreshPwnagotchiStatus(options = {}) {
@@ -3779,6 +3865,16 @@ function updatePwnButtons() {
     if (swapCard) {
         swapCard.style.display = pwnStatus.installed ? '' : 'none';
     }
+    // Show config card only when installed
+    const configCard = document.getElementById('pwn-config-card');
+    if (configCard) {
+        const wasHidden = configCard.style.display === 'none';
+        configCard.style.display = pwnStatus.installed ? '' : 'none';
+        if (wasHidden && pwnStatus.installed && !configCard._loaded) {
+            configCard._loaded = true;
+            loadPwnConfig();
+        }
+    }
 
     const installBtn = document.getElementById('pwn-install-btn');
     if (installBtn) {
@@ -3862,6 +3958,115 @@ function updatePwnButtons() {
             hint = 'Switch scheduled. Wait for the service hand-off to complete.';
         }
         swapHint.textContent = hint;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Pwnagotchi TOML Config — Load / Save
+// ---------------------------------------------------------------------------
+
+async function loadPwnConfig() {
+    const alert = document.getElementById('pwn-config-alert');
+    try {
+        const response = await fetchAPI('/api/pwnagotchi/config');
+        if (!response || !response.success) {
+            _showPwnConfigAlert(alert, response?.error || 'Failed to load config', 'error');
+            return;
+        }
+        const cfg = response.config;
+        _setPwnCfgValue('pwn-cfg-name', cfg['main.name']);
+        _setPwnCfgValue('pwn-cfg-whitelist', cfg['main.whitelist']);
+        _setPwnCfgChecked('pwn-cfg-deauth', cfg['personality.deauth']);
+        _setPwnCfgChecked('pwn-cfg-associate', cfg['personality.associate']);
+        _setPwnCfgChecked('pwn-cfg-advertise', cfg['personality.advertise']);
+        _setPwnCfgValue('pwn-cfg-min-rssi', String(cfg['personality.min_rssi']));
+        _setPwnCfgValue('pwn-cfg-channels', cfg['personality.channels']);
+        _setPwnCfgChecked('pwn-cfg-display-enabled', cfg['ui.display.enabled']);
+        _setPwnCfgChecked('pwn-cfg-invert', cfg['ui.invert']);
+        _setPwnCfgValue('pwn-cfg-rotation', String(cfg['ui.display.rotation']));
+        _setPwnCfgValue('pwn-cfg-display-type', cfg['ui.display.type']);
+        _setPwnCfgValue('pwn-cfg-web-user', cfg['ui.web.username']);
+        _setPwnCfgValue('pwn-cfg-web-pass', cfg['ui.web.password']);
+        _setPwnCfgValue('pwn-cfg-web-port', String(cfg['ui.web.port']));
+        _setPwnCfgChecked('pwn-cfg-auto-tune', cfg['main.plugins.auto-tune.enabled']);
+        _setPwnCfgChecked('pwn-cfg-webcfg', cfg['main.plugins.webcfg.enabled']);
+        _setPwnCfgChecked('pwn-cfg-memtemp', cfg['main.plugins.memtemp.enabled']);
+        _setPwnCfgChecked('pwn-cfg-grid', cfg['main.plugins.grid.enabled']);
+        _setPwnCfgChecked('pwn-cfg-fix-services', cfg['main.plugins.fix_services.enabled']);
+        _showPwnConfigAlert(alert, 'Configuration loaded', 'success');
+        setTimeout(() => { if (alert) alert.classList.add('hidden'); }, 2000);
+    } catch (error) {
+        console.error('Error loading Pwnagotchi config:', error);
+        _showPwnConfigAlert(alert, `Load failed: ${error.message}`, 'error');
+    }
+}
+
+async function savePwnConfig() {
+    const alert = document.getElementById('pwn-config-alert');
+    const saveBtn = document.getElementById('pwn-config-save-btn');
+    try {
+        if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving...'; }
+
+        const config = {
+            'main.name': document.getElementById('pwn-cfg-name')?.value || 'pwnagotchi',
+            'main.whitelist': document.getElementById('pwn-cfg-whitelist')?.value || '',
+            'personality.deauth': document.getElementById('pwn-cfg-deauth')?.checked || false,
+            'personality.associate': document.getElementById('pwn-cfg-associate')?.checked || false,
+            'personality.advertise': document.getElementById('pwn-cfg-advertise')?.checked || false,
+            'personality.min_rssi': parseInt(document.getElementById('pwn-cfg-min-rssi')?.value || '-200', 10),
+            'personality.channels': document.getElementById('pwn-cfg-channels')?.value || '',
+            'ui.display.enabled': document.getElementById('pwn-cfg-display-enabled')?.checked || false,
+            'ui.invert': document.getElementById('pwn-cfg-invert')?.checked || false,
+            'ui.display.rotation': parseInt(document.getElementById('pwn-cfg-rotation')?.value || '180', 10),
+            'ui.display.type': document.getElementById('pwn-cfg-display-type')?.value || 'waveshare_4',
+            'ui.web.username': document.getElementById('pwn-cfg-web-user')?.value || 'ragnar',
+            'ui.web.password': document.getElementById('pwn-cfg-web-pass')?.value || 'ragnar',
+            'ui.web.port': parseInt(document.getElementById('pwn-cfg-web-port')?.value || '8080', 10),
+            'main.plugins.auto-tune.enabled': document.getElementById('pwn-cfg-auto-tune')?.checked || false,
+            'main.plugins.webcfg.enabled': document.getElementById('pwn-cfg-webcfg')?.checked || false,
+            'main.plugins.memtemp.enabled': document.getElementById('pwn-cfg-memtemp')?.checked || false,
+            'main.plugins.grid.enabled': document.getElementById('pwn-cfg-grid')?.checked || false,
+            'main.plugins.fix_services.enabled': document.getElementById('pwn-cfg-fix-services')?.checked || false,
+        };
+
+        const response = await fetchAPI('/api/pwnagotchi/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ config })
+        });
+
+        if (response && response.success) {
+            _showPwnConfigAlert(alert, `Saved ${response.updated?.length || 0} setting(s). Changes apply on next Pwnagotchi start.`, 'success');
+            addConsoleMessage('Pwnagotchi config saved', 'info');
+        } else {
+            _showPwnConfigAlert(alert, response?.error || 'Save failed', 'error');
+        }
+    } catch (error) {
+        console.error('Error saving Pwnagotchi config:', error);
+        _showPwnConfigAlert(alert, `Save failed: ${error.message}`, 'error');
+    } finally {
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save Changes'; }
+    }
+}
+
+function _setPwnCfgValue(id, val) {
+    const el = document.getElementById(id);
+    if (el) el.value = val ?? '';
+}
+
+function _setPwnCfgChecked(id, val) {
+    const el = document.getElementById(id);
+    if (el) el.checked = Boolean(val);
+}
+
+function _showPwnConfigAlert(el, msg, type) {
+    if (!el) return;
+    el.classList.remove('hidden');
+    el.textContent = msg;
+    if (type === 'success') {
+        el.className = 'mb-4 p-3 rounded-lg text-sm bg-green-900/40 text-green-300 border border-green-700';
+    } else {
+        el.className = 'mb-4 p-3 rounded-lg text-sm bg-red-900/40 text-red-300 border border-red-700';
     }
 }
 
@@ -4530,370 +4735,6 @@ function togglePwnagotchiVisibility() {
     const isEnabled = checkbox.checked;
     localStorage.setItem('pwnagotchi-enabled', isEnabled ? 'true' : 'false');
     applyPwnVisibilityPreference(isEnabled);
-}
-
-// ── Live Activity Feed ────────────────────────────────────────────────────────
-
-const ACTIVITY_ICONS = {
-    wpasec:  { svg: `<svg class="w-4 h-4 text-cyan-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"></path></svg>` },
-    ipcam:   { svg: `<svg class="w-4 h-4 text-purple-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.069A1 1 0 0121 8.878v6.244a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"></path></svg>` },
-    creds:   { svg: `<svg class="w-4 h-4 text-yellow-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path></svg>` },
-    vuln:    { svg: `<svg class="w-4 h-4 text-red-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"></path></svg>` },
-    web:     { svg: `<svg class="w-4 h-4 text-green-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"></path></svg>` },
-    default: { svg: `<svg class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>` },
-};
-
-async function loadActivityFeed() {
-    const listEl = document.getElementById('activity-feed-list');
-    const countEl = document.getElementById('activity-feed-count');
-    if (!listEl) return;
-    try {
-        const data = await fetchAPI('/api/activity/feed?limit=20');
-        const events = (data && data.events) ? data.events : [];
-        if (countEl) countEl.textContent = events.length ? `${events.length} recent events` : '';
-        if (events.length === 0) {
-            listEl.innerHTML = '<p class="text-gray-500 text-sm text-center py-6">No activity yet — events will appear here as Ragnar works.</p>';
-            return;
-        }
-        const rows = events.map(e => {
-            const iconDef = ACTIVITY_ICONS[e.type] || ACTIVITY_ICONS.default;
-            const time = e.ts ? new Date(e.ts).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
-            const detail = e.detail ? `<p class="text-xs text-gray-500 mt-0.5">${escapeHtml(e.detail)}</p>` : '';
-            return `<div class="flex items-start gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-800/50 transition-colors">
-                ${iconDef.svg}
-                <div class="min-w-0 flex-1">
-                    <p class="text-sm text-white">${escapeHtml(e.message)}</p>
-                    ${detail}
-                </div>
-                <span class="text-xs text-gray-600 flex-shrink-0 ml-2">${time}</span>
-            </div>`;
-        }).join('');
-        listEl.innerHTML = rows;
-    } catch (err) {
-        // Silent fail — don't disrupt dashboard if feed errors
-    }
-}
-
-// ── IP Camera Scanner ─────────────────────────────────────────────────────────
-
-function toggleIpCamEnabled() {
-    const checkbox = document.getElementById('ipcam-enabled');
-    if (!checkbox) return;
-    postAPI('/api/config', { ipcam_enabled: checkbox.checked }).then(() => {
-        showNotification(
-            checkbox.checked ? 'IP Camera Scanner enabled' : 'IP Camera Scanner disabled',
-            checkbox.checked ? 'success' : 'info'
-        );
-    }).catch(() => showNotification('Failed to update IP Camera Scanner setting', 'error'));
-}
-
-function initializeIpCamToggle() {
-    fetchAPI('/api/config').then(data => {
-        if (!data) return;
-        const checkbox = document.getElementById('ipcam-enabled');
-        if (checkbox) checkbox.checked = data.ipcam_enabled !== false;
-    }).catch(() => {});
-}
-
-// ── Router Scanner ────────────────────────────────────────────────────────────
-
-function toggleRouterScannerEnabled() {
-    const checkbox = document.getElementById('router-scanner-enabled');
-    if (!checkbox) return;
-    postAPI('/api/config', { router_scanner_enabled: checkbox.checked }).then(() => {
-        showNotification(
-            checkbox.checked ? 'Router Admin Scanner enabled' : 'Router Admin Scanner disabled',
-            checkbox.checked ? 'success' : 'info'
-        );
-    }).catch(() => showNotification('Failed to update Router Admin Scanner setting', 'error'));
-}
-
-function initializeRouterScannerToggle() {
-    fetchAPI('/api/config').then(data => {
-        if (!data) return;
-        const checkbox = document.getElementById('router-scanner-enabled');
-        if (checkbox) checkbox.checked = data.router_scanner_enabled !== false;
-    }).catch(() => {});
-}
-
-// ── MQTT Scanner ──────────────────────────────────────────────────────────────
-
-function toggleMQTTScannerEnabled() {
-    const checkbox = document.getElementById('mqtt-scanner-enabled');
-    if (!checkbox) return;
-    postAPI('/api/config', { mqtt_scanner_enabled: checkbox.checked }).then(() => {
-        showNotification(
-            checkbox.checked ? 'MQTT Subscriber enabled' : 'MQTT Subscriber disabled',
-            checkbox.checked ? 'success' : 'info'
-        );
-    }).catch(() => showNotification('Failed to update MQTT Subscriber setting', 'error'));
-}
-
-function initializeMQTTScannerToggle() {
-    fetchAPI('/api/config').then(data => {
-        if (!data) return;
-        const checkbox = document.getElementById('mqtt-scanner-enabled');
-        if (checkbox) checkbox.checked = data.mqtt_scanner_enabled !== false;
-    }).catch(() => {});
-}
-
-// ── SNMP Scanner ──────────────────────────────────────────────────────────────
-
-function toggleSNMPScannerEnabled() {
-    const checkbox = document.getElementById('snmp-scanner-enabled');
-    if (!checkbox) return;
-    postAPI('/api/config', { snmp_scanner_enabled: checkbox.checked }).then(() => {
-        showNotification(
-            checkbox.checked ? 'SNMP Scanner enabled' : 'SNMP Scanner disabled',
-            checkbox.checked ? 'success' : 'info'
-        );
-    }).catch(() => showNotification('Failed to update SNMP Scanner setting', 'error'));
-}
-
-function initializeSNMPScannerToggle() {
-    fetchAPI('/api/config').then(data => {
-        if (!data) return;
-        const checkbox = document.getElementById('snmp-scanner-enabled');
-        if (checkbox) checkbox.checked = data.snmp_scanner_enabled !== false;
-    }).catch(() => {});
-}
-
-// ── tshark Capture ────────────────────────────────────────────────────────────
-
-function toggleTsharkEnabled() {
-    const checkbox = document.getElementById('tshark-enabled');
-    if (!checkbox) return;
-    postAPI('/api/config', { tshark_enabled: checkbox.checked }).then(() => {
-        showNotification(
-            checkbox.checked ? 'tshark Capture enabled' : 'tshark Capture disabled',
-            checkbox.checked ? 'success' : 'info'
-        );
-    }).catch(() => showNotification('Failed to update tshark setting', 'error'));
-}
-
-function initializeTsharkToggle() {
-    fetchAPI('/api/config').then(data => {
-        if (!data) return;
-        const checkbox = document.getElementById('tshark-enabled');
-        if (checkbox) checkbox.checked = data.tshark_enabled === true;
-    }).catch(() => {});
-}
-
-// ── ngrep Traffic Search ──────────────────────────────────────────────────────
-
-function toggleNgrepEnabled() {
-    const checkbox = document.getElementById('ngrep-enabled');
-    if (!checkbox) return;
-    postAPI('/api/config', { ngrep_enabled: checkbox.checked }).then(() => {
-        showNotification(
-            checkbox.checked ? 'ngrep Traffic Search enabled' : 'ngrep Traffic Search disabled',
-            checkbox.checked ? 'success' : 'info'
-        );
-    }).catch(() => showNotification('Failed to update ngrep setting', 'error'));
-}
-
-function initializeNgrepToggle() {
-    fetchAPI('/api/config').then(data => {
-        if (!data) return;
-        const checkbox = document.getElementById('ngrep-enabled');
-        if (checkbox) checkbox.checked = data.ngrep_enabled === true;
-    }).catch(() => {});
-}
-
-// ── Nuclei Scanner ────────────────────────────────────────────────────────────
-
-function toggleNucleiEnabled() {
-    const checkbox = document.getElementById('nuclei-enabled');
-    if (!checkbox) return;
-    postAPI('/api/config', { nuclei_enabled: checkbox.checked }).then(() => {
-        showNotification(
-            checkbox.checked ? 'Nuclei Scanner enabled' : 'Nuclei Scanner disabled',
-            checkbox.checked ? 'success' : 'info'
-        );
-    }).catch(() => showNotification('Failed to update Nuclei setting', 'error'));
-}
-
-function initializeNucleiToggle() {
-    fetchAPI('/api/config').then(data => {
-        if (!data) return;
-        const checkbox = document.getElementById('nuclei-enabled');
-        if (checkbox) checkbox.checked = data.nuclei_enabled === true;
-    }).catch(() => {});
-}
-
-// ── Aggressive Mode ───────────────────────────────────────────────────────────
-
-function toggleAggressiveMode() {
-    const checkbox = document.getElementById('aggressive-mode-enabled');
-    if (!checkbox) return;
-    const enabled = checkbox.checked;
-    postAPI('/api/config', { aggressive_mode_enabled: enabled }).then(() => {
-        if (enabled) {
-            showNotification('Aggressive Mode ON — fast scan preset applied', 'warning');
-        } else {
-            showNotification('Aggressive Mode OFF — conservative defaults restored', 'info');
-        }
-    }).catch(() => showNotification('Failed to update Aggressive Mode setting', 'error'));
-}
-
-function initializeAggressiveMode() {
-    fetchAPI('/api/config').then(data => {
-        if (!data) return;
-        const checkbox = document.getElementById('aggressive-mode-enabled');
-        if (checkbox) checkbox.checked = Boolean(data.aggressive_mode_enabled);
-    }).catch(() => {});
-}
-
-// ── wpa-sec integration ───────────────────────────────────────────────────────
-
-function toggleWpaSecVisibility() {
-    const checkbox = document.getElementById('wpasec-enabled');
-    if (!checkbox) return;
-    const isEnabled = checkbox.checked;
-    localStorage.setItem('wpasec-section-visible', isEnabled ? 'true' : 'false');
-    const section = document.getElementById('wpasec-section');
-    if (section) section.style.display = isEnabled ? 'block' : 'none';
-    if (isEnabled) loadWpaSecImported();
-}
-
-function initializeWpaSecVisibility() {
-    const checkbox = document.getElementById('wpasec-enabled');
-    if (!checkbox) return;
-
-    // Restore toggle state from localStorage
-    const stored = localStorage.getItem('wpasec-section-visible');
-    const isVisible = stored === 'true';
-    checkbox.checked = isVisible;
-    const section = document.getElementById('wpasec-section');
-    if (section) section.style.display = isVisible ? 'block' : 'none';
-    if (isVisible) loadWpaSecImported();
-
-    // Populate fields from live config
-    fetchAPI('/api/config').then(data => {
-        if (!data) return;
-        const apiKeyEl = document.getElementById('wpasec-api-key');
-        const intervalEl = document.getElementById('wpasec-poll-interval');
-        const priorityEl = document.getElementById('wpasec-priority');
-        const enabledEl = document.getElementById('wpasec-auto-connect');
-        const autoConnectEl = document.getElementById('wpasec-auto-connect-toggle');
-        const badgeEl = document.getElementById('wpasec-status-badge');
-        const activeEl = document.getElementById('wpasec-status-active');
-
-        if (apiKeyEl && data.wpasec_api_key) apiKeyEl.value = data.wpasec_api_key;
-        if (intervalEl && data.wpasec_poll_interval != null) intervalEl.value = data.wpasec_poll_interval;
-        if (priorityEl && data.wpasec_priority != null) priorityEl.value = data.wpasec_priority;
-        if (enabledEl) enabledEl.checked = Boolean(data.wpasec_enabled);
-        if (autoConnectEl) autoConnectEl.checked = data.wpasec_auto_connect !== false;
-
-        const enabled = Boolean(data.wpasec_enabled);
-        if (badgeEl) {
-            badgeEl.textContent = enabled ? 'Active' : 'Disabled';
-            badgeEl.className = `text-xs font-semibold uppercase tracking-wide px-3 py-1 rounded-full ${enabled ? 'bg-cyan-900/40 text-cyan-300 border border-cyan-700' : 'bg-slate-700 text-slate-200'}`;
-        }
-        if (activeEl) activeEl.textContent = enabled ? 'Yes' : 'No';
-    }).catch(() => {});
-}
-
-async function saveWpaSecConfig() {
-    const apiKey = (document.getElementById('wpasec-api-key')?.value || '').trim();
-    const pollInterval = parseInt(document.getElementById('wpasec-poll-interval')?.value || '3600', 10);
-    const priority = parseInt(document.getElementById('wpasec-priority')?.value || '5', 10);
-    const enabled = document.getElementById('wpasec-auto-connect')?.checked || false;
-    const autoConnect = document.getElementById('wpasec-auto-connect-toggle')?.checked !== false;
-
-    const payload = {
-        wpasec_enabled: enabled,
-        wpasec_api_key: apiKey,
-        wpasec_poll_interval: Math.max(300, pollInterval),
-        wpasec_priority: Math.min(10, Math.max(1, priority)),
-        wpasec_auto_connect: autoConnect
-    };
-
-    try {
-        const result = await postAPI('/api/config', payload);
-        if (result) {
-            showNotification('wpa-sec settings saved', 'success');
-            initializeWpaSecVisibility();
-        }
-    } catch (e) {
-        showNotification('Failed to save wpa-sec settings', 'error');
-    }
-}
-
-async function pollWpaSecNow() {
-    const resultEl = document.getElementById('wpasec-last-result');
-    const addedEl = document.getElementById('wpasec-networks-added');
-    if (resultEl) resultEl.textContent = 'Polling…';
-    try {
-        const result = await postAPI('/api/wpasec/poll', {});
-        if (result && result.error) {
-            if (resultEl) resultEl.textContent = `Error: ${result.error}`;
-            showNotification(`wpa-sec poll failed: ${result.error}`, 'error');
-        } else if (result) {
-            const added = result.added || 0;
-            const total = result.total_cracked || 0;
-            if (resultEl) resultEl.textContent = `OK — ${total} cracked total`;
-            if (addedEl) addedEl.textContent = `${added} new`;
-            showNotification(`wpa-sec poll complete: ${added} new network(s) added`, added > 0 ? 'success' : 'info');
-            loadWpaSecImported();
-        }
-    } catch (e) {
-        if (resultEl) resultEl.textContent = 'Request failed';
-        showNotification('wpa-sec poll request failed', 'error');
-    }
-}
-
-async function loadWpaSecImported() {
-    const listEl = document.getElementById('wpasec-imported-list');
-    const countEl = document.getElementById('wpasec-import-count');
-    if (!listEl) return;
-
-    try {
-        const data = await fetchAPI('/api/wpasec/imported');
-        const entries = (data && data.imported) ? data.imported : [];
-
-        if (countEl) countEl.textContent = `${entries.length} network${entries.length !== 1 ? 's' : ''}`;
-
-        // Restore persisted last-poll status
-        const resultEl = document.getElementById('wpasec-last-result');
-        const addedEl = document.getElementById('wpasec-networks-added');
-        if (data && data.last_polled) {
-            const when = new Date(data.last_polled);
-            const total = data.last_total_cracked != null ? data.last_total_cracked : '?';
-            if (resultEl) resultEl.textContent = `OK — ${total} cracked total (${when.toLocaleString()})`;
-            if (addedEl && data.last_added != null) addedEl.textContent = `${data.last_added} new`;
-        }
-
-        if (entries.length === 0) {
-            listEl.innerHTML = '<p class="text-gray-500 text-sm p-4 text-center">No networks imported yet — click Poll Now to fetch from wpa-sec.</p>';
-            return;
-        }
-
-        const rows = entries.map(e => {
-            const date = e.imported_at ? new Date(e.imported_at).toLocaleDateString() : '—';
-            const ssid = escapeHtml(e.ssid || 'Unknown');
-            const apCount = e.ap_count || 1;
-            const apBadge = apCount > 1
-                ? `<span class="text-xs text-slate-400 flex-shrink-0 ml-1">${apCount} APs</span>`
-                : '';
-            return `<div class="flex items-center justify-between px-4 py-2.5 border-b border-slate-800/60 hover:bg-slate-800/40 transition-colors">
-                <div class="flex items-center gap-3 min-w-0">
-                    <svg class="w-4 h-4 text-cyan-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"></path>
-                    </svg>
-                    <div class="min-w-0 flex items-center gap-2">
-                        <p class="text-sm font-medium text-white truncate">${ssid}</p>
-                        ${apBadge}
-                    </div>
-                </div>
-                <span class="text-xs text-gray-500 flex-shrink-0 ml-2">${date}</span>
-            </div>`;
-        }).join('');
-
-        listEl.innerHTML = rows;
-    } catch (e) {
-        listEl.innerHTML = '<p class="text-red-400 text-sm p-4 text-center">Failed to load imported networks.</p>';
-    }
 }
 
 function initializePwnagotchiVisibility() {
@@ -6240,7 +6081,7 @@ function renderConnectTabMultiInterface(state) {
     const focusInterface = state.focus_interface || '';
     const focusSsid = state.focus_interface_ssid || '';
     const globalEnabled = scanMode === 'multi';
-    pillEl.textContent = globalEnabled ? 'All adapters' : 'Single focus';
+    pillEl.textContent = globalEnabled ? 'Single focus' : 'All adapters';
     pillEl.className = `text-xs px-2 py-1 rounded ${globalEnabled ? 'bg-green-700 text-green-100' : 'bg-amber-700 text-amber-100'}`;
     if (noteEl) {
         const maxAdapters = state.max_interfaces || 1;
@@ -6380,7 +6221,7 @@ async function setMultiInterfaceMode(mode, button) {
     }
     try {
         await postAPI('/api/wifi/scan-control/mode', { mode });
-        addConsoleMessage(mode === 'multi' ? 'Scanning all eligible adapters' : 'Single-adapter focus enabled', 'info');
+        addConsoleMessage(mode === 'multi' ? 'Single focus mode enabled' : 'All adapters mode enabled', 'info');
         await refreshWifiStatus();
     } catch (error) {
         console.error('Unable to update scan mode:', error);
@@ -8477,112 +8318,96 @@ async function executeManualAttack() {
 
 async function startOrchestrator() {
     const statusEl = document.getElementById('system-control-status');
-    
-    try {
-        // Show status and start progress
-        if (statusEl) {
-            statusEl.classList.remove('hidden');
-            statusEl.textContent = 'Enabling automation...';
-            statusEl.className = 'text-sm text-blue-600 mt-4';
-        }
-        
-        addConsoleMessage('Enabling automation...', 'info');
-        
-        const data = await postAPI('/api/automation/orchestrator/start', {});
-        
-        if (data.success) {
-            const automationActive = data.automation_enabled !== false;
-            const modeLabelText = automationActive ? 'Auto' : 'Sleeping';
-            const modeClass = automationActive ? 'text-green-400 font-semibold' : 'text-purple-300 font-semibold';
 
-            addConsoleMessage('Automation enabled successfully', 'success');
-            updateElement('Ragnar-mode', modeLabelText);
-            const modeLabel = document.getElementById('Ragnar-mode');
-            if (modeLabel) {
-                modeLabel.className = modeClass;
-            }
-            
-            if (statusEl) {
-                statusEl.textContent = automationActive ? 'Automation enabled - Orchestrator running' : 'Automation queued - waiting for Wi-Fi';
-                statusEl.className = automationActive ? 'text-sm text-green-600 mt-4' : 'text-sm text-yellow-500 mt-4';
-                
-                // Hide status after 3 seconds
-                setTimeout(() => {
-                    if (statusEl) {
-                        statusEl.classList.add('hidden');
-                    }
-                }, 3000);
-            }
-            
-        } else {
-            addConsoleMessage(`Failed to start automatic mode: ${data.message || 'Unknown error'}`, 'error');
-            if (statusEl) {
-                statusEl.textContent = `Error: ${data.message || 'Failed to start automatic mode'}`;
-                statusEl.className = 'text-sm text-red-600 mt-4';
-            }
+    // Show status and start progress
+    if (statusEl) {
+        statusEl.classList.remove('hidden');
+        statusEl.textContent = 'Enabling automation...';
+        statusEl.className = 'text-sm text-blue-600 mt-4';
+    }
+
+    addConsoleMessage('Enabling automation...', 'info');
+
+    const data = await postAPI('/api/automation/orchestrator/start', {});
+
+    if (data.success) {
+        const automationActive = data.automation_enabled !== false;
+        const modeLabelText = automationActive ? 'Auto' : 'Sleeping';
+        const modeClass = automationActive ? 'text-green-400 font-semibold' : 'text-purple-300 font-semibold';
+
+        addConsoleMessage(automationActive ? 'Automation enabled successfully' : 'Automation queued - waiting for connectivity', 'success');
+        updateElement('Ragnar-mode', modeLabelText);
+        const modeLabel = document.getElementById('Ragnar-mode');
+        if (modeLabel) {
+            modeLabel.className = modeClass;
         }
-        
-    } catch (error) {
-        console.error('Error starting orchestrator:', error);
-        addConsoleMessage('Failed to start automatic mode', 'error');
+
         if (statusEl) {
-            statusEl.textContent = `Error: ${error.message}`;
+            statusEl.textContent = automationActive ? 'Automation enabled - Orchestrator running' : 'Automation queued - waiting for connectivity';
+            statusEl.className = automationActive ? 'text-sm text-green-600 mt-4' : 'text-sm text-yellow-500 mt-4';
+
+            // Hide status after 3 seconds
+            setTimeout(() => {
+                if (statusEl) {
+                    statusEl.classList.add('hidden');
+                }
+            }, 3000);
+        }
+
+    } else {
+        addConsoleMessage(`Failed to start automatic mode: ${data.message || 'Unknown error'}`, 'error');
+        if (statusEl) {
+            statusEl.textContent = `Error: ${data.message || 'Failed to start automatic mode'}`;
             statusEl.className = 'text-sm text-red-600 mt-4';
         }
     }
+
+    return data;
 }
 
 async function stopOrchestrator() {
     const statusEl = document.getElementById('system-control-status');
-    
-    try {
-        // Show status and start progress
+
+    // Show status and start progress
+    if (statusEl) {
+        statusEl.classList.remove('hidden');
+        statusEl.textContent = 'Stopping automatic mode...';
+        statusEl.className = 'text-sm text-orange-600 mt-4';
+    }
+
+    addConsoleMessage('Disabling automation...', 'info');
+
+    const data = await postAPI('/api/automation/orchestrator/stop', {});
+
+    if (data.success) {
+        addConsoleMessage('Automation disabled - Orchestrator sleeping', 'warning');
+        updateElement('Ragnar-mode', 'Sleeping');
+        const modeLabel = document.getElementById('Ragnar-mode');
+        if (modeLabel) {
+            modeLabel.className = 'text-purple-300 font-semibold';
+        }
+
         if (statusEl) {
-            statusEl.classList.remove('hidden');
-            statusEl.textContent = 'Stopping automatic mode...';
+            statusEl.textContent = 'Automation disabled - Ragnar is sleeping';
             statusEl.className = 'text-sm text-orange-600 mt-4';
+
+            // Hide status after 3 seconds
+            setTimeout(() => {
+                if (statusEl) {
+                    statusEl.classList.add('hidden');
+                }
+            }, 3000);
         }
-        
-        addConsoleMessage('Disabling automation...', 'info');
-        
-        const data = await postAPI('/api/automation/orchestrator/stop', {});
-        
-        if (data.success) {
-            addConsoleMessage('Automation disabled - Orchestrator sleeping', 'warning');
-            updateElement('Ragnar-mode', 'Sleeping');
-            const modeLabel = document.getElementById('Ragnar-mode');
-            if (modeLabel) {
-                modeLabel.className = 'text-purple-300 font-semibold';
-            }
-            
-            if (statusEl) {
-                statusEl.textContent = 'Automation disabled - Ragnar is sleeping';
-                statusEl.className = 'text-sm text-orange-600 mt-4';
-                
-                // Hide status after 3 seconds
-                setTimeout(() => {
-                    if (statusEl) {
-                        statusEl.classList.add('hidden');
-                    }
-                }, 3000);
-            }
-            
-        } else {
-            addConsoleMessage(`Failed to stop automatic mode: ${data.message || 'Unknown error'}`, 'error');
-            if (statusEl) {
-                statusEl.textContent = `Error: ${data.message || 'Failed to stop automatic mode'}`;
-                statusEl.className = 'text-sm text-red-600 mt-4';
-            }
-        }
-        
-    } catch (error) {
-        console.error('Error stopping orchestrator:', error);
-        addConsoleMessage('Failed to stop automatic mode', 'error');
+
+    } else {
+        addConsoleMessage(`Failed to stop automatic mode: ${data.message || 'Unknown error'}`, 'error');
         if (statusEl) {
-            statusEl.textContent = `Error: ${error.message}`;
+            statusEl.textContent = `Error: ${data.message || 'Failed to stop automatic mode'}`;
             statusEl.className = 'text-sm text-red-600 mt-4';
         }
     }
+
+    return data;
 }
 
 async function triggerNetworkScan() {
@@ -8988,13 +8813,16 @@ async function handleAutomationToggle() {
     button.textContent = action === 'start' ? 'Enabling...' : 'Disabling...';
 
     try {
+        let data;
         if (action === 'start') {
-            await startOrchestrator();
-            updateAutomationToggleButton(true, { force: true });
+            data = await startOrchestrator();
         } else {
-            await stopOrchestrator();
-            updateAutomationToggleButton(false, { force: true });
+            data = await stopOrchestrator();
         }
+
+        // Use the actual server-reported state instead of assuming success
+        const actualEnabled = data && data.success ? Boolean(data.automation_enabled) : !targetStateEnabled;
+        updateAutomationToggleButton(actualEnabled, { force: true });
 
         refreshDashboard().catch(() => {/* best effort */});
     } catch (error) {
@@ -9954,6 +9782,138 @@ async function saveAIToken() {
     }
 }
 
+// ─── Pushover Notification Functions ───────────────────────────────────
+async function loadPushoverConfiguration(config) {
+    // Sync toggle checkboxes from config
+    const toggle = document.getElementById('pushover-enabled-toggle');
+    if (toggle) toggle.checked = Boolean(config && config.pushover_enabled);
+
+    const evtMap = {
+        'pushover-notify-new-device': 'pushover_notify_new_device',
+        'pushover-notify-new-vuln': 'pushover_notify_new_vulnerability',
+        'pushover-notify-new-cred': 'pushover_notify_new_credential',
+        'pushover-notify-device-lost': 'pushover_notify_device_lost',
+        'pushover-notify-device-back-online': 'pushover_notify_device_back_online'
+    };
+    for (const [elemId, key] of Object.entries(evtMap)) {
+        const cb = document.getElementById(elemId);
+        if (cb) cb.checked = config && Object.prototype.hasOwnProperty.call(config, key) ? Boolean(config[key]) : false;
+    }
+
+    // Fetch key status from backend
+    try {
+        const ks = await fetchAPI('/api/pushover/keys');
+        const ukInput = document.getElementById('pushover-user-key');
+        const atInput = document.getElementById('pushover-api-token');
+        if (ukInput) {
+            ukInput.value = '';
+            ukInput.placeholder = ks.user_key_configured ? `Configured: ${ks.user_key_preview || '••••'}` : 'Your user key...';
+        }
+        if (atInput) {
+            atInput.value = '';
+            atInput.placeholder = ks.api_token_configured ? `Configured: ${ks.api_token_preview || '••••'}` : 'Your app token...';
+        }
+    } catch (e) {
+        console.error('Failed to fetch Pushover key status:', e);
+    }
+}
+
+async function togglePushoverEnabled() {
+    const cb = document.getElementById('pushover-enabled-toggle');
+    if (!cb) return;
+    try {
+        await postAPI('/api/config', { pushover_enabled: cb.checked });
+        showPushoverStatus(cb.checked ? '✓ Pushover notifications enabled' : 'ℹ Pushover notifications disabled',
+            cb.checked ? 'green' : 'blue');
+    } catch (e) {
+        cb.checked = !cb.checked;
+        showPushoverStatus('✗ Failed to toggle Pushover: ' + (e.message || 'unknown error'), 'red');
+    }
+}
+
+async function savePushoverKeys() {
+    const ukInput = document.getElementById('pushover-user-key');
+    const atInput = document.getElementById('pushover-api-token');
+    const userKey = ukInput ? ukInput.value.trim() : '';
+    const apiToken = atInput ? atInput.value.trim() : '';
+
+    if (!userKey && !apiToken) {
+        showPushoverStatus('⚠ Please enter at least one key.', 'yellow');
+        return;
+    }
+
+    try {
+        const payload = {};
+        if (userKey) payload.user_key = userKey;
+        if (apiToken) payload.api_token = apiToken;
+        const result = await postAPI('/api/pushover/keys', payload);
+        if (result.success) {
+            showPushoverStatus('✓ Pushover keys saved successfully!', 'green');
+            addConsoleMessage('Pushover keys saved', 'success');
+            const config = await fetchAPI('/api/config');
+            await loadPushoverConfiguration(config);
+        } else {
+            throw new Error(result.message || 'Save failed');
+        }
+    } catch (e) {
+        showPushoverStatus('✗ Failed to save keys: ' + (e.message || 'unknown error'), 'red');
+    }
+}
+
+async function savePushoverTriggers() {
+    const evtMap = {
+        'pushover-notify-new-device': 'pushover_notify_new_device',
+        'pushover-notify-new-vuln': 'pushover_notify_new_vulnerability',
+        'pushover-notify-new-cred': 'pushover_notify_new_credential',
+        'pushover-notify-device-lost': 'pushover_notify_device_lost',
+        'pushover-notify-device-back-online': 'pushover_notify_device_back_online'
+    };
+    const payload = {};
+    for (const [elemId, key] of Object.entries(evtMap)) {
+        const cb = document.getElementById(elemId);
+        if (cb) payload[key] = cb.checked;
+    }
+    try {
+        await postAPI('/api/config', payload);
+        showPushoverStatus('✓ Notification triggers updated', 'green', 2000);
+    } catch (e) {
+        showPushoverStatus('✗ Failed to update triggers: ' + (e.message || 'unknown'), 'red');
+    }
+}
+
+async function testPushover() {
+    showPushoverStatus('Sending test notification...', 'blue', 0);
+    try {
+        const result = await postAPI('/api/pushover/test', {});
+        if (result.success) {
+            showPushoverStatus('✓ Test notification sent! Check your device.', 'green', 5000);
+            addConsoleMessage('Pushover test notification sent', 'success');
+        } else {
+            throw new Error(result.message || 'Send failed');
+        }
+    } catch (e) {
+        showPushoverStatus('✗ Test failed: ' + (e.message || 'unknown error'), 'red', 6000);
+    }
+}
+
+function showPushoverStatus(msg, color, timeout) {
+    const div = document.getElementById('pushover-config-status');
+    const span = document.getElementById('pushover-config-status-message');
+    if (!div || !span) return;
+    const colors = {
+        green:  'bg-green-900/30 border border-green-700',
+        red:    'bg-red-900/30 border border-red-700',
+        yellow: 'bg-yellow-900/30 border border-yellow-700',
+        blue:   'bg-blue-900/30 border border-blue-700'
+    };
+    div.className = 'p-3 rounded-lg text-sm ' + (colors[color] || colors.blue);
+    span.textContent = msg;
+    div.classList.remove('hidden');
+    if (timeout !== 0) {
+        setTimeout(() => div.classList.add('hidden'), timeout || 4000);
+    }
+}
+
 // E-Paper Display Functions
 async function loadEpaperDisplay() {
     try {
@@ -10061,6 +10021,25 @@ function setupEpaperAutoRefresh() {
 
 let currentDirectory = '/';
 let fileOperationInProgress = false;
+let currentFileSort = 'name';
+let currentFileSearch = '';
+
+function setFileSort(sort) {
+    currentFileSort = sort;
+    document.querySelectorAll('.file-sort-btn').forEach(btn => {
+        const isActive = btn.getAttribute('data-sort') === sort;
+        btn.classList.toggle('bg-Ragnar-600', isActive);
+        btn.classList.toggle('text-white', isActive);
+        btn.classList.toggle('text-gray-400', !isActive);
+        btn.classList.toggle('hover:text-white', !isActive);
+    });
+    refreshFiles();
+}
+
+function onFileSearch(value) {
+    currentFileSearch = value.trim().toLowerCase();
+    refreshFiles();
+}
 
 function loadFiles(path = '/', highlightFile = null) {
     if (fileOperationInProgress) return;
@@ -10107,13 +10086,25 @@ function displayFiles(files, path, highlightFile = null) {
         `;
     }
     
-    // Sort files - directories first, then by name
+    // Apply search filter (only to files, not directories)
+    if (currentFileSearch) {
+        files = files.filter(f => f.is_directory || f.name.toLowerCase().includes(currentFileSearch));
+    }
+
+    if (files.length === 0 && currentFileSearch) {
+        fileList.innerHTML = `<p class="text-gray-400 p-4">No files match "<span class="text-white">${escapeHtml(currentFileSearch)}</span>"</p>`;
+        return false;
+    }
+
+    // Sort: directories always first, then apply chosen sort within each group
     files.sort((a, b) => {
         if (a.is_directory && !b.is_directory) return -1;
         if (!a.is_directory && b.is_directory) return 1;
+        if (currentFileSort === 'date') return (b.modified || 0) - (a.modified || 0);
+        if (currentFileSort === 'size') return (b.size || 0) - (a.size || 0);
         return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
     });
-    
+
     files.forEach(file => {
         const icon = file.is_directory ? 
             `<svg class="w-5 h-5 mr-3 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -15530,16 +15521,13 @@ async function deleteTargetCredential(targetHost) {
     }
 }
 
-// ── Network Map (D3 force graph) ────────────────────────────────
+// ── Network Map (D3 force graph with topology API) ──────────────
 let _mapSimulation = null;
 let _mapInitialized = false;
-
-function riskScore(host, credIPs) {
-    const ports = host.ports ? host.ports.length : 0;
-    const hasCreds = credIPs.has(host.ip) ? 5 : 0;
-    const degraded = host.status === 'degraded' ? 3 : 0;
-    return ports + hasCreds + degraded;
-}
+let _mapAiAvailable = false;   // AI service ready on server
+let _mapAiEnabled = false;     // user toggle state
+let _mapNetworkHash = null;    // last-known host fingerprint for change detection
+let _mapAiCacheValid = false;  // true when AI results are cached for current hash
 
 function riskColor(score) {
     if (score === 0) return '#64748b';
@@ -15548,51 +15536,140 @@ function riskColor(score) {
     return '#ef4444';
 }
 
+function _buildMapLegend(deviceColors, deviceLabels) {
+    const el = document.getElementById('map-legend');
+    if (!el) return;
+    el.innerHTML = '';
+    const order = ['router', 'access_point', 'extender', 'switch', 'ragnar', 'laptop', 'workstation', 'server', 'nas', 'sbc', 'phone', 'tablet', 'wearable', 'printer', 'camera', 'smart_tv', 'speaker', 'doorbell', 'thermostat', 'appliance', 'iot', 'media', 'gaming', 'vehicle', 'apple', 'unknown'];
+    order.forEach(t => {
+        const color = deviceColors[t];
+        const label = deviceLabels[t];
+        if (!color || !label) return;
+        const span = document.createElement('span');
+        span.className = 'flex items-center gap-1';
+        span.innerHTML = `<span class="inline-block w-3 h-3 rounded-full" style="background:${color}"></span> ${escapeHtml(label)}`;
+        el.appendChild(span);
+    });
+}
+
+// ── AI toggle helpers ──
+async function _checkMapAiStatus() {
+    try {
+        const resp = await networkAwareFetch('/api/ai/status');
+        const data = await resp.json();
+        // enabled=true means the AI service is up and working
+        // config_enabled=true means the user wants AI on
+        // Either field being true is sufficient — if AI Insights works, so should classification
+        _mapAiAvailable = !!(data.enabled || (data.config_enabled && data.configured));
+        const track = document.getElementById('map-ai-toggle-track');
+        if (track) {
+            if (_mapAiAvailable) {
+                track.classList.remove('disabled');
+            } else {
+                track.classList.add('disabled');
+                track.classList.remove('active');
+                _mapAiEnabled = false;
+            }
+        }
+        const wrapper = document.getElementById('map-ai-toggle-wrapper');
+        if (wrapper) {
+            wrapper.title = _mapAiAvailable ? 'Use GPT-5 Nano to improve device classification' : 'AI not available – enable in Settings';
+        }
+    } catch(e) { console.warn('AI status check failed:', e); _mapAiAvailable = false; }
+}
+
+function onMapAiToggleClick() {
+    if (!_mapAiAvailable) return;
+    const track = document.getElementById('map-ai-toggle-track');
+    if (!track) return;
+    _mapAiEnabled = !_mapAiEnabled;
+    track.classList.toggle('active', _mapAiEnabled);
+    if (_mapAiEnabled) {
+        _mapAiCacheValid = false;
+        refreshNetworkMap();
+    }
+}
+
+function _showMapAiSpinner(show) {
+    const el = document.getElementById('map-ai-spinner');
+    if (el) el.classList.toggle('hidden', !show);
+}
+
 async function loadNetworkMap() {
     if (typeof d3 === 'undefined') {
         document.getElementById('network-map-loading').innerHTML = '<p class="text-red-400">D3.js failed to load. Check your internet connection.</p>';
         return;
     }
 
+    // Check AI availability on first load
+    if (!_mapInitialized) {
+        _mapInitialized = true;     // set flag early to prevent re-entry
+        await _checkMapAiStatus();
+        loadScanSubnets();          // populate subnet badge / panel
+    }
+
     document.getElementById('network-map-loading').style.display = 'flex';
     document.getElementById('network-map-svg').style.display = 'none';
 
+    // Determine whether to ask the server for AI classification
+    const wantAi = _mapAiEnabled && _mapAiAvailable;
+    const useAiParam = wantAi && !_mapAiCacheValid ? '1' : '0';
+    if (wantAi) _showMapAiSpinner(true);
+
     try {
-        const [netResp, credResp] = await Promise.all([
-            networkAwareFetch('/api/network'),
-            networkAwareFetch('/api/credentials')
-        ]);
-        const hosts = await netResp.json();
-        const creds = await credResp.json();
+        const resp = await networkAwareFetch(`/api/network/topology?use_ai=${useAiParam}`);
+        const topo = await resp.json();
+        if (topo.error) throw new Error(topo.error);
 
-        // Build set of IPs that have credentials
-        const credIPs = new Set();
-        Object.values(creds).forEach(arr => arr.forEach(c => { if (c.ip) credIPs.add(c.ip); }));
+        // Track network hash for change detection
+        if (topo.network_hash) {
+            if (_mapNetworkHash && _mapNetworkHash !== topo.network_hash) {
+                // Network changed — invalidate AI cache so next refresh re-runs AI
+                _mapAiCacheValid = false;
+            }
+            if (topo.ai_used) {
+                // Server ran AI for this response — mark cache valid
+                _mapAiCacheValid = true;
+            }
+            _mapNetworkHash = topo.network_hash;
+        }
 
-        // Build graph nodes + links
-        // Central "Ragnar" node + one node per host
-        const nodes = [{ id: '__ragnar__', label: 'Ragnar', isCenter: true, score: -1 }];
-        hosts.forEach(h => {
-            nodes.push({
-                id: h.ip,
-                label: h.hostname || h.ip,
-                ip: h.ip,
-                status: h.status,
-                ports: h.ports || [],
-                score: riskScore(h, credIPs),
-                isCenter: false
-            });
-        });
+        // Build legend
+        _buildMapLegend(topo.device_colors || {}, topo.device_labels || {});
 
-        const links = hosts.map(h => ({ source: '__ragnar__', target: h.ip }));
+        // Build D3-compatible nodes (topology API already provides structured data)
+        const nodes = topo.nodes.map(n => ({
+            id: n.ip,
+            ip: n.ip,
+            label: n.hostname || n.ip,
+            mac: n.mac,
+            vendor: n.vendor,
+            type: n.type,
+            type_label: n.type_label,
+            confidence: n.confidence,
+            ports: n.ports || [],
+            status: n.status,
+            risk: n.risk || 0,
+            last_seen: n.last_seen,
+            is_gateway: n.is_gateway,
+            is_ragnar: n.is_ragnar,
+        }));
 
-        renderNetworkMap(nodes, links);
+        const links = topo.links.map(l => ({
+            source: l.source,
+            target: l.target,
+            type: l.type,
+        }));
+
+        renderNetworkMap(nodes, links, topo.device_colors || {}, topo.device_icons || {});
     } catch(err) {
         document.getElementById('network-map-loading').innerHTML = `<p class="text-red-400">Error loading map: ${escapeHtml(err.message)}</p>`;
+    } finally {
+        _showMapAiSpinner(false);
     }
 }
 
-function renderNetworkMap(nodes, links) {
+function renderNetworkMap(nodes, links, deviceColors, deviceIcons) {
     const container = document.getElementById('network-map-container');
     const svgEl = document.getElementById('network-map-svg');
     const loading = document.getElementById('network-map-loading');
@@ -15616,34 +15693,66 @@ function renderNetworkMap(nodes, links) {
     const g = svg.append('g');
     svg.call(d3.zoom().scaleExtent([0.2, 4]).on('zoom', e => g.attr('transform', e.transform)));
 
+    // Link stroke styles by type
+    function linkStroke(d) {
+        if (d.type === 'ap_uplink') return '#8b5cf6';
+        if (d.type === 'subnet_inferred') return '#06b6d4';
+        if (d.type === 'ap_inferred') return '#6366f1';
+        return '#334155';
+    }
+    function linkDash(d) {
+        if (d.type === 'ap_inferred') return '4,3';
+        if (d.type === 'subnet_inferred') return '6,3';
+        return null;
+    }
+
     // Links
     const link = g.append('g')
         .selectAll('line')
         .data(links)
         .join('line')
-        .attr('stroke', '#334155')
-        .attr('stroke-width', 1.5)
-        .attr('stroke-opacity', 0.6);
+        .attr('stroke', linkStroke)
+        .attr('stroke-width', d => d.type === 'ap_uplink' ? 2 : 1.5)
+        .attr('stroke-opacity', 0.6)
+        .attr('stroke-dasharray', linkDash);
+
+    // Node radius based on type
+    function nodeRadius(d) {
+        if (d.is_gateway) return 22;
+        if (d.is_ragnar) return 20;
+        if (d.type === 'access_point') return 16;
+        if (d.type === 'server') return 15;
+        return 13;
+    }
+
+    // Node color from device type
+    function nodeColor(d) {
+        return deviceColors[d.type] || deviceColors['unknown'] || '#64748b';
+    }
 
     // Node groups
     const node = g.append('g')
         .selectAll('g')
         .data(nodes)
         .join('g')
-        .attr('cursor', d => d.isCenter ? 'default' : 'pointer')
+        .attr('cursor', 'pointer')
         .call(d3.drag()
             .on('start', (event, d) => { if (!event.active) _mapSimulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
             .on('drag',  (event, d) => { d.fx = event.x; d.fy = event.y; })
             .on('end',   (event, d) => { if (!event.active) _mapSimulation.alphaTarget(0); d.fx = null; d.fy = null; }))
-        .on('click', (event, d) => { if (!d.isCenter && d.ip) openHostPanel(d.ip); })
+        .on('click', (event, d) => { if (d.ip) openHostPanel(d.ip); })
         .on('mouseover', (event, d) => {
-            if (d.isCenter) return;
             tooltip.classList.remove('hidden');
+            const riskBadge = d.risk > 8 ? 'text-red-400' : d.risk > 3 ? 'text-amber-400' : d.risk > 0 ? 'text-green-400' : 'text-gray-400';
             tooltip.innerHTML = `<div class="font-semibold font-mono mb-1">${escapeHtml(d.ip)}</div>
                 ${d.label !== d.ip ? `<div class="text-gray-400 text-xs mb-1">${escapeHtml(d.label)}</div>` : ''}
+                ${d.vendor ? `<div class="text-xs text-gray-500">${escapeHtml(d.vendor)}</div>` : ''}
+                <div class="text-xs mt-1"><span style="color:${nodeColor(d)}">${escapeHtml(d.type_label)}</span>${d.confidence < 0.7 ? ' <span class="text-gray-600">(low conf.)</span>' : ''}</div>
                 <div class="text-xs">Status: <span class="${d.status === 'alive' ? 'text-green-400' : 'text-yellow-400'}">${escapeHtml(d.status || 'unknown')}</span></div>
-                <div class="text-xs">Ports: ${d.ports.length}</div>
-                <div class="text-xs">Risk score: ${d.score}</div>
+                <div class="text-xs">Ports: ${d.ports.length}${d.ports.length > 0 && d.ports.length <= 8 ? ' (' + d.ports.join(', ') + ')' : ''}</div>
+                <div class="text-xs">Risk: <span class="${riskBadge}">${d.risk}</span></div>
+                ${d.is_gateway ? '<div class="text-xs text-amber-400 mt-1">Default Gateway</div>' : ''}
+                ${d.is_ragnar ? '<div class="text-xs text-sky-400 mt-1">Ragnar Scanner</div>' : ''}
                 <div class="text-xs text-blue-400 mt-1">Click to view details</div>`;
         })
         .on('mousemove', (event) => {
@@ -15653,28 +15762,62 @@ function renderNetworkMap(nodes, links) {
         })
         .on('mouseout', () => tooltip.classList.add('hidden'));
 
-    // Circles
+    // Outer ring (risk indicator)
     node.append('circle')
-        .attr('r', d => d.isCenter ? 18 : Math.max(10, Math.min(22, 10 + d.score)))
-        .attr('fill', d => d.isCenter ? '#6366f1' : riskColor(d.score))
+        .attr('r', d => nodeRadius(d) + 3)
+        .attr('fill', 'none')
+        .attr('stroke', d => d.risk > 8 ? '#ef4444' : d.risk > 3 ? '#f59e0b' : 'none')
+        .attr('stroke-width', 2)
+        .attr('stroke-opacity', 0.5);
+
+    // Main circle
+    node.append('circle')
+        .attr('r', nodeRadius)
+        .attr('fill', nodeColor)
         .attr('stroke', '#0f172a')
         .attr('stroke-width', 2)
         .attr('fill-opacity', 0.9);
 
+    // Device icon (SVG path inside each node)
+    node.each(function(d) {
+        const iconPath = deviceIcons[d.is_ragnar ? 'ragnar' : d.type] || deviceIcons['unknown'];
+        if (!iconPath) return;
+        const r = nodeRadius(d);
+        const iconScale = r / 16; // icons are 24x24, scale to fit in radius
+        d3.select(this).append('path')
+            .attr('d', iconPath)
+            .attr('fill', '#0f172a')
+            .attr('fill-opacity', 0.6)
+            .attr('transform', `translate(${-12 * iconScale},${-12 * iconScale}) scale(${iconScale})`);
+    });
+
     // Labels
     node.append('text')
-        .attr('dy', d => (d.isCenter ? 18 : Math.max(10, Math.min(22, 10 + d.score))) + 12)
+        .attr('dy', d => nodeRadius(d) + 14)
         .attr('text-anchor', 'middle')
         .attr('fill', '#94a3b8')
         .attr('font-size', '10px')
-        .text(d => d.isCenter ? 'Ragnar' : (d.label || d.ip));
+        .text(d => {
+            if (d.is_gateway) return 'Gateway';
+            if (d.is_ragnar) return 'Ragnar';
+            return d.label || d.ip;
+        });
 
-    // Force simulation
+    // Force simulation — gateway (or first node) pinned at center
+    const gatewayNode = nodes.find(n => n.is_gateway);
+    if (gatewayNode) {
+        gatewayNode.fx = W / 2;
+        gatewayNode.fy = H / 2;
+    }
+
     _mapSimulation = d3.forceSimulation(nodes)
-        .force('link', d3.forceLink(links).id(d => d.id).distance(100))
-        .force('charge', d3.forceManyBody().strength(-300))
+        .force('link', d3.forceLink(links).id(d => d.id).distance(d => {
+            if (d.type === 'ap_uplink') return 80;
+            return 120;
+        }))
+        .force('charge', d3.forceManyBody().strength(-350))
         .force('center', d3.forceCenter(W / 2, H / 2))
-        .force('collision', d3.forceCollide(35))
+        .force('collision', d3.forceCollide(d => nodeRadius(d) + 15))
         .on('tick', () => {
             link
                 .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
@@ -15697,6 +15840,162 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// ── Subnet Manager ──────────────────────────────────────────
+function toggleSubnetPanel() {
+    const panel = document.getElementById('subnet-panel');
+    const chevron = document.getElementById('subnet-chevron');
+    if (!panel) return;
+    const hidden = panel.classList.toggle('hidden');
+    if (chevron) chevron.style.transform = hidden ? '' : 'rotate(90deg)';
+    if (!hidden) {
+        loadScanSubnets();           // refresh subnet list
+        _startSubnetLogPolling();    // start live log updates
+    } else {
+        _stopSubnetLogPolling();     // stop polling when panel closed
+    }
+}
+
+async function loadScanSubnets() {
+    try {
+        const resp = await networkAwareFetch('/api/config/scan-subnets');
+        const data = await resp.json();
+
+        // primary note
+        const primaryEl = document.getElementById('subnet-primary');
+        if (primaryEl && data.primary) {
+            primaryEl.textContent = `Primary (auto-detected): ${data.primary}`;
+        }
+
+        // badge count
+        const badge = document.getElementById('subnet-count');
+        const subs = data.subnets || [];
+        if (badge) badge.textContent = subs.length;
+
+        // list
+        const list = document.getElementById('subnet-list');
+        if (!list) return;
+        if (subs.length === 0) {
+            list.innerHTML = '<p class="text-xs text-gray-600 italic">No extra subnets configured.</p>';
+            return;
+        }
+        list.innerHTML = subs.map(cidr => `
+            <div class="flex items-center justify-between bg-slate-700/50 rounded px-2 py-1">
+                <span class="font-mono text-xs text-gray-300">${escapeHtml(cidr)}</span>
+                <button onclick="removeScanSubnet('${escapeHtml(cidr)}')" class="text-red-400 hover:text-red-300 text-xs ml-2">&times;</button>
+            </div>`).join('');
+    } catch (e) {
+        console.error('loadScanSubnets error', e);
+    }
+}
+
+async function addScanSubnet() {
+    const input = document.getElementById('subnet-input');
+    const errorEl = document.getElementById('subnet-error');
+    if (!input) return;
+    const cidr = input.value.trim();
+    if (!cidr) return;
+
+    // hide previous error
+    if (errorEl) { errorEl.textContent = ''; errorEl.classList.add('hidden'); }
+
+    try {
+        const resp = await networkAwareFetch('/api/config/scan-subnets', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cidr })
+        });
+        const data = await resp.json();
+        if (!resp.ok || data.error) {
+            if (errorEl) { errorEl.textContent = data.error || 'Failed to add subnet'; errorEl.classList.remove('hidden'); }
+            return;
+        }
+        input.value = '';
+        await loadScanSubnets();
+        // Trigger an immediate scan of the newly added subnet
+        triggerSubnetScan(data.subnets ? data.subnets[data.subnets.length - 1] : cidr);
+    } catch (e) {
+        if (errorEl) { errorEl.textContent = e.message; errorEl.classList.remove('hidden'); }
+    }
+}
+
+async function triggerSubnetScan(cidr) {
+    try {
+        await networkAwareFetch('/api/config/scan-subnets/trigger', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cidr })
+        });
+        // Start polling the scan log so user sees live progress
+        _startSubnetLogPolling();
+    } catch (e) {
+        console.error('triggerSubnetScan error', e);
+    }
+}
+
+async function removeScanSubnet(cidr) {
+    try {
+        await networkAwareFetch('/api/config/scan-subnets', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cidr })
+        });
+        await loadScanSubnets();
+    } catch (e) {
+        console.error('removeScanSubnet error', e);
+    }
+}
+
+// ── Subnet Scan Log ─────────────────────────────────────────
+let _subnetLogTimer = null;
+
+const _logStatusStyle = {
+    ok:    'text-green-400',
+    error: 'text-red-400',
+    info:  'text-blue-400',
+    skip:  'text-yellow-400',
+};
+const _logStatusIcon = {
+    ok:    '✅',
+    error: '❌',
+    info:  '🔍',
+    skip:  '⏭️',
+};
+
+async function loadSubnetScanLog() {
+    const container = document.getElementById('subnet-scan-log');
+    if (!container) return;
+    try {
+        const resp = await networkAwareFetch('/api/config/scan-subnets/log');
+        const data = await resp.json();
+        const log = data.log || [];
+        if (log.length === 0) {
+            container.innerHTML = '<p class="text-gray-600 italic">No scan data yet — waiting for next scan cycle.</p>';
+            return;
+        }
+        // Render newest-first
+        container.innerHTML = log.slice().reverse().map(e => {
+            const cls = _logStatusStyle[e.status] || 'text-gray-400';
+            const icon = _logStatusIcon[e.status] || '•';
+            const dev = e.devices !== undefined ? ` (${e.devices} device${e.devices !== 1 ? 's' : ''})` : '';
+            return `<div class="${cls}"><span class="text-gray-600">${escapeHtml(e.ts)}</span> ${icon} <span class="text-gray-300">${escapeHtml(e.cidr)}</span> — ${escapeHtml(e.msg)}${dev}</div>`;
+        }).join('');
+        // Auto-scroll to top (newest)
+        container.scrollTop = 0;
+    } catch (e) {
+        console.error('loadSubnetScanLog error', e);
+    }
+}
+
+function _startSubnetLogPolling() {
+    _stopSubnetLogPolling();
+    loadSubnetScanLog();                         // immediate
+    _subnetLogTimer = setInterval(loadSubnetScanLog, 10000);  // every 10s while panel open
+}
+
+function _stopSubnetLogPolling() {
+    if (_subnetLogTimer) { clearInterval(_subnetLogTimer); _subnetLogTimer = null; }
 }
 
 // Export new functions to window
@@ -15740,3 +16039,7 @@ window.editTargetCredential = editTargetCredential;
 window.deleteTargetCredential = deleteTargetCredential;
 window.loadNetworkMap = loadNetworkMap;
 window.refreshNetworkMap = refreshNetworkMap;
+window.onMapAiToggleClick = onMapAiToggleClick;
+window.toggleSubnetPanel = toggleSubnetPanel;
+window.addScanSubnet = addScanSubnet;
+window.removeScanSubnet = removeScanSubnet;

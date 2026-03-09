@@ -144,6 +144,7 @@ SEP_SCAN_COMMAND = ['sudo', 'sep-scan']
 MAC_REGEX = re.compile(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$')
 PWN_INSTALL_SCRIPT = os.path.join(shared_data.currentdir, 'scripts', 'install_pwnagotchi.sh')
 PWN_SERVICE_FILE = '/etc/systemd/system/pwnagotchi.service'
+PWN_CONFIG_FILE = '/etc/pwnagotchi/config.toml'
 PWN_SWAP_DELAY_SECONDS = 1
 PWN_INSTALL_STALE_SECONDS = 600  # Treat installer as stale after 10 minutes
 PWN_SWITCH_STALE_SECONDS = 60  # Consider switch stuck after 60 seconds
@@ -1056,6 +1057,10 @@ def _execute_pwn_mode_switch(target_mode: str) -> None:
     if target_mode == 'pwnagotchi':
         _ensure_pwn_launcher()
 
+        # Stop the display loop FIRST so it doesn't overwrite the transition message.
+        # E-paper retains its image without power, so the message stays visible.
+        shared_data.display_should_exit = True
+
         # Show transition message on e-paper before Ragnar stops.
         # Run in a thread with a timeout so a blocked SPI bus never hangs the swap.
         _epd_t = threading.Thread(target=_show_epaper_transition, args=("Switching to Pwnagotchi...",), daemon=True)
@@ -1083,10 +1088,11 @@ def _execute_pwn_mode_switch(target_mode: str) -> None:
                 ['systemd-run', '--no-block', '--collect',
                  '--unit=ragnar-to-pwnagotchi-swap',
                  'bash', '-c',
-                 'sleep 1 && systemctl stop ragnar.service'
-                 ' && sleep 3'
+                 'systemctl stop ragnar.service'
+                 ' && python3 -OO /home/ragnar/Ragnar/wipe_epd.py 2>/dev/null; true'
                  ' && systemctl start bettercap.service'
-                 ' && systemctl start pwnagotchi.service'],
+                 ' && systemctl start pwnagotchi.service'
+                 ' && systemctl start ragnar-swap-button.service'],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
@@ -1380,6 +1386,19 @@ def sync_vulnerability_count():
         shared_data.vulnnbr = vuln_count
         logger.debug(f"Updated shared_data.vulnnbr: {old_count} -> {vuln_count}")
 
+        # ── Pushover: new vulnerability notification ──
+        # Always pass the absolute total; PushoverService tracks its own baseline
+        # (loaded from DB at startup) to avoid re-alerting on restart.
+        try:
+            from pushover_service import PushoverService
+            _po = getattr(shared_data, '_pushover_service', None)
+            if _po is None:
+                _po = PushoverService(shared_data)
+                shared_data._pushover_service = _po
+            _po.notify_new_vulnerabilities(vuln_count)
+        except Exception as _po_err:
+            logger.debug(f"Pushover vulnerability notification skipped: {_po_err}")
+
         old_host_count = getattr(shared_data, 'vulnerable_host_count', 0)
         shared_data.vulnerable_host_count = len(vulnerable_hosts)
         logger.debug(f"Updated vulnerable host count: {old_host_count} -> {shared_data.vulnerable_host_count}")
@@ -1543,6 +1562,21 @@ def sync_all_counts():
             shared_data.new_targets = len(shared_data.new_target_ips)
             shared_data.lost_targets = len(shared_data.lost_target_ips)
 
+            # ── Pushover: new / lost device notifications ──
+            try:
+                from pushover_service import PushoverService
+                _po = getattr(shared_data, '_pushover_service', None)
+                if _po is None:
+                    _po = PushoverService(shared_data)
+                    shared_data._pushover_service = _po
+                if new_active_hosts:
+                    _po.notify_new_devices(new_active_hosts)
+                    _po.notify_device_back_online(new_active_hosts)
+                if lost_active_hosts:
+                    _po.notify_device_lost(lost_active_hosts)
+            except Exception as _po_err:
+                logger.debug(f"Pushover new/lost device notification skipped: {_po_err}")
+
             if discovered_macs:
                 new_mac_count, points_awarded = shared_data.process_discovered_macs(discovered_macs)
                 if new_mac_count:
@@ -1618,6 +1652,14 @@ def sync_all_counts():
                 if old_creds != cred_count:
                     shared_data.crednbr = cred_count
                     logger.info(f"WEBAPP: Updated credentials: {old_creds} -> {cred_count} from {len(cred_files_found)} files")
+                    # ── Pushover: new credentials notification ──
+                    if cred_count > old_creds:
+                        try:
+                            _po = getattr(shared_data, '_pushover_service', None)
+                            if _po:
+                                _po.notify_new_credentials(cred_count - old_creds, cred_count)
+                        except Exception as _po_err:
+                            logger.debug(f"Pushover credential notification skipped: {_po_err}")
                 else:
                     logger.debug(f"WEBAPP: Credentials stable at: {cred_count} from {len(cred_files_found)} files")
             else:
@@ -3125,6 +3167,160 @@ def update_config():
         logger.error(f"Error updating config: {e}")
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/api/config/scan-subnets', methods=['GET', 'POST', 'DELETE'])
+def manage_scan_subnets():
+    """Manage the list of extra subnets to scan.
+
+    GET:    Return current list + auto-detected primary subnet.
+    POST:   Add a new CIDR (body: {"cidr": "10.0.0.0/24"}).
+    DELETE: Remove a CIDR  (body: {"cidr": "10.0.0.0/24"}).
+    """
+    import ipaddress as _ip
+    try:
+        subnets = list(shared_data.config.get('scan_subnets', []))
+
+        # Detect primary subnet for reference
+        primary = None
+        try:
+            import netifaces
+            gws = netifaces.gateways()
+            gw_tuple = gws.get('default', {}).get(netifaces.AF_INET)
+            if gw_tuple:
+                iface_addrs = netifaces.ifaddresses(gw_tuple[1]).get(netifaces.AF_INET)
+                if iface_addrs:
+                    my_ip = iface_addrs[0]['addr']
+                    mask = iface_addrs[0]['netmask']
+                    cidr_bits = sum(bin(int(x)).count('1') for x in mask.split('.'))
+                    primary = str(_ip.ip_network(f"{my_ip}/{cidr_bits}", strict=False))
+        except Exception:
+            pass
+
+        if request.method == 'GET':
+            return jsonify({'subnets': subnets, 'primary': primary})
+
+        data = request.get_json() or {}
+        raw = str(data.get('cidr', '')).strip()
+        if not raw:
+            return jsonify({'error': 'Missing cidr field'}), 400
+
+        # Validate
+        try:
+            net = _ip.ip_network(raw, strict=False)
+            normalised = str(net)
+        except ValueError:
+            return jsonify({'error': f'Invalid CIDR: {raw}'}), 400
+
+        if request.method == 'POST':
+            if normalised == primary:
+                return jsonify({'error': 'This is already your primary subnet — no need to add it'}), 400
+            if normalised not in subnets:
+                subnets.append(normalised)
+                shared_data.config['scan_subnets'] = subnets
+                shared_data.scan_subnets = subnets
+                shared_data.save_config()
+            return jsonify({'subnets': subnets, 'primary': primary})
+
+        if request.method == 'DELETE':
+            subnets = [s for s in subnets if s != normalised]
+            shared_data.config['scan_subnets'] = subnets
+            shared_data.scan_subnets = subnets
+            shared_data.save_config()
+            return jsonify({'subnets': subnets, 'primary': primary})
+
+    except Exception as e:
+        logger.error(f"Error managing scan subnets: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/config/scan-subnets/trigger', methods=['POST'])
+def trigger_subnet_scan():
+    """Trigger an immediate nmap scan of a specific subnet in the background.
+
+    Body: {"cidr": "10.0.0.0/24"}
+    Returns immediately — results appear in the subnet scan log.
+    """
+    import ipaddress as _ip
+    try:
+        data = request.get_json() or {}
+        raw = str(data.get('cidr', '')).strip()
+        if not raw:
+            return jsonify({'error': 'Missing cidr field'}), 400
+        try:
+            net = _ip.ip_network(raw, strict=False)
+            normalised = str(net)
+        except ValueError:
+            return jsonify({'error': f'Invalid CIDR: {raw}'}), 400
+
+        def _bg_scan(cidr):
+            try:
+                from actions.scanning import NetworkScanner
+                scanner = NetworkScanner(shared_data)
+                portstart = shared_data.portstart
+                portend = shared_data.portend
+                extra_ports = shared_data.portlist
+
+                shared_data.append_subnet_scan_log(
+                    cidr, 'info', f'Scanning {cidr}\u2026',
+                )
+                results = scanner.run_nmap_network_scan(
+                    cidr, portstart, portend, extra_ports,
+                )
+                found = len(results)
+                # Persist discovered hosts into DB
+                for host, host_data in results.items():
+                    mac = host_data.get('mac', '')
+                    if not mac or mac == '00:00:00:00:00:00':
+                        ip_parts = host.split('.')
+                        if len(ip_parts) == 4:
+                            mac = f"00:00:{int(ip_parts[0]):02x}:{int(ip_parts[1]):02x}:{int(ip_parts[2]):02x}:{int(ip_parts[3]):02x}"
+                    if mac:
+                        scanner.db.upsert_host(
+                            mac=mac.lower().strip(),
+                            ip=host,
+                            hostname=host_data.get('hostname', ''),
+                            ports=','.join(map(str, sorted(host_data.get('open_ports', [])))),
+                        )
+                        scanner.db.update_ping_status(mac.lower().strip(), success=True)
+
+                if found > 0:
+                    shared_data.append_subnet_scan_log(
+                        cidr, 'ok',
+                        f'{found} device(s) found on {cidr}',
+                        devices=found,
+                    )
+                else:
+                    shared_data.append_subnet_scan_log(
+                        cidr, 'error',
+                        f'{cidr} \u2014 no devices responded',
+                        devices=0,
+                    )
+                logger.info(f"Subnet trigger scan complete for {cidr}: {found} hosts")
+            except Exception as e:
+                logger.error(f"Subnet trigger scan failed for {cidr}: {e}")
+                shared_data.append_subnet_scan_log(
+                    cidr, 'error', f'Scan failed: {e}',
+                )
+
+        import threading
+        t = threading.Thread(target=_bg_scan, args=(normalised,), daemon=True)
+        t.start()
+        return jsonify({'status': 'scan_triggered', 'cidr': normalised})
+
+    except Exception as e:
+        logger.error(f"Error triggering subnet scan: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/config/scan-subnets/log')
+def get_scan_subnets_log():
+    """Return the in-memory subnet scan log (newest last)."""
+    try:
+        log = shared_data.get_subnet_scan_log()
+        return jsonify({'log': log})
+    except Exception as e:
+        logger.error(f"Error fetching subnet scan log: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/config/hardware-profiles')
 def get_hardware_profiles():
     """Get predefined hardware profiles for different Raspberry Pi models"""
@@ -3789,6 +3985,342 @@ def get_network():
         except Exception as e:
             logger.error(f"Error getting network data from SQLite: {e}")
             logger.debug(f"Traceback: {traceback.format_exc()}")
+            return jsonify({'error': str(e)}), 500
+
+
+def _batch_ai_classify(nodes, indices, ai_service, labels, valid_types):
+    """Classify multiple low-confidence devices in a SINGLE GPT-5 Nano call.
+
+    Mutates nodes in-place for the given indices.
+    """
+    if not indices:
+        return
+
+    # Build a compact table for the prompt
+    lines = []
+    for idx in indices:
+        n = nodes[idx]
+        lines.append(
+            f"{idx}|{n.get('vendor','') or '?'}|{n.get('hostname','') or '?'}|"
+            f"{n.get('mac','') or '?'}|{','.join(n['ports'][:10]) or 'none'}"
+        )
+
+    valid_list = ", ".join(sorted(valid_types - {"ragnar", "unknown"}))
+
+    system = (
+        "You are a network device classifier. For each numbered line, reply with "
+        "ONLY the line number and device_type, one per line. "
+        f"Valid types: {valid_list}. "
+        "Format: NUMBER|TYPE\nExample: 0|smart_tv\nIf uncertain reply NUMBER|unknown"
+    )
+
+    user = (
+        "IDX|VENDOR|HOSTNAME|MAC|PORTS\n" + "\n".join(lines)
+    )
+
+    original_model = ai_service.model
+    try:
+        ai_service.model = "gpt-5-nano"
+        answer = ai_service._ask(system, user)
+    finally:
+        ai_service.model = original_model
+
+    if not answer:
+        return
+
+    # Parse response lines
+    for line in answer.strip().splitlines():
+        line = line.strip().strip('`')
+        if '|' not in line:
+            continue
+        parts = line.split('|', 1)
+        try:
+            idx = int(parts[0].strip())
+            dtype = parts[1].strip().lower().replace(' ', '_').strip('"\'.,')
+        except (ValueError, IndexError):
+            continue
+        if idx in indices and dtype in valid_types:
+            nodes[idx]['type'] = dtype
+            nodes[idx]['type_label'] = labels.get(dtype, 'Unknown')
+            nodes[idx]['confidence'] = 0.7
+
+
+@app.route('/api/network/topology')
+def get_network_topology():
+    """Build a topology graph with gateway as center, device types classified, and links inferred."""
+    with _network_context_from_request():
+        try:
+            import hashlib
+            from device_classifier import classify_device, classify_device_ai, DEVICE_ICONS, DEVICE_TYPE_LABELS, DEVICE_TYPE_COLORS, VALID_DEVICE_TYPES
+
+            # Client can explicitly request AI classification
+            use_ai = request.args.get('use_ai', '0') == '1'
+
+            hosts = shared_data.db.get_all_hosts()
+            gw = getattr(shared_data, 'gateway_info', {}) or {}
+            gateway_ip = gw.get('gateway_ip')
+            ragnar_ip = gw.get('ragnar_ip')
+            subnet = gw.get('subnet')
+            interface = gw.get('interface')
+
+            # Compute a lightweight fingerprint of the current host list
+            # so the client can detect network changes
+            _hash_parts = sorted(f"{h.get('ip','')}|{h.get('mac','')}|{h.get('ports','')}" for h in hosts)
+            network_hash = hashlib.md5('|'.join(_hash_parts).encode()).hexdigest()[:12]
+
+            # If no gateway info yet, try to detect from netifaces directly
+            if not gateway_ip:
+                try:
+                    import netifaces
+                    gws = netifaces.gateways()
+                    gw_tuple = gws.get('default', {}).get(netifaces.AF_INET)
+                    if gw_tuple:
+                        gateway_ip = gw_tuple[0]
+                        interface = gw_tuple[1]
+                        iface_addrs = netifaces.ifaddresses(gw_tuple[1]).get(netifaces.AF_INET)
+                        if iface_addrs:
+                            ragnar_ip = iface_addrs[0]['addr']
+                except Exception:
+                    pass
+
+            # Build credentials set for risk scoring
+            cred_ips = set()
+            try:
+                cred_data = shared_data.db.get_all_credentials() if hasattr(shared_data.db, 'get_all_credentials') else []
+                for c in cred_data:
+                    ip_val = c.get('ip', '')
+                    if ip_val:
+                        cred_ips.add(ip_val)
+            except Exception:
+                pass
+
+            # ----------------------------------------------------------
+            # Phase 1: fast rule-based classification (no AI calls)
+            # ----------------------------------------------------------
+            nodes = []
+            node_ids = set()
+            low_confidence_indices = []  # indices of nodes needing AI help
+
+            for host in hosts:
+                ip = host.get('ip', '')
+                if not ip:
+                    continue
+
+                ports_str = host.get('ports', '')
+                ports = [p.strip() for p in ports_str.split(',') if p.strip()] if ports_str else []
+                vendor = host.get('vendor', '') or ''
+                status = host.get('status', 'unknown')
+                hostname = host.get('hostname', '') or ''
+                mac = host.get('mac', '') or ''
+
+                # Rule-based + hostname classification (no AI yet)
+                classification = classify_device_ai(
+                    vendor, ports,
+                    hostname=hostname,
+                    mac=mac,
+                    ai_service=None,  # skip AI in phase 1
+                    gateway_ip=gateway_ip, device_ip=ip,
+                )
+
+                # Risk scoring
+                port_count = len(ports)
+                has_creds = 5 if ip in cred_ips else 0
+                degraded = 3 if status == 'degraded' else 0
+                risk = port_count + has_creds + degraded
+
+                node = {
+                    'id': ip,
+                    'ip': ip,
+                    'mac': mac,
+                    'hostname': hostname,
+                    'vendor': vendor,
+                    'type': classification['device_type'],
+                    'type_label': classification['label'],
+                    'confidence': classification['confidence'],
+                    'ports': ports,
+                    'status': status,
+                    'risk': risk,
+                    'last_seen': host.get('last_seen', ''),
+                    'is_gateway': ip == gateway_ip,
+                    'is_ragnar': ip == ragnar_ip,
+                }
+                nodes.append(node)
+                node_ids.add(ip)
+
+                # Track low-confidence nodes for batch AI
+                if classification['confidence'] < 0.65 and not node['is_gateway']:
+                    low_confidence_indices.append(len(nodes) - 1)
+
+            # ----------------------------------------------------------
+            # Phase 2: batch AI classification (only when client requests it)
+            # ----------------------------------------------------------
+            ai_used = False
+            ai_service = getattr(shared_data, 'ai_service', None)
+            if use_ai and ai_service and low_confidence_indices and ai_service.ensure_ready():
+                # Check if we have cached AI results for this exact network state
+                _topo_ai_cache = getattr(shared_data, '_topo_ai_cache', {})
+                cached = _topo_ai_cache.get(network_hash)
+                if cached:
+                    # Apply cached classifications
+                    for idx, dtype, label in cached:
+                        if idx < len(nodes):
+                            nodes[idx]['type'] = dtype
+                            nodes[idx]['type_label'] = label
+                            nodes[idx]['confidence'] = 0.7
+                    ai_used = True
+                else:
+                    try:
+                        _batch_ai_classify(nodes, low_confidence_indices, ai_service, DEVICE_TYPE_LABELS, VALID_DEVICE_TYPES)
+                        # Store results in cache
+                        cache_entries = [(idx, nodes[idx]['type'], nodes[idx]['type_label']) for idx in low_confidence_indices]
+                        shared_data._topo_ai_cache = {network_hash: cache_entries}
+                        ai_used = True
+                    except Exception as e:
+                        logger.debug(f"Batch AI classification failed (non-fatal): {e}")
+
+            # ----------------------------------------------------------
+            # Phase 3: build topology links
+            # ----------------------------------------------------------
+            import ipaddress
+            potential_aps = []  # Devices that extend the network
+
+            # Ensure gateway is in node list even if not in hosts table
+            if gateway_ip and gateway_ip not in node_ids:
+                gw_vendor = gw.get('gateway_vendor', '')
+                gw_class = classify_device(gw_vendor, ['53', '80', '443'], gateway_ip=gateway_ip, device_ip=gateway_ip)
+                nodes.append({
+                    'id': gateway_ip,
+                    'ip': gateway_ip,
+                    'mac': gw.get('gateway_mac', ''),
+                    'hostname': 'Gateway',
+                    'vendor': gw_vendor,
+                    'type': 'router',
+                    'type_label': 'Router/Gateway',
+                    'confidence': 1.0,
+                    'ports': [],
+                    'status': 'alive',
+                    'risk': 0,
+                    'last_seen': '',
+                    'is_gateway': True,
+                    'is_ragnar': False,
+                })
+                node_ids.add(gateway_ip)
+
+            # Identify network-extending devices (APs, extenders, secondary routers)
+            _NETWORK_EXTENDER_TYPES = {'access_point', 'extender', 'switch'}
+            for node in nodes:
+                if node['is_gateway'] or node['is_ragnar']:
+                    continue
+                if node['type'] in _NETWORK_EXTENDER_TYPES:
+                    potential_aps.append(node)
+                elif node['type'] == 'router' and node['confidence'] >= 0.8:
+                    potential_aps.append(node)
+
+            # ── Determine the gateway's /24 subnet ──
+            gw_subnet_prefix = None
+            if gateway_ip:
+                try:
+                    gw_subnet_prefix = str(ipaddress.ip_network(f"{gateway_ip}/24", strict=False))
+                except Exception:
+                    pass
+
+            # ── Build AP subnet map ──
+            # If an AP/router is on a DIFFERENT /24 than the gateway,
+            # every device on that /24 is assumed to go through that AP.
+            ap_subnet_map = {}    # "/24 network string" → AP ip
+            ap_macs_prefix = {}   # MAC OUI prefix → AP ip  (fallback for same-subnet)
+            for ap in potential_aps:
+                ap_ip = ap.get('ip', '')
+                if not ap_ip:
+                    continue
+
+                # Subnet-based mapping
+                try:
+                    ap_net = str(ipaddress.ip_network(f"{ap_ip}/24", strict=False))
+                    if gw_subnet_prefix and ap_net != gw_subnet_prefix:
+                        # This AP serves a different subnet
+                        ap_subnet_map[ap_net] = ap_ip
+                    elif not gw_subnet_prefix:
+                        ap_subnet_map[ap_net] = ap_ip
+                except Exception:
+                    pass
+
+                # MAC OUI fallback (same-subnet heuristic)
+                mac = ap.get('mac', '')
+                if mac and len(mac) >= 8:
+                    prefix = mac[:8].lower()
+                    ap_macs_prefix[prefix] = ap_ip
+
+            # ── Build links ──
+            links = []
+            for node in nodes:
+                if node['is_gateway']:
+                    continue
+                target = gateway_ip or (nodes[0]['ip'] if nodes else None)
+                link_type = 'default'
+                node_ip = node.get('ip', '')
+                node_type = node.get('type', '')
+
+                # Strategy 1: Subnet-based assignment
+                # If this device is on the same /24 as an AP that is NOT
+                # on the gateway's subnet, route it through that AP.
+                try:
+                    node_net = str(ipaddress.ip_network(f"{node_ip}/24", strict=False))
+                    if node_net in ap_subnet_map and ap_subnet_map[node_net] != node_ip:
+                        target = ap_subnet_map[node_net]
+                        link_type = 'subnet_inferred'
+                except Exception:
+                    node_net = None
+
+                # Strategy 2: MAC OUI prefix (same-subnet fallback)
+                if link_type == 'default' and node_type not in ('router', 'access_point', 'extender', 'switch'):
+                    mac = node.get('mac', '')
+                    if mac and len(mac) >= 8:
+                        prefix = mac[:8].lower()
+                        if prefix in ap_macs_prefix and ap_macs_prefix[prefix] != node_ip:
+                            target = ap_macs_prefix[prefix]
+                            link_type = 'ap_inferred'
+
+                if target:
+                    links.append({
+                        'source': node_ip,
+                        'target': target,
+                        'type': link_type,
+                    })
+
+            # APs / extenders connect upstream to gateway
+            for ap in potential_aps:
+                if gateway_ip:
+                    links.append({
+                        'source': ap['ip'],
+                        'target': gateway_ip,
+                        'type': 'ap_uplink',
+                    })
+
+            result = {
+                'gateway': {
+                    'ip': gateway_ip,
+                    'mac': gw.get('gateway_mac', ''),
+                    'vendor': gw.get('gateway_vendor', ''),
+                },
+                'ragnar': {
+                    'ip': ragnar_ip,
+                    'interface': interface,
+                },
+                'subnet': subnet,
+                'nodes': nodes,
+                'links': links,
+                'device_icons': DEVICE_ICONS,
+                'device_labels': DEVICE_TYPE_LABELS,
+                'device_colors': DEVICE_TYPE_COLORS,
+                'network_hash': network_hash,
+                'ai_used': ai_used,
+            }
+            return jsonify(result)
+
+        except Exception as e:
+            logger.error(f"Error building topology: {e}")
+            logger.debug(traceback.format_exc())
             return jsonify({'error': str(e)}), 500
 
 
@@ -4749,7 +5281,8 @@ def attack_logs():
                 'target_port': target_port,
                 'status': status,
                 'message': message,
-                'details': details
+                'details': details,
+                'network_ssid': getattr(shared_data, 'active_network_ssid', None) or 'unknown'
             }
             
             # Load existing logs or create new list
@@ -4791,6 +5324,7 @@ def attack_logs():
             ip_filter = request.args.get('ip', None)
             attack_type_filter = request.args.get('type', None)
             status_filter = request.args.get('status', None)
+            network_filter = request.args.get('network', None)
             limit = int(request.args.get('limit', 100))
             days_back = int(request.args.get('days', 7))
             
@@ -4836,18 +5370,27 @@ def attack_logs():
                     logger.error(f"Error reading attack log file {log_file}: {e}")
                     continue
 
+            # Collect all unique network SSIDs across all logs (before filtering)
+            available_networks = sorted(set(
+                log.get('network_ssid') or 'unknown'
+                for log in all_logs
+            ))
+
             # Apply filters
             filtered_logs = all_logs
 
             if ip_filter:
                 filtered_logs = [log for log in filtered_logs if log.get('target_ip') == ip_filter]
-            
+
             if attack_type_filter:
                 filtered_logs = [log for log in filtered_logs if log.get('attack_type') == attack_type_filter]
-            
+
             if status_filter:
                 filtered_logs = [log for log in filtered_logs if log.get('status') == status_filter]
-            
+
+            if network_filter:
+                filtered_logs = [log for log in filtered_logs if (log.get('network_ssid') or 'unknown') == network_filter]
+
             # Sort by timestamp (most recent first)
             filtered_logs.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
 
@@ -4872,10 +5415,12 @@ def attack_logs():
                 'filtered_count': filtered_count,
                 'success_count': success_count,
                 'failed_count': failed_count,
+                'available_networks': available_networks,
                 'filters_applied': {
                     'ip': ip_filter,
                     'type': attack_type_filter,
                     'status': status_filter,
+                    'network': network_filter,
                     'days': days_back,
                     'limit': limit
                 }
@@ -6805,6 +7350,259 @@ def swap_to_pwnagotchi_mode():
     except Exception as e:
         logger.error(f"Error scheduling Pwnagotchi swap: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/pwnagotchi/config')
+def get_pwnagotchi_config():
+    """Read the Pwnagotchi TOML config and return structured settings."""
+    try:
+        if not os.path.isfile(PWN_CONFIG_FILE):
+            return jsonify({'success': False, 'error': 'Pwnagotchi config not found. Install Pwnagotchi first.'}), 404
+
+        try:
+            import tomlkit
+            with open(PWN_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                doc = tomlkit.parse(f.read())
+        except ImportError:
+            # Fallback: basic TOML parser for simple key=value configs
+            doc = _parse_toml_basic(PWN_CONFIG_FILE)
+        except Exception as exc:
+            logger.error(f"Failed to parse Pwnagotchi config: {exc}")
+            return jsonify({'success': False, 'error': f'Failed to parse config: {exc}'}), 500
+
+        # Extract the settings we expose in the UI
+        main = doc.get('main', {})
+        ui = doc.get('ui', {})
+        ui_display = ui.get('display', {})
+        ui_web = ui.get('web', {})
+        personality = doc.get('personality', {})
+        plugins = main.get('plugins', {})
+
+        # Parse whitelist (list of SSIDs/BSSIDs)
+        raw_whitelist = main.get('whitelist', [])
+        if isinstance(raw_whitelist, list):
+            whitelist_str = ', '.join(str(s) for s in raw_whitelist)
+        else:
+            whitelist_str = str(raw_whitelist)
+
+        # Parse channels (list of ints)
+        raw_channels = personality.get('channels', [])
+        if isinstance(raw_channels, list):
+            channels_str = ', '.join(str(c) for c in raw_channels)
+        else:
+            channels_str = str(raw_channels)
+
+        config = {
+            'main.name': str(main.get('name', 'pwnagotchi')),
+            'main.whitelist': whitelist_str,
+            'personality.advertise': bool(personality.get('advertise', False)),
+            'personality.deauth': bool(personality.get('deauth', True)),
+            'personality.associate': bool(personality.get('associate', True)),
+            'personality.min_rssi': int(personality.get('min_rssi', -200)),
+            'personality.channels': channels_str,
+            'ui.invert': bool(ui.get('invert', False)),
+            'ui.display.enabled': bool(ui_display.get('enabled', True)),
+            'ui.display.type': str(ui_display.get('type', 'waveshare_4')),
+            'ui.display.rotation': int(ui_display.get('rotation', 180)),
+            'ui.web.enabled': bool(ui_web.get('enabled', True)),
+            'ui.web.address': str(ui_web.get('address', '0.0.0.0')),
+            'ui.web.username': str(ui_web.get('username', 'ragnar')),
+            'ui.web.password': str(ui_web.get('password', 'ragnar')),
+            'ui.web.port': int(ui_web.get('port', 8080)),
+            'main.plugins.grid.enabled': bool(plugins.get('grid', {}).get('enabled', False)),
+            'main.plugins.fix_services.enabled': bool(plugins.get('fix_services', {}).get('enabled', False)),
+            'main.plugins.auto-tune.enabled': bool(plugins.get('auto-tune', {}).get('enabled', True)),
+            'main.plugins.webcfg.enabled': bool(plugins.get('webcfg', {}).get('enabled', True)),
+            'main.plugins.memtemp.enabled': bool(plugins.get('memtemp', {}).get('enabled', False)),
+        }
+
+        return jsonify({'success': True, 'config': config})
+    except Exception as e:
+        logger.error(f"Error reading Pwnagotchi config: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/pwnagotchi/config', methods=['POST'])
+def save_pwnagotchi_config():
+    """Update specific settings in the Pwnagotchi TOML config."""
+    try:
+        if not os.path.isfile(PWN_CONFIG_FILE):
+            return jsonify({'success': False, 'error': 'Pwnagotchi config not found. Install Pwnagotchi first.'}), 404
+
+        data = request.get_json(silent=True)
+        if not data or 'config' not in data:
+            return jsonify({'success': False, 'error': 'Missing config payload'}), 400
+
+        updates = data['config']
+        if not isinstance(updates, dict):
+            return jsonify({'success': False, 'error': 'Config must be a dict'}), 400
+
+        # Whitelist of allowed settings to prevent arbitrary file writes
+        ALLOWED_KEYS = {
+            'main.name': str,
+            'main.whitelist': str,       # comma-separated → converted to list
+            'personality.advertise': bool,
+            'personality.deauth': bool,
+            'personality.associate': bool,
+            'personality.min_rssi': int,
+            'personality.channels': str,  # comma-separated → converted to list
+            'ui.invert': bool,
+            'ui.display.enabled': bool,
+            'ui.display.rotation': int,
+            'ui.display.type': str,
+            'ui.web.username': str,
+            'ui.web.password': str,
+            'ui.web.port': int,
+            'main.plugins.grid.enabled': bool,
+            'main.plugins.fix_services.enabled': bool,
+            'main.plugins.auto-tune.enabled': bool,
+            'main.plugins.webcfg.enabled': bool,
+            'main.plugins.memtemp.enabled': bool,
+        }
+
+        # Validate keys and types
+        validated = {}
+        for key, value in updates.items():
+            if key not in ALLOWED_KEYS:
+                continue  # silently skip unknown keys
+            expected_type = ALLOWED_KEYS[key]
+            if expected_type == bool:
+                validated[key] = bool(value)
+            elif expected_type == int:
+                validated[key] = int(value)
+            else:
+                validated[key] = str(value).strip()
+
+        if not validated:
+            return jsonify({'success': False, 'error': 'No valid settings in payload'}), 400
+
+        # Validate specific value ranges
+        if 'ui.display.rotation' in validated and validated['ui.display.rotation'] not in (0, 90, 180, 270):
+            return jsonify({'success': False, 'error': 'Rotation must be 0, 90, 180, or 270'}), 400
+        if 'ui.web.port' in validated:
+            port = validated['ui.web.port']
+            if port < 1024 or port > 65535:
+                return jsonify({'success': False, 'error': 'Web port must be between 1024 and 65535'}), 400
+        if 'main.name' in validated:
+            name = validated['main.name']
+            if not name or len(name) > 32 or not re.match(r'^[a-zA-Z0-9_-]+$', name):
+                return jsonify({'success': False, 'error': 'Name must be 1-32 alphanumeric characters (plus - and _)'}), 400
+        if 'personality.min_rssi' in validated:
+            rssi = validated['personality.min_rssi']
+            if rssi < -200 or rssi > 0:
+                return jsonify({'success': False, 'error': 'Min RSSI must be between -200 and 0'}), 400
+
+        # Convert comma-separated strings to TOML lists
+        if 'main.whitelist' in validated:
+            raw = validated['main.whitelist']
+            validated['main.whitelist'] = [s.strip() for s in raw.split(',') if s.strip()] if raw.strip() else []
+        if 'personality.channels' in validated:
+            raw = validated['personality.channels']
+            if raw.strip():
+                try:
+                    validated['personality.channels'] = [int(c.strip()) for c in raw.split(',') if c.strip()]
+                except ValueError:
+                    return jsonify({'success': False, 'error': 'Channels must be comma-separated numbers (e.g. 1, 6, 11)'}), 400
+            else:
+                validated['personality.channels'] = []
+
+        try:
+            import tomlkit
+            with open(PWN_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                doc = tomlkit.parse(f.read())
+
+            for dotted_key, value in validated.items():
+                _set_toml_value(doc, dotted_key, value)
+
+            with open(PWN_CONFIG_FILE, 'w', encoding='utf-8') as f:
+                f.write(tomlkit.dumps(doc))
+        except ImportError:
+            # Fallback: use the shell helper from install script
+            script_path = os.path.join(shared_data.currentdir, 'scripts', 'install_pwnagotchi.sh')
+            for dotted_key, value in validated.items():
+                _set_toml_value_fallback(dotted_key, value)
+
+        logger.info(f"Pwnagotchi config updated: {list(validated.keys())}")
+        return jsonify({'success': True, 'message': f'Updated {len(validated)} setting(s)', 'updated': list(validated.keys())})
+
+    except Exception as e:
+        logger.error(f"Error saving Pwnagotchi config: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _set_toml_value(doc, dotted_key, value):
+    """Set a nested value in a tomlkit document using dotted key notation."""
+    import tomlkit
+    keys = dotted_key.split('.')
+    d = doc
+    for k in keys[:-1]:
+        if k not in d:
+            d[k] = tomlkit.table()
+        d = d[k]
+    d[keys[-1]] = value
+
+
+def _set_toml_value_fallback(dotted_key, value):
+    """Fallback: use Python inline script to update a TOML value when tomlkit is unavailable."""
+    if isinstance(value, bool):
+        val_str = 'true' if value else 'false'
+    elif isinstance(value, int):
+        val_str = str(value)
+    else:
+        val_str = value
+    try:
+        subprocess.run(
+            ['sudo', 'python3', '-c',
+             f"import tomlkit; f=open('{PWN_CONFIG_FILE}','r'); d=tomlkit.parse(f.read()); f.close(); "
+             f"exec(\"keys='{dotted_key}'.split('.');o=d\\nfor k in keys[:-1]:\\n if k not in o: o[k]=tomlkit.table()\\n o=o[k]\\no[keys[-1]]={repr(value)}\")"
+             f"; f=open('{PWN_CONFIG_FILE}','w'); f.write(tomlkit.dumps(d)); f.close()"],
+            capture_output=True, text=True, timeout=10
+        )
+    except Exception as exc:
+        logger.error(f"Fallback TOML write failed for {dotted_key}: {exc}")
+
+
+def _parse_toml_basic(filepath):
+    """Minimal TOML parser for reading simple config files when tomlkit is unavailable."""
+    result = {}
+    current_section = result
+    section_path = []
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                # Section header
+                m = re.match(r'^\[([^\]]+)\]$', line)
+                if m:
+                    section_path = m.group(1).split('.')
+                    current_section = result
+                    for part in section_path:
+                        if part not in current_section:
+                            current_section[part] = {}
+                        current_section = current_section[part]
+                    continue
+                # Key = value
+                m = re.match(r'^(\w+)\s*=\s*(.+)$', line)
+                if m:
+                    key = m.group(1)
+                    val = m.group(2).strip()
+                    if val.startswith('"') and val.endswith('"'):
+                        val = val[1:-1]
+                    elif val == 'true':
+                        val = True
+                    elif val == 'false':
+                        val = False
+                    else:
+                        try:
+                            val = int(val)
+                        except ValueError:
+                            pass
+                    current_section[key] = val
+    except Exception as exc:
+        logger.error(f"Basic TOML parse failed: {exc}")
+    return result
 
 
 @app.route('/api/kill', methods=['POST'])
@@ -12175,13 +12973,19 @@ def get_traffic_host_details(ip):
 # ADVANCED VULNERABILITY SCANNING API ENDPOINTS
 # ============================================================================
 
-# Global advanced vuln scanner instance
+# Global advanced vuln scanner instance (thread-safe singleton)
 _advanced_vuln_scanner_instance = None
+_advanced_vuln_scanner_lock = threading.Lock()
 
 def get_advanced_vuln_scanner():
-    """Get or create advanced vuln scanner instance"""
+    """Get or create advanced vuln scanner instance (thread-safe)"""
     global _advanced_vuln_scanner_instance
-    if _advanced_vuln_scanner_instance is None:
+    if _advanced_vuln_scanner_instance is not None:
+        return _advanced_vuln_scanner_instance
+    with _advanced_vuln_scanner_lock:
+        # Double-check after acquiring lock
+        if _advanced_vuln_scanner_instance is not None:
+            return _advanced_vuln_scanner_instance
         try:
             from advanced_vuln_scanner import AdvancedVulnScanner
             _advanced_vuln_scanner_instance = AdvancedVulnScanner(shared_data)
@@ -13886,7 +14690,7 @@ def get_ai_status():
                 'network_insights': getattr(ai_service, 'network_insights', False),
                 'vulnerability_summaries': getattr(ai_service, 'vulnerability_summaries', False)
             },
-            'configured': bool(getattr(ai_service, 'api_token', None))
+            'configured': bool(getattr(ai_service, 'api_token', None) or getattr(ai_service, 'client', None))
         }
         
         # Include initialization error if present (but skip SDK-related ones)
@@ -14176,6 +14980,113 @@ def remove_ai_token():
 
 
 # ============================================================================
+# PUSHOVER NOTIFICATION ENDPOINTS
+# ============================================================================
+
+@app.route('/api/pushover/keys', methods=['GET'])
+def get_pushover_keys():
+    """Get Pushover key status (without revealing full keys)."""
+    try:
+        from env_manager import EnvManager
+        em = EnvManager()
+        user_key = em.get_env_key("RAGNAR_PUSHOVER_USER_KEY")
+        api_token = em.get_env_key("RAGNAR_PUSHOVER_API_TOKEN")
+        return jsonify({
+            'user_key_configured': bool(user_key),
+            'api_token_configured': bool(api_token),
+            'user_key_preview': f"{user_key[:6]}...{user_key[-4:]}" if user_key and len(user_key) > 10 else None,
+            'api_token_preview': f"{api_token[:6]}...{api_token[-4:]}" if api_token and len(api_token) > 10 else None,
+        })
+    except Exception as e:
+        logger.error(f"Error getting Pushover key status: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pushover/keys', methods=['POST'])
+def save_pushover_keys():
+    """Save Pushover user key and/or API token to .env file."""
+    try:
+        from env_manager import EnvManager
+        em = EnvManager()
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+
+        saved = []
+        user_key = data.get('user_key', '').strip()
+        api_token = data.get('api_token', '').strip()
+
+        if user_key:
+            em.set_env_key("RAGNAR_PUSHOVER_USER_KEY", user_key)
+            saved.append("User Key")
+        if api_token:
+            em.set_env_key("RAGNAR_PUSHOVER_API_TOKEN", api_token)
+            saved.append("API Token")
+
+        if not saved:
+            return jsonify({'error': 'No keys provided'}), 400
+
+        # Auto-enable Pushover if both keys are now set
+        uk = em.get_env_key("RAGNAR_PUSHOVER_USER_KEY")
+        at = em.get_env_key("RAGNAR_PUSHOVER_API_TOKEN")
+        auto_enabled = False
+        if uk and at and not shared_data.config.get('pushover_enabled', False):
+            shared_data.config['pushover_enabled'] = True
+            shared_data.save_config()
+            auto_enabled = True
+
+        return jsonify({
+            'success': True,
+            'message': f"✓ Saved: {', '.join(saved)}",
+            'auto_enabled': auto_enabled,
+            'both_configured': bool(uk and at),
+        })
+    except Exception as e:
+        logger.error(f"Error saving Pushover keys: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pushover/keys', methods=['DELETE'])
+def remove_pushover_keys():
+    """Remove Pushover keys from .env file."""
+    try:
+        from env_manager import EnvManager
+        em = EnvManager()
+        em.delete_env_key("RAGNAR_PUSHOVER_USER_KEY")
+        em.delete_env_key("RAGNAR_PUSHOVER_API_TOKEN")
+        shared_data.config['pushover_enabled'] = False
+        shared_data.save_config()
+        return jsonify({'success': True, 'message': 'Pushover keys removed'})
+    except Exception as e:
+        logger.error(f"Error removing Pushover keys: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/pushover/test', methods=['POST'])
+def test_pushover():
+    """Send a test Pushover notification."""
+    try:
+        pushover = getattr(shared_data, '_pushover_service', None)
+        if not pushover:
+            from pushover_service import PushoverService
+            pushover = PushoverService(shared_data)
+            shared_data._pushover_service = pushover
+
+        if not pushover.is_configured():
+            return jsonify({'success': False, 'message': 'Pushover keys not configured. Please save your User Key and API Token first.'}), 400
+
+        result = pushover.send(
+            message="Hello there Viking, are you ready for adventures?",
+            title="Ragnar says",
+            sound="bugle"
+        )
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error testing Pushover: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+# ============================================================================
 # SIGNAL HANDLERS
 # ============================================================================
 
@@ -14395,8 +15306,15 @@ def run_server(host='0.0.0.0', port=8000, ssl_cert=None, ssl_key=None, https_por
         if use_https:
             logger.info("⚠️  Using self-signed certificate - browser will show security warning")
 
-        # Prime synchronized data before clients connect
-        sync_all_counts()
+        # Synchronize counts in the background so the web server binds
+        # immediately instead of waiting for a full DB scan first.
+        def _deferred_sync():
+            try:
+                sync_all_counts()
+                logger.info("Initial sync_all_counts completed")
+            except Exception as e:
+                logger.error(f"Deferred sync_all_counts error: {e}")
+        socketio.start_background_task(_deferred_sync)
 
         # Start background status broadcaster
         socketio.start_background_task(broadcast_status_updates)

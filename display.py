@@ -15,7 +15,6 @@
 import threading
 import time
 import os
-import pandas as pd
 import signal
 import glob
 import logging
@@ -63,6 +62,7 @@ class Display:
             logger.info("Display initialization complete.")
         except Exception as e:
             logger.error(f"Error during display initialization: {e}")
+            raise
 
         self.main_image_thread = threading.Thread(target=self.update_main_image)
         self.main_image_thread.daemon = True
@@ -79,14 +79,14 @@ class Display:
         self.scale_factor_x = self.shared_data.scale_factor_x
         self.scale_factor_y = self.shared_data.scale_factor_y
 
-        # Layout stretch for wider displays (e.g. 2.7" 176x264)
-        # On 2.13" (122x250) this is 1.0 - no change
-        # On 2.7" (176x264) push status/comment section down further
-        self.y_stretch = 1.35 if self.scale_factor_x > 1.2 else 1.0
+        # Wide display detection (e.g. 2.7" at 176x264 vs reference 122x250)
+        self.is_wide = self.scale_factor_x > 1.2
+        # y_stretch is no longer needed — scale_factor_y handles vertical spacing
+        self.y_stretch = 1.0
 
         # Hardware button support (2.7" HAT has KEY1-KEY4)
         self.button_listener = None
-        if self.scale_factor_x > 1.2 and EPDButtonListener is not None:
+        if self.is_wide and EPDButtonListener is not None:
             self.button_listener = EPDButtonListener(shared_data)
             self.button_listener.start()
 
@@ -136,6 +136,7 @@ class Display:
         
     def update_vuln_count(self):
         """Update the vulnerability count on the display."""
+        import pandas as pd
         with self.semaphore:
             try:
                 if not os.path.exists(self.shared_data.vuln_summary_file):
@@ -205,6 +206,7 @@ class Display:
 
     def update_shared_data(self):
         """Update the shared data with the latest system information."""
+        import pandas as pd
         with self.semaphore:
             try:
                 # Create livestatus file if it doesn't exist
@@ -728,23 +730,28 @@ class Display:
         """Draw standard page frame: border, title, divider, footer."""
         w = self.shared_data.width
         h = self.shared_data.height
+        sx = self.scale_factor_x
+        sy = self.scale_factor_y
         font = self.shared_data.font_arial9
         font_title = self.shared_data.font_viking
         draw.rectangle((1, 1, w - 1, h - 1), outline=0)
-        draw.text((4, 4), title, font=font_title, fill=0)
-        draw.line((1, 22, w - 1, 22), fill=0)
-        draw.line((1, h - 18, w - 1, h - 18), fill=0)
-        draw.text((4, h - 16), "K1:Home K2:Flip K3:Next K4:Rst", font=font, fill=0)
+        draw.text((int(4 * sx), int(4 * sy)), title, font=font_title, fill=0)
+        draw.line((1, int(22 * sy), w - 1, int(22 * sy)), fill=0)
+        draw.line((1, h - int(18 * sy), w - 1, h - int(18 * sy)), fill=0)
+        draw.text((int(4 * sx), h - int(16 * sy)), "K1:Home K2:Flip K3:Next K4:Rst", font=font, fill=0)
 
     def _draw_stat_rows(self, draw, y, stats):
         """Draw key-value stat rows. Returns final y position."""
         w = self.shared_data.width
+        sx = self.scale_factor_x
+        sy = self.scale_factor_y
         font = self.shared_data.font_arial9
-        line_h = 14
+        line_h = int(14 * sy)
+        pad_x = int(6 * sx)
         for label, value in stats:
             val_str = str(value)[:22]
-            draw.text((6, y), label, font=font, fill=0)
-            draw.text((w - 6 - font.getlength(val_str), y), val_str, font=font, fill=0)
+            draw.text((pad_x, y), label, font=font, fill=0)
+            draw.text((w - pad_x - font.getlength(val_str), y), val_str, font=font, fill=0)
             y += line_h
         return y
 
@@ -902,10 +909,14 @@ class Display:
         self._draw_page_frame(draw, "NETWORK SCAN")
         w = self.shared_data.width
         h = self.shared_data.height
+        sx = self.scale_factor_x
+        sy = self.scale_factor_y
         font = self.shared_data.font_arial9
         sd = self.shared_data
-        y = 28
-        line_h = 14
+        y = int(28 * sy)
+        line_h = int(14 * sy)
+        pad_x = int(6 * sx)
+        row_h = int(12 * sy)
 
         data = self._get_cached_page_data('network', self._fetch_network_data)
 
@@ -919,13 +930,13 @@ class Display:
             y = self._draw_stat_rows(draw, y, stats)
 
             # Divider before host list
-            y += 2
-            draw.line((4, y, w - 4, y), fill=0)
-            y += 4
+            y += int(2 * sy)
+            draw.line((int(4 * sx), y, w - int(4 * sx), y), fill=0)
+            y += int(4 * sy)
 
             # List actual discovered hosts
             hosts = data.get('hosts', [])
-            max_rows = (h - 18 - y) // 12
+            max_rows = (h - int(18 * sy) - y) // row_h
             for host in hosts[:max_rows]:
                 ip = host.get('ip', '?')
                 status = host.get('status', '?')
@@ -933,9 +944,9 @@ class Display:
                 port_count = len([p for p in str(ports).split(';') if p.strip()]) if ports else 0
                 line = f"{ip}"
                 extra = f"{status[:3]} p:{port_count}"
-                draw.text((6, y), line, font=font, fill=0)
-                draw.text((w - 6 - font.getlength(extra), y), extra, font=font, fill=0)
-                y += 12
+                draw.text((pad_x, y), line, font=font, fill=0)
+                draw.text((w - pad_x - font.getlength(extra), y), extra, font=font, fill=0)
+                y += row_h
         else:
             stats = [
                 ("Hosts found", str(getattr(sd, 'targetnbr', 0))),
@@ -951,10 +962,13 @@ class Display:
         self._draw_page_frame(draw, "VULN INTEL")
         w = self.shared_data.width
         h = self.shared_data.height
+        sx = self.scale_factor_x
+        sy = self.scale_factor_y
         font = self.shared_data.font_arial9
         sd = self.shared_data
-        y = 28
-        line_h = 14
+        y = int(28 * sy)
+        row_h = int(12 * sy)
+        pad_x = int(6 * sx)
 
         data = self._get_cached_page_data('vuln_intel', self._fetch_vuln_intel_data, ttl=30)
 
@@ -971,15 +985,15 @@ class Display:
             # Show recent scan targets
             targets = data.get('targets', [])
             if targets:
-                y += 2
-                draw.line((4, y, w - 4, y), fill=0)
-                y += 4
-                draw.text((6, y), "Recent targets:", font=font, fill=0)
-                y += 12
-                max_rows = (h - 18 - y) // 12
+                y += int(2 * sy)
+                draw.line((int(4 * sx), y, w - int(4 * sx), y), fill=0)
+                y += int(4 * sy)
+                draw.text((pad_x, y), "Recent targets:", font=font, fill=0)
+                y += row_h
+                max_rows = (h - int(18 * sy) - y) // row_h
                 for ip in targets[:max_rows]:
-                    draw.text((10, y), ip, font=font, fill=0)
-                    y += 12
+                    draw.text((int(10 * sx), y), ip, font=font, fill=0)
+                    y += row_h
         else:
             stats = [
                 ("Vulns found", str(getattr(sd, 'vulnnbr', 0))),
@@ -994,8 +1008,10 @@ class Display:
         self._draw_page_frame(draw, "DISCOVERED")
         w = self.shared_data.width
         h = self.shared_data.height
+        sx = self.scale_factor_x
+        sy = self.scale_factor_y
         font = self.shared_data.font_arial9
-        y = 28
+        y = int(28 * sy)
 
         data = self._get_cached_page_data('discovered', self._fetch_discovered_data, ttl=15)
 
@@ -1010,9 +1026,9 @@ class Display:
                 ("SQL creds", str(creds.get('SQL', 0))),
             ]
             y = self._draw_stat_rows(draw, y, stats)
-            y += 2
-            draw.line((4, y, w - 4, y), fill=0)
-            y += 4
+            y += int(2 * sy)
+            draw.line((int(4 * sx), y, w - int(4 * sx), y), fill=0)
+            y += int(4 * sy)
             summary = [
                 ("Data stolen", f"{data['loot']} files"),
                 ("Attack logs", str(data['attacks'])),
@@ -1032,8 +1048,13 @@ class Display:
         self._draw_page_frame(draw, "ADV SCANNER")
         w = self.shared_data.width
         h = self.shared_data.height
+        sx = self.scale_factor_x
+        sy = self.scale_factor_y
         font = self.shared_data.font_arial9
-        y = 28
+        y = int(28 * sy)
+        line_h = int(14 * sy)
+        row_h = int(12 * sy)
+        pad_x = int(6 * sx)
 
         data = self._get_cached_page_data('advanced', self._fetch_advanced_data, ttl=5)
 
@@ -1054,19 +1075,19 @@ class Display:
                 scanner_items.append((name.capitalize(), status))
 
             for label, value in scanner_items:
-                draw.text((6, y), label, font=font, fill=0)
-                draw.text((w - 6 - font.getlength(value), y), value, font=font, fill=0)
-                y += 14
+                draw.text((pad_x, y), label, font=font, fill=0)
+                draw.text((w - pad_x - font.getlength(value), y), value, font=font, fill=0)
+                y += line_h
 
-            y += 2
-            draw.line((4, y, w - 4, y), fill=0)
-            y += 4
+            y += int(2 * sy)
+            draw.line((int(4 * sx), y, w - int(4 * sx), y), fill=0)
+            y += int(4 * sy)
 
             # Findings summary
             total = summary.get('total_findings', 0)
-            draw.text((6, y), "Findings", font=font, fill=0)
-            draw.text((w - 6 - font.getlength(str(total)), y), str(total), font=font, fill=0)
-            y += 14
+            draw.text((pad_x, y), "Findings", font=font, fill=0)
+            draw.text((w - pad_x - font.getlength(str(total)), y), str(total), font=font, fill=0)
+            y += line_h
 
             # Severity breakdown on one line each
             crit = sev.get('critical', 0)
@@ -1074,23 +1095,23 @@ class Display:
             med = sev.get('medium', 0)
             low = sev.get('low', 0)
             sev_line = f"C:{crit} H:{high} M:{med} L:{low}"
-            draw.text((6, y), sev_line, font=font, fill=0)
-            y += 14
+            draw.text((pad_x, y), sev_line, font=font, fill=0)
+            y += line_h
 
             # Active scans
             active_count = len([s for s in active if s.get('status') == 'running'])
-            draw.text((6, y), "Active scans", font=font, fill=0)
-            draw.text((w - 6 - font.getlength(str(active_count)), y), str(active_count), font=font, fill=0)
-            y += 14
+            draw.text((pad_x, y), "Active scans", font=font, fill=0)
+            draw.text((w - pad_x - font.getlength(str(active_count)), y), str(active_count), font=font, fill=0)
+            y += line_h
 
             # Show running scan details
             for scan in active:
-                if scan.get('status') == 'running' and y < h - 32:
+                if scan.get('status') == 'running' and y < h - int(32 * sy):
                     stype = scan.get('scan_type', '?')[:8]
                     progress = scan.get('progress_percent', 0)
                     line = f"{stype} {progress}%"
-                    draw.text((10, y), line, font=font, fill=0)
-                    y += 12
+                    draw.text((int(10 * sx), y), line, font=font, fill=0)
+                    y += row_h
         else:
             stats = [
                 ("Scanner", "Not available"),
@@ -1104,8 +1125,9 @@ class Display:
         self._draw_page_frame(draw, "TRAFFIC")
         w = self.shared_data.width
         h = self.shared_data.height
+        sy = self.scale_factor_y
         font = self.shared_data.font_arial9
-        y = 28
+        y = int(28 * sy)
 
         data = self._get_cached_page_data('traffic', self._fetch_traffic_data, ttl=3)
 
@@ -1180,16 +1202,63 @@ class Display:
         C_AMBER = (220, 160,   0)
         RING_W  = 6
 
+        # Mascot tint colours keyed by partial status name
+        TINT_MAP = {
+            "IDLE":          (150, 200, 255),  # soft blue
+            "NetworkScanner":(0,   220, 220),  # cyan
+            "NmapVuln":      (0,   220, 220),  # cyan
+            "SSHBrute":      (255,  80,  80),  # red
+            "SMBBrute":      (255,  80,  80),
+            "FTPBrute":      (255,  80,  80),
+            "RDPBrute":      (255,  80,  80),
+            "TelnetBrute":   (255,  80,  80),
+            "SQLBrute":      (255, 120,  60),
+            "StealFiles":    (255, 160,  40),  # amber
+            "StealData":     (255, 160,  40),
+            "LogStandalone": (180, 180, 180),  # gray
+        }
+
+        def _tint_for(status):
+            s = status or "IDLE"
+            for key, col in TINT_MAP.items():
+                if key.lower() in s.lower():
+                    return col
+            return C_WHITE
+
         # ── fonts ────────────────────────────────────────────────────────
         fonts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resources", "fonts")
         arial_path  = os.path.join(fonts_dir, "Arial.ttf")
         viking_path = os.path.join(fonts_dir, "Creamy.ttf")
         try:
             font_title  = _ImageFont.truetype(viking_path, 22)
-            font_status = _ImageFont.truetype(arial_path,  18)
             font_ssid   = _ImageFont.truetype(arial_path,  14)
+            _font_status_cache = {}
+            def _status_font(text, max_px=200):
+                """Return the largest font that fits `text` within max_px."""
+                # At y=182 the circle chord is narrower than the full 240px diameter.
+                # Compute usable width: 2*sqrt(r^2 - (y - cx)^2) minus ring border.
+                import math
+                _r, _cx, _cy = 120, 120, 120
+                _chord = 2 * math.sqrt(max(0, _r**2 - (182 - _cy)**2))
+                max_px = min(max_px, int(_chord) - 2 * RING_W - 8)  # 8px safety margin
+                for size in (18, 16, 14, 12, 11, 10, 9):
+                    if size not in _font_status_cache:
+                        try:
+                            _font_status_cache[size] = _ImageFont.truetype(arial_path, size)
+                        except Exception:
+                            _font_status_cache[size] = _ImageFont.load_default()
+                    f = _font_status_cache[size]
+                    try:
+                        w = f.getbbox(text)[2] - f.getbbox(text)[0]
+                    except Exception:
+                        w = len(text) * size
+                    if w <= max_px:
+                        return f
+                return _font_status_cache.get(9, _ImageFont.load_default())
         except Exception:
-            font_title = font_status = font_ssid = _ImageFont.load_default()
+            font_title = font_ssid = _ImageFont.load_default()
+            def _status_font(text, max_px=200):
+                return _ImageFont.load_default()
 
         # ── mascot tint colour (user-configurable via web UI) ────────────
         def _parse_hex(hex_str, fallback=(150, 200, 255)):
@@ -1217,6 +1286,7 @@ class Display:
                 _frame_cache[key] = None
                 return None
             src = frames[idx % len(frames)]
+            tint = _tint_for(status)
             try:
                 gray  = src.convert("L").resize((MASCOT_SZ, MASCOT_SZ), _Image.LANCZOS)
                 alpha = _ImageOps.invert(gray)   # dark pixels → opaque, white → transparent
@@ -1260,7 +1330,8 @@ class Display:
             if any(k in s for k in ("ERROR", "FAIL")):                     return C_RED
             return C_GREEN
 
-        def _render(wifi_on, ssid, ap_on, status_text, mascot_rgba):
+        def _render(wifi_on, ssid, ap_on, status_text, mascot_rgba, info_label, info_col):
+            import math as _math
             img  = _Image.new("RGB", (SIZE, SIZE), C_BG)
             draw = _ImageDraw.Draw(img)
 
@@ -1288,32 +1359,71 @@ class Display:
                 my = 32 + (MASCOT_SZ - mh) // 2
                 img.paste(mascot_rgba, (mx, my), mascot_rgba)
 
-            # Status text
+            # ── Left panel: WiFi signal ───────────────────────────────────
+            sd = self.shared_data
+            rssi  = getattr(sd, "wifi_signal_dbm",     None)
+            qual  = getattr(sd, "wifi_signal_quality",  None)
+            font_side = font_ssid  # 14px
+            panel_y   = 100
+            # Compute safe inward x so panels stay inside the circle at panel_y
+            _chord = 2 * _math.sqrt(max(0, 120**2 - (panel_y - 120)**2))
+            panel_x = int((SIZE - _chord) / 2) + RING_W + 6   # left panel x
+            right_x_limit = SIZE - panel_x                     # right panel right edge
+
+            if not wifi_on:
+                draw.text((panel_x, panel_y),      "WiFi", font=font_side, fill=C_RED)
+                draw.text((panel_x, panel_y + 16), " OFF", font=font_side, fill=C_RED)
+            elif rssi is not None:
+                # Signal bar indicator (4 bars)
+                bars = 1 if rssi >= -90 else 0
+                bars = 2 if rssi >= -75 else bars
+                bars = 3 if rssi >= -65 else bars
+                bars = 4 if rssi >= -55 else bars
+                bar_col = C_RED if bars <= 1 else C_AMBER if bars == 2 else C_GREEN
+                for b in range(4):
+                    bh = 4 + b * 3   # bar heights: 4,7,10,13
+                    bx = panel_x + b * 7
+                    by = panel_y + 13 - bh
+                    col = bar_col if b < bars else C_GRAY
+                    draw.rectangle([bx, by, bx + 4, panel_y + 13], fill=col)
+                dbm_str = f"{int(rssi)}d"
+                draw.text((panel_x, panel_y + 17), dbm_str, font=font_side, fill=C_GRAY)
+            else:
+                draw.text((panel_x, panel_y), "N/A", font=font_side, fill=C_GRAY)
+
+            # ── Right panel: Target count ─────────────────────────────────
+            targets = getattr(sd, "total_targetnbr", 0) or 0
+            # Right-align within the right sliver
+            tgt_label1 = "TGTS"
+            tgt_label2 = str(targets)
+            try:
+                w1 = font_side.getbbox(tgt_label1)[2] - font_side.getbbox(tgt_label1)[0]
+                w2 = font_side.getbbox(tgt_label2)[2] - font_side.getbbox(tgt_label2)[0]
+            except Exception:
+                w1 = w2 = 28
+            rx1 = right_x_limit - w1
+            rx2 = right_x_limit - w2
+            draw.text((rx1, panel_y),      tgt_label1, font=font_side, fill=C_GRAY)
+            draw.text((rx2, panel_y + 16), tgt_label2, font=font_side, fill=C_GREEN)
+
+            # Status text — same size as info line below (font_ssid / 14px)
             st = (status_text or "IDLE").upper()
             s_col = _status_col(wifi_on, ap_on, status_text)
+            f_st  = font_ssid
             try:
-                sb = font_status.getbbox(st)
+                sb = f_st.getbbox(st)
                 sx = (SIZE - (sb[2] - sb[0])) // 2
             except Exception:
                 sx = 60
-            draw.text((sx, 182), st, font=font_status, fill=s_col)
+            draw.text((sx, 182), st, font=f_st, fill=s_col)
 
-            # Network label
-            if ap_on:
-                net_label = ssid if ssid.startswith("AP") else "AP MODE"
-                net_col   = C_AMBER
-            elif wifi_on:
-                net_label = ssid.removeprefix("WiFi: ") if ssid else "Connected"
-                net_col   = C_GRAY
-            else:
-                net_label = "NOT CONNECTED"
-                net_col   = C_RED
+            # Rotating info line
             try:
-                nb = font_ssid.getbbox(net_label)
+                nb = font_ssid.getbbox(info_label)
                 nx = (SIZE - (nb[2] - nb[0])) // 2
             except Exception:
                 nx = 60
-            draw.text((nx, 207), net_label, font=font_ssid, fill=net_col)
+            draw.text((nx, 207), info_label, font=font_ssid, fill=info_col)
 
             # Apply circular mask (black corners)
             result = _Image.new("RGB", (SIZE, SIZE), C_BG)
@@ -1328,17 +1438,51 @@ class Display:
         _last_status = None
         _last_text   = None
         _last_fidx   = -1
+        _info_tick   = 0   # increments each TICK_SLEEP; drives rotating bottom line
+
+        # Info slots cycle every 20 ticks (10 s each); 3 slots = 30 s period
+        # Slot 0: scan target / current IP
+        # Slot 1: targets found + creds
+        # Slot 2: WiFi/network (the "every 30 s" network glimpse)
+        INFO_SLOT_TICKS = 20   # 10 s per slot
+        INFO_SLOTS      = 3
+
+        def _info_line(slot, wifi_on, ssid, ap_on):
+            sd = self.shared_data
+            if slot == 2:
+                # Network slot
+                if ap_on:
+                    return ssid if ssid.startswith("AP") else "AP MODE", C_AMBER
+                if not wifi_on:
+                    return "NOT CONNECTED", C_RED
+                return (ssid.removeprefix("WiFi: ") if ssid else "Connected"), C_GRAY
+            if slot == 0:
+                # Current scan target — bjornstatustext2 holds network or IP being scanned
+                target = getattr(sd, "bjornstatustext2", "") or ""
+                if target:
+                    label = target if len(target) <= 20 else target[-20:]
+                    return label, C_CYAN
+                # Fallback: gateway
+                gw = (getattr(sd, "gateway_info", {}) or {}).get("gateway_ip", "")
+                return (f"GW: {gw}" if gw else "Scanning..."), C_CYAN
+            # slot == 1: targets + creds
+            targets = getattr(sd, "total_targetnbr", 0) or 0
+            creds   = getattr(sd, "crednbr",        0) or 0
+            vulns   = getattr(sd, "vulnnbr",         0) or 0
+            return f"T:{targets} C:{creds} V:{vulns}", C_GREEN
 
         while not self.shared_data.display_should_exit:
             try:
                 wifi_on, ssid, ap_on, status_text = _text_state()
                 orch_status = getattr(self.shared_data, "ragnarorch_status", "IDLE") or "IDLE"
+                self.shared_data.update_ragnarstatus()
 
                 # Reset animation when status changes
                 if orch_status != _last_status:
                     _frame_idx   = 0
                     _anim_tick   = 0
                     _last_status = orch_status
+                    _frame_cache.clear()  # tint may change with new status
 
                 # Advance animation frame
                 _anim_tick += 1
@@ -1347,17 +1491,21 @@ class Display:
                     _frame_idx  = (_frame_idx + 1) % _frame_count(orch_status)
 
                 tint = _mascot_tint()
-                text_changed  = (wifi_on, ssid, ap_on, status_text) != _last_text
+                info_slot = (_info_tick // INFO_SLOT_TICKS) % INFO_SLOTS
+                info_label, info_col = _info_line(info_slot, wifi_on, ssid, ap_on)
+                _info_tick += 1
+
+                text_changed  = (wifi_on, ssid, ap_on, status_text, info_label) != _last_text
                 frame_changed = _frame_idx != _last_fidx
                 color_changed = tint != getattr(self, "_gc9a01_last_tint", None)
 
                 if text_changed or frame_changed or color_changed:
                     sprite = _get_colorized_frame(orch_status, _frame_idx, tint)
                     self._gc9a01_last_tint = tint
-                    output = _render(wifi_on, ssid, ap_on, status_text, sprite)
+                    output = _render(wifi_on, ssid, ap_on, status_text, sprite, info_label, info_col)
                     output = output.transpose(_Image.Transpose.FLIP_LEFT_RIGHT)
                     self.epd_helper.display_partial(output)
-                    _last_text  = (wifi_on, ssid, ap_on, status_text)
+                    _last_text  = (wifi_on, ssid, ap_on, status_text, info_label)
                     _last_fidx  = _frame_idx
 
                     try:
@@ -1379,8 +1527,11 @@ class Display:
             self._run_gc9a01()
             return
 
+        # Wait for deferred initialization (fonts, images) to finish
+        # before attempting to render anything.
+        if hasattr(self.shared_data, 'wait_for_deferred_init'):
+            self.shared_data.wait_for_deferred_init(timeout=30)
         self.manual_mode_txt = ""
-        _last_page = PAGE_MAIN
         while not self.shared_data.display_should_exit:
             try:
                 self.epd_helper.init_partial_update()
@@ -1396,16 +1547,6 @@ class Display:
                 current_page = PAGE_MAIN
                 if self.button_listener and self.button_listener.available:
                     current_page = self.button_listener.current_page
-
-                # Full refresh on page change to prevent V2 ghosting
-                if current_page != _last_page:
-                    try:
-                        self.epd_helper.init_full_update()
-                        self.epd_helper.clear()
-                        self.epd_helper.init_partial_update()
-                    except Exception:
-                        pass
-                    _last_page = current_page
 
                 if current_page == PAGE_NETWORK:
                     self._render_network_page(image, draw)
@@ -1428,7 +1569,6 @@ class Display:
                     self.epd_helper.display_partial(image)
                     if self.web_screen_reversed:
                         image = image.transpose(Image.Transpose.ROTATE_180)
-                    image = image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
                     with open(os.path.join(self.shared_data.webdir, "screen.png"), 'wb') as img_file:
                         image.save(img_file)
                         img_file.flush()
@@ -1437,6 +1577,13 @@ class Display:
                     continue
 
                 # === PAGE_MAIN: Default Ragnar display ===
+                # Scale factors spread positions across the full physical canvas
+                # (e.g. 176x264 for 2.7") while icons stay at original pixel size.
+                W = self.shared_data.width   # physical width  (176 or 122)
+                H = self.shared_data.height  # physical height (264 or 250)
+                sx = self.scale_factor_x     # 1.44 on 2.7", 1.0 on 2.13"
+                sy = self.scale_factor_y     # 1.056 on 2.7", 1.0 on 2.13"
+
                 # Check PiSugar once per frame for title sizing + battery text
                 _pisugar_available = False
                 try:
@@ -1446,35 +1593,23 @@ class Display:
                 except Exception:
                     pass
                 if _pisugar_available:
-                    draw.text((int(40 * self.scale_factor_x), int(6 * self.scale_factor_y)), "RAGNAR", font=self.shared_data.font_viking_sm, fill=0)
+                    draw.text((int(40 * sx), int(6 * sy)), "RAGNAR", font=self.shared_data.font_viking_sm, fill=0)
                 else:
-                    draw.text((int(37 * self.scale_factor_x), int(5 * self.scale_factor_y)), "RAGNAR", font=self.shared_data.font_viking, fill=0)
-                draw.text((int(110 * self.scale_factor_x), int(170 * self.scale_factor_y)), self.manual_mode_txt, font=self.shared_data.font_arial14, fill=0)
+                    draw.text((int(37 * sx), int(5 * sy)), "RAGNAR", font=self.shared_data.font_viking, fill=0)
+                draw.text((int(110 * sx), int(170 * sy)), self.manual_mode_txt, font=self.shared_data.font_arial14, fill=0)
                 
                 # Show AP status or WiFi status in the top-left corner
                 if hasattr(self.shared_data, 'ap_mode_active') and self.shared_data.ap_mode_active:
-                    # Show AP status with client count
-                    ap_text = f"AP"
+                    ap_text = "AP"
                     if hasattr(self.shared_data, 'ap_client_count') and self.shared_data.ap_client_count > 0:
                         ap_text = f"AP:{self.shared_data.ap_client_count}"
-                    draw.text((int(3 * self.scale_factor_x), int(3 * self.scale_factor_y)), ap_text, font=self.shared_data.font_arial9, fill=0)
+                    draw.text((int(3 * sx), int(3 * sy)), ap_text, font=self.shared_data.font_arial9, fill=0)
                 elif self.shared_data.wifi_connected:
                     self.render_wifi_wave_indicator(image, draw)
-                # # # if self.shared_data.bluetooth_active:
-                # # #     image.paste(self.shared_data.bluetooth, (int(23 * self.scale_factor_x), int(4 * self.scale_factor_y)))
                 if self.shared_data.pan_connected:
-                    image.paste(self.shared_data.connected, (int(104 * self.scale_factor_x), int(3 * self.scale_factor_y)))
+                    image.paste(self.shared_data.connected, (int(104 * sx), int(3 * sy)))
                 if self.shared_data.usb_active:
-                    image.paste(self.shared_data.usb, (int(90 * self.scale_factor_x), int(4 * self.scale_factor_y)))
-                if (getattr(self.shared_data, 'captive_portal_detected', False)
-                        and not getattr(self.shared_data, 'captive_portal_authenticated', False)):
-                    # Show "PORTAL" in the header when behind an unauthenticated captive portal
-                    draw.text(
-                        (int(3 * self.scale_factor_x), int(14 * self.scale_factor_y)),
-                        "PORTAL",
-                        font=self.shared_data.font_arial9,
-                        fill=0,
-                    )
+                    image.paste(self.shared_data.usb, (int(90 * sx), int(4 * sy)))
 
                 # Battery percentage (PiSugar) - flush right in header
                 if _pisugar_available:
@@ -1486,28 +1621,25 @@ class Display:
                             bat_text = f"{bat_level}%+" if charging else f"{bat_level}%"
                             bbox = self.shared_data.font_arial9.getbbox(bat_text)
                             text_w = bbox[2] - bbox[0]
-                            tx = self.shared_data.width - text_w - 1
-                            draw.text((tx, int(10 * self.scale_factor_y)),
+                            tx = W - text_w - 1
+                            draw.text((tx, int(10 * sy)),
                                       bat_text, font=self.shared_data.font_arial9, fill=0)
                     except Exception:
                         pass
 
-                # ys stretches the status/comment section down on wider displays
-                # Stats rows stay at normal scale, only dividers and status below get stretched
-                ys = self.y_stretch
-                sx = self.scale_factor_x
-                sy = self.scale_factor_y
+                # Stats — positions scaled to fill the physical width/height,
+                # but icon images stay at their original pixel size.
                 stats = [
-                    (self.shared_data.target, (int(8 * sx), int(22 * sy)), (int(28 * sx), int(22 * sy)), str(self.shared_data.targetnbr)),
-                    (self.shared_data.port, (int(47 * sx), int(22 * sy)), (int(67 * sx), int(22 * sy)), str(self.shared_data.portnbr)),
-                    (self.shared_data.vuln, (int(86 * sx), int(22 * sy)), (int(106 * sx), int(22 * sy)), str(self.shared_data.vulnnbr)),
-                    (self.shared_data.cred, (int(8 * sx), int(41 * sy)), (int(28 * sx), int(41 * sy)), str(self.shared_data.crednbr)),
-                    (self.shared_data.money, (int(3 * sx), int(172 * sy)), (int(3 * sx), int(192 * sy)), str(self.shared_data.coinnbr)),
-                    (self.shared_data.level, (int(2 * sx), int(217 * sy)), (int(4 * sx), int(237 * sy)), str(self.shared_data.levelnbr)),
-                    (self.shared_data.zombie, (int(47 * sx), int(41 * sy)), (int(67 * sx), int(41 * sy)), str(self.shared_data.zombiesnbr)),
+                    (self.shared_data.target,    (int(8 * sx),   int(22 * sy)), (int(28 * sx),  int(22 * sy)), str(self.shared_data.targetnbr)),
+                    (self.shared_data.port,      (int(47 * sx),  int(22 * sy)), (int(67 * sx),  int(22 * sy)), str(self.shared_data.portnbr)),
+                    (self.shared_data.vuln,      (int(86 * sx),  int(22 * sy)), (int(106 * sx), int(22 * sy)), str(self.shared_data.vulnnbr)),
+                    (self.shared_data.cred,      (int(8 * sx),   int(41 * sy)), (int(28 * sx),  int(41 * sy)), str(self.shared_data.crednbr)),
+                    (self.shared_data.money,     (int(3 * sx),   int(172 * sy)), (int(3 * sx),  int(192 * sy)), str(self.shared_data.coinnbr)),
+                    (self.shared_data.level,     (int(2 * sx),   int(217 * sy)), (int(4 * sx),  int(237 * sy)), str(self.shared_data.levelnbr)),
+                    (self.shared_data.zombie,    (int(47 * sx),  int(41 * sy)), (int(67 * sx),  int(41 * sy)), str(self.shared_data.zombiesnbr)),
                     (self.shared_data.networkkb, (int(102 * sx), int(190 * sy)), (int(102 * sx), int(208 * sy)), str(self.shared_data.networkkbnbr)),
-                    (self.shared_data.data, (int(86 * sx), int(41 * sy)), (int(106 * sx), int(41 * sy)), str(self.shared_data.datanbr)),
-                    (self.shared_data.attacks, (int(100 * sx), int(218 * sy)), (int(102 * sx), int(237 * sy)), str(self.shared_data.attacksnbr)),
+                    (self.shared_data.data,      (int(86 * sx),  int(41 * sy)), (int(106 * sx), int(41 * sy)), str(self.shared_data.datanbr)),
+                    (self.shared_data.attacks,   (int(100 * sx), int(218 * sy)), (int(102 * sx), int(237 * sy)), str(self.shared_data.attacksnbr)),
                 ]
 
                 for img, img_pos, text_pos, text in stats:
@@ -1515,32 +1647,36 @@ class Display:
                     draw.text(text_pos, text, font=self.shared_data.font_arial9, fill=0)
 
                 self.shared_data.update_ragnarstatus()
-                status_img = self.shared_data.ragnarstatusimage
-                image.paste(status_img, (int(3 * sx), int(60 * sy * ys)))
-                draw.text((int(35 * sx), int(65 * sy * ys)), self.shared_data.ragnarstatustext, font=self.shared_data.font_arial9, fill=0)
-                draw.text((int(35 * sx), int(75 * sy * ys)), self.shared_data.ragnarstatustext2, font=self.shared_data.font_arial9, fill=0)
+                image.paste(self.shared_data.ragnarstatusimage, (int(3 * sx), int(60 * sy)))
+                draw.text((int(35 * sx), int(65 * sy)), self.shared_data.ragnarstatustext, font=self.shared_data.font_arial9, fill=0)
+                draw.text((int(35 * sx), int(75 * sy)), self.shared_data.ragnarstatustext2, font=self.shared_data.font_arial9, fill=0)
 
-                # Frise ribbon - hide on wide displays to save vertical space
-                if ys == 1.0:
-                    frise_x, frise_y = self.get_frise_position()
-                    image.paste(self.shared_data.frise, (frise_x, frise_y))
+                # Frise ribbon
+                if self.shared_data.frise is not None:
+                    frise_img = self.shared_data.frise
+                    if frise_img.width != W - 2:
+                        frise_img = frise_img.resize((W - 2, frise_img.height), Image.NEAREST)
+                    image.paste(frise_img, (1, int(160 * sy)))
 
-                draw.rectangle((1, 1, self.shared_data.width - 1, self.shared_data.height - 1), outline=0)
-                draw.line((1, int(20 * sy), self.shared_data.width - 1, int(20 * sy)), fill=0)
-                draw.line((1, int(59 * sy * ys), self.shared_data.width - 1, int(59 * sy * ys)), fill=0)
-                draw.line((1, int(87 * sy * ys), self.shared_data.width - 1, int(87 * sy * ys)), fill=0)
+                # Frame & dividers — span full physical width
+                draw.rectangle((1, 1, W - 1, H - 1), outline=0)
+                draw.line((1, int(20 * sy), W - 1, int(20 * sy)), fill=0)
+                draw.line((1, int(59 * sy), W - 1, int(59 * sy)), fill=0)
+                draw.line((1, int(87 * sy), W - 1, int(87 * sy)), fill=0)
 
-                lines = self.shared_data.wrap_text(self.shared_data.ragnarsays, self.shared_data.font_arialbold, self.shared_data.width - 4)
-                y_text = int(90 * sy * ys)
+                lines = self.shared_data.wrap_text(self.shared_data.ragnarsays, self.shared_data.font_arialbold, W - 4)
+                y_text = int(90 * sy)
 
+                # Character image — centred on the full canvas
                 if self.main_image is not None:
-                    main_img = self.main_image
-                    image.paste(main_img, (self.shared_data.x_center1, self.shared_data.y_bottom1))
+                    cx = (W - self.main_image.width) // 2
+                    cy = H - self.main_image.height
+                    image.paste(self.main_image, (cx, cy))
                 else:
                     logger.error("Main image not found in shared_data.")
 
                 for line in lines:
-                    draw.text((int(4 * self.scale_factor_x), y_text), line, font=self.shared_data.font_arialbold, fill=0)
+                    draw.text((int(4 * sx), y_text), line, font=self.shared_data.font_arialbold, fill=0)
                     y_text += (self.shared_data.font_arialbold.getbbox(line)[3] - self.shared_data.font_arialbold.getbbox(line)[1]) + 3
 
                 if self.screen_reversed:
@@ -1551,7 +1687,6 @@ class Display:
 
                 if self.web_screen_reversed:
                     image = image.transpose(Image.Transpose.ROTATE_180)
-                image = image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
                 with open(os.path.join(self.shared_data.webdir, "screen.png"), 'wb') as img_file:
                     image.save(img_file)
                     img_file.flush()

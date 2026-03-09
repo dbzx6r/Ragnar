@@ -1010,13 +1010,12 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStartPre=-/home/ragnar/Ragnar/kill_port_8000.sh
-ExecStartPre=-/bin/bash -c 'ip link set mon0 down 2>/dev/null; iw mon0 del 2>/dev/null; systemctl stop pwnagotchi 2>/dev/null; systemctl stop bettercap 2>/dev/null; true'
+ExecStartPre=-/bin/bash -c '/home/ragnar/Ragnar/kill_port_8000.sh; ip link set mon0 down 2>/dev/null; iw mon0 del 2>/dev/null; systemctl stop pwnagotchi 2>/dev/null; systemctl stop bettercap 2>/dev/null; true'
 EOF
 
     if [ -n "$wipe_exec" ]; then
         # Prefix with - so wipe_epd failure does not block service start
-        # Use timeout to prevent a hung SPI/GPIO call from stalling boot indefinitely
+        # Must run as separate process: GPIO pins conflict if shared with Display's EPDHelper
         cat >> /etc/systemd/system/ragnar.service << EOF
 ExecStartPre=-/usr/bin/timeout 20 /usr/bin/python3 -OO /home/ragnar/Ragnar/wipe_epd.py
 EOF
@@ -1031,7 +1030,7 @@ Restart=always
 RestartSec=3
 User=root
 TimeoutStartSec=60
-TimeoutStopSec=10
+TimeoutStopSec=5
 KillMode=mixed
 
 # Check open files and restart if it reached the limit (ulimit -n buffer of 10000)
@@ -1725,12 +1724,15 @@ except:
     fi
     
     # Check available RAM (7.5GB threshold for 8GB systems with overhead)
-    TOTAL_RAM_MB=$(free -m 2>/dev/null | awk '/^Mem:/{print $2}')
-    TOTAL_RAM_GB=$(echo "scale=2; $TOTAL_RAM_MB / 1024" | bc 2>/dev/null || echo "0")
-    MIN_RAM_GB=7.5
-    HAS_ENOUGH_RAM=$(echo "$TOTAL_RAM_GB >= $MIN_RAM_GB" | bc 2>/dev/null || echo "0")
+    # Read from /proc/meminfo — always English, works under sudo, no locale issues
+    TOTAL_RAM_KB=$(awk '/^MemTotal:/{print $2}' /proc/meminfo 2>/dev/null)
+    TOTAL_RAM_MB=$(( ${TOTAL_RAM_KB:-0} / 1024 ))
+    TOTAL_RAM_GB=$(awk "BEGIN{printf \"%.2f\", ${TOTAL_RAM_MB}/1024}")
+    MIN_RAM_MB=7680
+    HAS_ENOUGH_RAM=0
+    [ "$TOTAL_RAM_MB" -ge "$MIN_RAM_MB" ] 2>/dev/null && HAS_ENOUGH_RAM=1
     
-    log "INFO" "System RAM: ${TOTAL_RAM_GB}GB (minimum for advanced tools: ${MIN_RAM_GB}GB)"
+    log "INFO" "System RAM: ${TOTAL_RAM_GB}GB / ${TOTAL_RAM_MB}MB (minimum: 7.5GB)"
     
     if [ "$IS_PI_ZERO" = false ] && [ "$HAS_ENOUGH_RAM" = "1" ]; then
         log "INFO" "System qualifies for advanced security tools (${TOTAL_RAM_GB}GB RAM, not Pi Zero)"
@@ -1771,7 +1773,7 @@ except:
         if [ "$IS_PI_ZERO" = true ]; then
             log "INFO" "Raspberry Pi Zero detected - advanced tools not recommended due to limited resources"
         else
-            log "INFO" "System has ${TOTAL_RAM_GB}GB RAM (minimum ${MIN_RAM_GB}GB required for advanced tools)"
+            log "INFO" "System has ${TOTAL_RAM_GB}GB RAM (minimum 7.5GB required for advanced tools)"
             echo -e "\n${YELLOW}Note: Advanced security tools require at least 8GB RAM${NC}"
             echo -e "${YELLOW}Your system: ${TOTAL_RAM_GB}GB RAM${NC}"
             echo -e "${YELLOW}Advanced tools can be manually installed later if upgraded${NC}"

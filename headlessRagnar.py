@@ -102,6 +102,11 @@ class Ragnar:
 
     def start_orchestrator(self):
         """Start the orchestrator thread."""
+        # Always clear manual mode so the main loop will auto-start
+        # the orchestrator when connectivity becomes available
+        self.shared_data.manual_mode = False
+        self.shared_data.orchestrator_should_exit = False
+
         if self.wifi_manager.check_network_connectivity():
             connection_type = getattr(self.wifi_manager, "last_connection_type", None)
             self.shared_data.network_connected = True
@@ -109,8 +114,6 @@ class Ragnar:
             self.shared_data.lan_connected = connection_type == "ethernet"
             if self.orchestrator_thread is None or not self.orchestrator_thread.is_alive():
                 logger.info("Starting Orchestrator thread...")
-                self.shared_data.orchestrator_should_exit = False
-                self.shared_data.manual_mode = False
                 self.orchestrator = Orchestrator()
                 self.orchestrator_thread = threading.Thread(
                     target=self.orchestrator.run, name="RagnarOrchestrator"
@@ -120,7 +123,7 @@ class Ragnar:
             else:
                 logger.info("Orchestrator thread is already running.")
         else:
-            logger.warning("Cannot start Orchestrator: Wi-Fi is not connected.")
+            logger.warning("Cannot start Orchestrator yet: no network. Will auto-start when connected.")
 
     def stop_orchestrator(self):
         """Stop the orchestrator thread."""
@@ -229,6 +232,18 @@ if __name__ == "__main__":
     try:
         logger.info("Loading shared data config...")
         shared_data.load_config()
+
+        # Always reset pwnagotchi_mode on Ragnar startup so Ragnar
+        # is the canonical mode after every boot / service restart.
+        shared_data.config['pwnagotchi_mode'] = 'ragnar'
+        shared_data.config['pwnagotchi_last_status'] = 'Ragnar service is running'
+        shared_data.save_config()
+
+        # Stop the swap-button listener if it was left running
+        subprocess.Popen(
+            ['systemctl', 'stop', 'ragnar-swap-button'],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
 
         # Start Ragnar core logic
         logger.info("Starting Ragnar thread...")
