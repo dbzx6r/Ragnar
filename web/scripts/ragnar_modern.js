@@ -474,6 +474,7 @@ function epdTypeToSizeKey(epd_type) {
     if (epd_type.startsWith('epd2in9')) return '2in9';
     if (epd_type.startsWith('epd3in7')) return '3in7';
     if (epd_type === 'gc9a01') return '1in28_tft';
+    if (epd_type === 'ssd1306') return '0in96_oled';
     return epd_type; // fallback: return as-is
 }
 
@@ -484,7 +485,8 @@ const displaySelectOptions = {
         { value: '2in7', label: '2.7" e-Paper (176x264)' },
         { value: '2in9', label: '2.9" e-Paper (128x296)' },
         { value: '3in7', label: '3.7" e-Paper (280x480)' },
-        { value: '1in28_tft', label: '1.28" GC9A01 Round TFT (240x240)' }
+        { value: '1in28_tft', label: '1.28" GC9A01 Round TFT (240x240)' },
+        { value: '0in96_oled', label: '0.96" SSD1306 OLED (128x64)' }
     ],
     screen_reversed: [
         { value: 'false', label: 'Normal orientation' },
@@ -9556,14 +9558,15 @@ function displayConfigForm(config) {
         'General': ['manual_mode', 'debug_mode', 'scan_vuln_running', 'scan_vuln_no_ports', 'enable_attacks', 'blacklistcheck'],
         'Network': ['network_max_failed_pings'],
         'Timing': ['startup_delay', 'web_delay', 'screen_delay', 'scan_interval'],
-        'Display': ['epd_type', 'screen_reversed', 'gc9a01_mascot_color']
+        'Display': ['epd_type', 'screen_reversed', 'gc9a01_mascot_color', 'ssd1306_i2c_address']
     };
     
     const knownBooleans = ['manual_mode', 'debug_mode', 'scan_vuln_running', 'scan_vuln_no_ports', 'enable_attacks', 'blacklistcheck', 'screen_reversed'];
-    const alwaysShowKeys = new Set(['network_max_failed_pings', 'gc9a01_mascot_color']);
+    const alwaysShowKeys = new Set(['network_max_failed_pings', 'gc9a01_mascot_color', 'ssd1306_i2c_address']);
     const fallbackValues = {
         network_max_failed_pings: 15,
-        gc9a01_mascot_color: '#96C8FF'
+        gc9a01_mascot_color: '#96C8FF',
+        ssd1306_i2c_address: '0x3C'
     };
     const checkboxHandlers = {
         scan_vuln_running: 'handleVulnScanToggle(this)',
@@ -9646,6 +9649,20 @@ function displayConfigForm(config) {
                             </div>
                         </div>
                     `;
+                } else if (key === 'ssd1306_i2c_address') {
+                    const currentVal = (value && typeof value === 'string') ? value : '0x3C';
+                    html += `
+                        <div class="space-y-2" id="cfg-ssd1306-addr-row">
+                            <label class="flex items-center gap-2 text-sm text-gray-400">
+                                ${label}
+                                <span class="info-icon" tabindex="0" role="button" aria-label="${description}" data-tooltip="${description}">ⓘ</span>
+                            </label>
+                            <input type="text" name="${key}" id="cfg-ssd1306-addr-input"
+                                   class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm font-mono"
+                                   value="${currentVal}" placeholder="0x3C or 0x3D">
+                            <p class="text-xs text-gray-500">Most modules use 0x3C. Use 0x3D if display doesn't initialize.</p>
+                        </div>
+                    `;
                 } else {
                     html += `
                         <div class="space-y-2">
@@ -9681,13 +9698,18 @@ function displayConfigForm(config) {
     // Show/hide GC9A01 colour row based on selected display type
     const epdSelect = document.querySelector('select[name="epd_type"]');
     const colorRow = document.getElementById('cfg-gc9a01-color-row');
-    function syncGc9a01ColorRow() {
-        if (!colorRow || !epdSelect) return;
-        colorRow.style.display = (epdSelect.value === '1in28_tft') ? '' : 'none';
+    const addrRow = document.getElementById('cfg-ssd1306-addr-row');
+    function syncDisplayRows() {
+        if (colorRow && epdSelect) {
+            colorRow.style.display = (epdSelect.value === '1in28_tft') ? '' : 'none';
+        }
+        if (addrRow && epdSelect) {
+            addrRow.style.display = (epdSelect.value === '0in96_oled') ? '' : 'none';
+        }
     }
     if (epdSelect) {
-        epdSelect.addEventListener('change', syncGc9a01ColorRow);
-        syncGc9a01ColorRow();
+        epdSelect.addEventListener('change', syncDisplayRows);
+        syncDisplayRows();
     }
 
     const attacksEnabled = config.hasOwnProperty('enable_attacks') ? Boolean(config.enable_attacks) : true;

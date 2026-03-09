@@ -63,6 +63,7 @@ SIZE_KEY_TO_DEFAULT_DRIVER = {
     "2in9":     "epd2in9_V2",
     "3in7":     "epd3in7",
     "1in28_tft": "gc9a01",
+    "0in96_oled": "ssd1306",
 }
 
 def resolve_epd_type(size_key, current_epd_type=None):
@@ -96,6 +97,8 @@ DISPLAY_PROFILES = {
     "epd2in13_V4": {"ref_width": DESIGN_REF_WIDTH, "ref_height": DESIGN_REF_HEIGHT, "default_flip": False},
     # GC9A01 1.28" 240x240 round colour TFT LCD
     "gc9a01":      {"ref_width": DESIGN_REF_WIDTH, "ref_height": DESIGN_REF_WIDTH, "default_flip": False},
+    # SSD1306 0.96" 128x64 monochrome OLED
+    "ssd1306":     {"ref_width": 128, "ref_height": 64, "default_flip": False},
 }
 
 
@@ -530,6 +533,7 @@ class SharedData:
             "epd_type": DEFAULT_EPD_TYPE,
             "screen_reversed": default_profile.get("default_flip", False),
             "gc9a01_mascot_color": "#96C8FF",
+            "ssd1306_i2c_address": "0x3C",
             
             
             "__title_lists__": "List Settings",

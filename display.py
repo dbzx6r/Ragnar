@@ -1521,10 +1521,171 @@ class Display:
 
             time.sleep(TICK_SLEEP)
 
+    # ------------------------------------------------------------------
+    # SSD1306 0.96" 128x64 monochrome OLED display loop
+    # ------------------------------------------------------------------
+
+    def _run_ssd1306(self):
+        """Main display loop for SSD1306 0.96\" 128x64 monochrome OLED.
+
+        Renders a compact status dashboard with header bar, WiFi info,
+        target/credential counters, and a cycling info ticker at the bottom.
+        """
+        from PIL import Image as _Image, ImageDraw as _ImageDraw, ImageFont as _ImageFont
+        import os
+
+        W          = 128
+        H          = 64
+        TICK_SLEEP = 0.5    # seconds between ticks
+        PNG_EVERY  = 10     # save screen.png every N ticks
+
+        # ── Initialise display ──────────────────────────────────────────
+        from resources.waveshare_epd import ssd1306 as _ssd1306_mod
+        i2c_addr = int(self.config.get("ssd1306_i2c_address", "0x3C"), 16)
+        epd = _ssd1306_mod.EPD(i2c_address=i2c_addr)
+        epd.init()
+
+        # ── Load fonts once ─────────────────────────────────────────────
+        _font_path = os.path.join(
+            os.path.dirname(__file__), "resources", "fonts", "Arial.ttf"
+        )
+
+        def _load_font(size):
+            try:
+                return _ImageFont.truetype(_font_path, size)
+            except Exception:
+                return _ImageFont.load_default()
+
+        font_hdr  = _load_font(10)   # header bar text
+        font_body = _load_font(9)    # all other lines
+
+        _png_counter  = 0
+        _scroll_pos   = 0   # pixel offset for header scroll
+
+        # Width (px) available in the header beside "RAGNAR " prefix
+        _RAGNAR_LABEL = "RAGNAR "
+        try:
+            _ragnar_w = font_hdr.getbbox(_RAGNAR_LABEL)[2]
+        except Exception:
+            _ragnar_w = len(_RAGNAR_LABEL) * 6
+        _HDR_STATUS_W = W - _ragnar_w - 2   # pixels available for scrolling status
+
+        # ── WiFi helper (same method used by gc9a01) ─────────────────────
+        def _get_wifi():
+            """Return (connected: bool, ssid: str, ip: str)."""
+            import subprocess
+            try:
+                result = subprocess.run(
+                    ["iwgetid", "-r"], capture_output=True, text=True, timeout=2
+                )
+                ssid = result.stdout.strip()
+                if ssid:
+                    # Get IP from shared_data
+                    ip = getattr(self.shared_data, "ipaddress", "") or ""
+                    return True, ssid, ip
+            except Exception:
+                pass
+            if getattr(self.shared_data, "ap_enabled", False):
+                return True, "AP MODE", getattr(self.shared_data, "ipaddress", "") or ""
+            return False, "", getattr(self.shared_data, "ipaddress", "") or ""
+
+        # ── Render helper ───────────────────────────────────────────────
+        def _render(scroll_px):
+            sd = self.shared_data
+
+            # --- collect data --------------------------------------------------
+            orch_status = (getattr(sd, "ragnarorch_status", "IDLE") or "IDLE").upper()
+            wifi_on, ssid, ip = _get_wifi()
+
+            targets = getattr(sd, "total_targetnbr", 0) or 0
+            creds   = getattr(sd, "crednbr",        0) or 0
+            vulns   = getattr(sd, "vulnnbr",         0) or 0
+
+            status2 = (getattr(sd, "bjornstatustext2", "") or "").strip()
+
+            # --- layout strings ------------------------------------------------
+            wifi_line    = ("WiFi: " + ssid[:18]) if wifi_on else "NOT CONNECTED"
+            target_line  = (">" + status2[:20]) if status2 else ("IP: " + ip if ip else "Scanning...")
+            tc_line      = "TARGETS: {}   CREDS: {}".format(targets, creds)
+            vuln_line    = "VULNERABILITIES: {}".format(vulns)
+
+            # --- draw ----------------------------------------------------------
+            img  = _Image.new("1", (W, H), 0)
+            draw = _ImageDraw.Draw(img)
+
+            # Header bar: white filled rectangle
+            draw.rectangle((0, 0, W - 1, 12), fill=255)
+            draw.text((2, 1), _RAGNAR_LABEL, font=font_hdr, fill=0)
+
+            # Scrolling status text clipped to right portion of header
+            # Build scroll string with padding so it wraps smoothly
+            scroll_str = orch_status + "   "
+            try:
+                full_w = font_hdr.getbbox(scroll_str)[2]
+            except Exception:
+                full_w = len(scroll_str) * 6
+            # Render into a temp image and paste a window of it
+            tmp = _Image.new("1", (max(full_w * 2, _HDR_STATUS_W + 4), 12), 255)
+            tdraw = _ImageDraw.Draw(tmp)
+            tdraw.text((0, 1),        scroll_str, font=font_hdr, fill=0)
+            tdraw.text((full_w, 1),   scroll_str, font=font_hdr, fill=0)
+            offset = scroll_px % full_w
+            crop   = tmp.crop((offset, 0, offset + _HDR_STATUS_W, 12))
+            img.paste(crop, (_ragnar_w, 0))
+
+            # Thin divider line at y=13
+            draw.line((0, 13, W - 1, 13), fill=255)
+
+            # Body lines
+            draw.text((0, 15), wifi_line,   font=font_body, fill=255)
+            draw.text((0, 26), target_line, font=font_body, fill=255)
+            draw.text((0, 37), tc_line,     font=font_body, fill=255)
+            draw.text((0, 48), vuln_line,   font=font_body, fill=255)
+
+            return img
+
+        # ── Main loop ───────────────────────────────────────────────────
+        while not self.shared_data.display_should_exit:
+            try:
+                self.shared_data.update_ragnarstatus()
+                img = _render(_scroll_pos)
+                epd.init()
+                buf = epd.getbuffer(img)
+                epd.displayPartial(buf)
+                _scroll_pos += 2   # advance scroll 2px per tick (0.5s → ~4px/s)
+                # Save screen.png for web preview every PNG_EVERY ticks
+                _png_counter += 1
+                if _png_counter >= PNG_EVERY:
+                    _png_counter = 0
+                    try:
+                        web_path = os.path.join(self.shared_data.webdir, "screen.png")
+                        with open(web_path, "wb") as f:
+                            img.save(f)
+                            f.flush()
+                            os.fsync(f.fileno())
+                    except Exception:
+                        pass
+
+            except Exception as exc:
+                logger.error("SSD1306 render error: %s", exc)
+
+            time.sleep(TICK_SLEEP)
+
+        # ── Cleanup on exit ─────────────────────────────────────────────
+        try:
+            epd.Clear()
+            epd.sleep()
+        except Exception as exc:
+            logger.error("SSD1306 shutdown error: %s", exc)
+
     def run(self):
         """Main loop for updating the EPD display with shared data."""
         if self.config.get("epd_type") == "gc9a01":
             self._run_gc9a01()
+            return
+
+        if self.config.get("epd_type") == "ssd1306":
+            self._run_ssd1306()
             return
 
         # Wait for deferred initialization (fonts, images) to finish
