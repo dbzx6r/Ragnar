@@ -305,6 +305,10 @@ const configMetadata = {
         label: "Flip E-Paper Output",
         description: "Rotate the Waveshare e-paper output 180° so the content appears upright when the panel is mounted upside down."
     },
+    screen_mirrored: {
+        label: "Mirror E-Paper Output",
+        description: "Flip the e-paper output horizontally (left-right) to correct mirrored/backwards text caused by display mounting orientation."
+    },
     epd_type: {
         label: "EPD Type",
         description: "Model identifier for the connected Waveshare e-paper display."
@@ -9588,10 +9592,10 @@ function displayConfigForm(config) {
         'General': ['manual_mode', 'debug_mode', 'scan_vuln_running', 'scan_vuln_no_ports', 'enable_attacks', 'blacklistcheck'],
         'Network': ['network_max_failed_pings'],
         'Timing': ['startup_delay', 'web_delay', 'screen_delay', 'scan_interval'],
-        'Display': ['epd_type', 'screen_reversed', 'gc9a01_mascot_color']
+        'Display': ['epd_type', 'screen_reversed', 'screen_mirrored', 'gc9a01_mascot_color']
     };
     
-    const knownBooleans = ['manual_mode', 'debug_mode', 'scan_vuln_running', 'scan_vuln_no_ports', 'enable_attacks', 'blacklistcheck', 'screen_reversed'];
+    const knownBooleans = ['manual_mode', 'debug_mode', 'scan_vuln_running', 'scan_vuln_no_ports', 'enable_attacks', 'blacklistcheck', 'screen_reversed', 'screen_mirrored'];
     const alwaysShowKeys = new Set(['network_max_failed_pings', 'gc9a01_mascot_color']);
     const fallbackValues = {
         network_max_failed_pings: 15,

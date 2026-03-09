@@ -147,6 +147,7 @@ class SharedData:
         self.config.setdefault('epd_type', DEFAULT_EPD_TYPE)
         self.apply_display_profile(self.config['epd_type'], set_orientation_if_missing=True, persist=not self._pager_mode)
         self.screen_reversed = bool(self.config.get('screen_reversed', False))
+        self.screen_mirrored = bool(self.config.get('screen_mirrored', False))
         self.web_screen_reversed = self.screen_reversed
 
         # Check if auth is configured and DB might be encrypted
@@ -508,6 +509,7 @@ class SharedData:
             "ref_height": default_profile["ref_height"],
             "epd_type": DEFAULT_EPD_TYPE,
             "screen_reversed": default_profile.get("default_flip", False),
+            "screen_mirrored": False,
             "gc9a01_mascot_color": "#96C8FF",
             
             
@@ -817,6 +819,7 @@ class SharedData:
             self.epd_helper = EPDHelper(epd_type)
             self.apply_display_profile(epd_type)
             self.screen_reversed = bool(self.config.get("screen_reversed", False))
+            self.screen_mirrored = bool(self.config.get("screen_mirrored", False))
             self.web_screen_reversed = self.screen_reversed
             logger.info(f"EPD type: {epd_type} | size: {self.epd_helper.epd.width}x{self.epd_helper.epd.height} | flipped: {self.screen_reversed}")
             self.epd_helper.init_full_update()
@@ -849,6 +852,7 @@ class SharedData:
                     self.epd_helper.init_full_update()
                     self.width, self.height = self.epd_helper.epd.width, self.epd_helper.epd.height
                     self.screen_reversed = bool(self.config.get("screen_reversed", False))
+                    self.screen_mirrored = bool(self.config.get("screen_mirrored", False))
                     self.web_screen_reversed = self.screen_reversed
                     self.save_config()
                     logger.info(f"EPD {epd_type} initialized via fallback with size: {self.width}x{self.height}")
