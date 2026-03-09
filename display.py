@@ -1379,6 +1379,7 @@ class Display:
             try:
                 wifi_on, ssid, ap_on, status_text = _text_state()
                 orch_status = getattr(self.shared_data, "ragnarorch_status", "IDLE") or "IDLE"
+                self.shared_data.update_ragnarstatus()
 
                 # Reset animation when status changes
                 if orch_status != _last_status:
