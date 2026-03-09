@@ -1559,7 +1559,6 @@ class Display:
         font_hdr  = _load_font(10)   # header bar text
         font_body = _load_font(9)    # all other lines
 
-        _info_tick    = 0
         _png_counter  = 0
         _scroll_pos   = 0   # pixel offset for header scroll
 
@@ -1607,11 +1606,8 @@ class Display:
             # --- layout strings ------------------------------------------------
             wifi_line    = ("WiFi: " + ssid[:18]) if wifi_on else "NOT CONNECTED"
             target_line  = (">" + status2[:20]) if status2 else ("IP: " + ip if ip else "Scanning...")
-            counter_line = "TRGTS:{}  CREDS:{}  VULNS:{}".format(targets, creds, vulns)
-
-            # Ticker: 10 s per slot (20 ticks), 2 slots
-            slot = (_info_tick // 20) % 2
-            ticker_line = status2[:24] if slot == 0 and status2 else ("WiFi: " + ssid if ssid else ip or "---")
+            tc_line      = "TARGETS: {}   CREDS: {}".format(targets, creds)
+            vuln_line    = "VULNERABILITIES: {}".format(vulns)
 
             # --- draw ----------------------------------------------------------
             img  = _Image.new("1", (W, H), 0)
@@ -1641,15 +1637,10 @@ class Display:
             draw.line((0, 13, W - 1, 13), fill=255)
 
             # Body lines
-            draw.text((0, 15), wifi_line,    font=font_body, fill=255)
-            draw.text((0, 25), target_line,  font=font_body, fill=255)
-            draw.text((0, 35), counter_line, font=font_body, fill=255)
-
-            # Thin separator at y=45
-            draw.line((0, 45, W - 1, 45), fill=255)
-
-            # Ticker at y=47
-            draw.text((0, 47), ticker_line,  font=font_body, fill=255)
+            draw.text((0, 15), wifi_line,   font=font_body, fill=255)
+            draw.text((0, 26), target_line, font=font_body, fill=255)
+            draw.text((0, 37), tc_line,     font=font_body, fill=255)
+            draw.text((0, 48), vuln_line,   font=font_body, fill=255)
 
             return img
 
@@ -1661,9 +1652,7 @@ class Display:
                 epd.init()
                 buf = epd.getbuffer(img)
                 epd.displayPartial(buf)
-                _info_tick  += 1
                 _scroll_pos += 2   # advance scroll 2px per tick (0.5s → ~4px/s)
-
                 # Save screen.png for web preview every PNG_EVERY ticks
                 _png_counter += 1
                 if _png_counter >= PNG_EVERY:
