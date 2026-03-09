@@ -1521,10 +1521,166 @@ class Display:
 
             time.sleep(TICK_SLEEP)
 
+    # ------------------------------------------------------------------
+    # SSD1306 0.96" 128x64 monochrome OLED display loop
+    # ------------------------------------------------------------------
+
+    def _run_ssd1306(self):
+        """Main display loop for SSD1306 0.96\" 128x64 monochrome OLED.
+
+        Renders a compact status dashboard with header bar, WiFi info,
+        target/credential counters, and a cycling info ticker at the bottom.
+        """
+        from PIL import Image as _Image, ImageDraw as _ImageDraw, ImageFont as _ImageFont
+        import os
+
+        W          = 128
+        H          = 64
+        TICK_SLEEP = 0.5    # seconds between ticks
+        PNG_EVERY  = 10     # save screen.png every N ticks
+
+        # ── Initialise display ──────────────────────────────────────────
+        from resources.waveshare_epd import ssd1306 as _ssd1306_mod
+        i2c_addr = int(self.config.get("ssd1306_i2c_address", "0x3C"), 16)
+        epd = _ssd1306_mod.EPD(i2c_address=i2c_addr)
+        epd.init()
+
+        # ── Load fonts once ─────────────────────────────────────────────
+        _font_path = os.path.join(
+            os.path.dirname(__file__), "resources", "fonts", "Arial.ttf"
+        )
+
+        def _load_font(size):
+            try:
+                return _ImageFont.truetype(_font_path, size)
+            except Exception:
+                return _ImageFont.load_default()
+
+        font_hdr  = _load_font(10)   # header bar text
+        font_body = _load_font(9)    # all other lines
+
+        _info_tick   = 0
+        _png_counter = 0
+
+        # ── Render helper ───────────────────────────────────────────────
+        def _render():
+            sd = self.shared_data
+
+            # --- collect data --------------------------------------------------
+            orch_status = (getattr(sd, "ragnarorch_status", "IDLE") or "IDLE").upper()
+            # Truncate status to ~10 chars with ellipsis
+            status_str = orch_status if len(orch_status) <= 10 else orch_status[:9] + "\u2026"
+
+            wifi_on = getattr(sd, "wifi_enabled", False)
+            ssid    = getattr(sd, "wifi_network", "") or ""
+            ap_on   = getattr(sd, "ap_enabled", False)
+            ip      = getattr(sd, "ipaddress", "") or ""
+            gw_info = getattr(sd, "gateway_info", {}) or {}
+            gateway = gw_info.get("gateway_ip", "") if isinstance(gw_info, dict) else ""
+
+            targets = getattr(sd, "total_targetnbr", 0) or 0
+            creds   = getattr(sd, "crednbr",        0) or 0
+            vulns   = getattr(sd, "vulnnbr",         0) or 0
+
+            status2 = getattr(sd, "bjornstatustext2", "") or ""
+
+            # --- layout strings ------------------------------------------------
+            if wifi_on or ap_on:
+                wifi_line = "WiFi: {}".format(ssid[:16]) if ssid else "WiFi: connected"
+            else:
+                wifi_line = "NOT CONNECTED"
+
+            if ip:
+                ip_line = ip
+            elif gateway:
+                ip_line = gateway
+            else:
+                ip_line = "---"
+
+            counter_line = "T:{}  C:{}  V:{}".format(targets, creds, vulns)
+
+            # Ticker: 10 s per slot (20 ticks at 0.5 s), 2 slots
+            slot = (_info_tick // 20) % 2
+            if slot == 0:
+                ticker_line = status2 if status2 else (gateway or "Scanning...")
+            else:
+                ticker_line = ("SSID: " + ssid) if ssid else "SSID: none"
+
+            # --- draw ----------------------------------------------------------
+            img  = _Image.new("1", (W, H), 0)   # black background
+            draw = _ImageDraw.Draw(img)
+
+            # Header bar: white rectangle (0,0) → (127,12)
+            draw.rectangle((0, 0, W - 1, 12), fill=255)
+            draw.text((2, 1),    "RAGNAR",    font=font_hdr, fill=0)
+
+            # Right-align status in header
+            try:
+                bbox   = draw.textbbox((0, 0), status_str, font=font_hdr)
+                txt_w  = bbox[2] - bbox[0]
+            except AttributeError:
+                txt_w  = len(status_str) * 6   # fallback estimate
+            draw.text((W - txt_w - 2, 1), status_str, font=font_hdr, fill=0)
+
+            # Thin divider line at y=13
+            draw.line((0, 13, W - 1, 13), fill=255)
+
+            # Body lines
+            draw.text((0, 15), wifi_line,    font=font_body, fill=255)
+            draw.text((0, 25), ip_line,      font=font_body, fill=255)
+            draw.text((0, 35), counter_line, font=font_body, fill=255)
+
+            # Thin separator at y=45
+            draw.line((0, 45, W - 1, 45), fill=255)
+
+            # Ticker at y=47
+            draw.text((0, 47), ticker_line,  font=font_body, fill=255)
+
+            return img
+
+        # ── Main loop ───────────────────────────────────────────────────
+        while not self.shared_data.display_should_exit:
+            try:
+                self.shared_data.update_ragnarstatus()
+                img = _render()
+                epd.init()
+                buf = epd.getbuffer(img)
+                epd.displayPartial(buf)
+                _info_tick += 1
+
+                # Save screen.png for web preview every PNG_EVERY ticks
+                _png_counter += 1
+                if _png_counter >= PNG_EVERY:
+                    _png_counter = 0
+                    try:
+                        web_path = os.path.join(self.shared_data.webdir, "screen.png")
+                        with open(web_path, "wb") as f:
+                            img.save(f)
+                            f.flush()
+                            os.fsync(f.fileno())
+                    except Exception:
+                        pass
+
+            except Exception as exc:
+                logger.error("SSD1306 render error: %s", exc)
+
+            time.sleep(TICK_SLEEP)
+
+        # ── Cleanup on exit ─────────────────────────────────────────────
+        try:
+            epd.Clear()
+            epd.sleep()
+        except Exception as exc:
+            logger.error("SSD1306 shutdown error: %s", exc)
+
     def run(self):
         """Main loop for updating the EPD display with shared data."""
         if self.config.get("epd_type") == "gc9a01":
             self._run_gc9a01()
+            return
+
+        if self.config.get("epd_type") == "ssd1306":
+            self._run_ssd1306()
             return
 
         # Wait for deferred initialization (fonts, images) to finish

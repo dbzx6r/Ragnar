@@ -788,6 +788,17 @@ except Exception as e:
         # Ensure spidev is installed for TFT SPI communication
         pip3 install spidev --break-system-packages >/dev/null 2>&1
         log "INFO" "SPI dependencies installed for TFT display"
+    elif [ "$EPD_VERSION" = "ssd1306" ]; then
+        if [ -f "$ragnar_PATH/resources/waveshare_epd/ssd1306.py" ]; then
+            log "SUCCESS" "SSD1306 OLED driver verified (resources/waveshare_epd/ssd1306.py)"
+        else
+            log "ERROR" "SSD1306 OLED driver not found at $ragnar_PATH/resources/waveshare_epd/ssd1306.py"
+        fi
+        # Install smbus2 for I2C communication
+        pip3 install smbus2 --break-system-packages >/dev/null 2>&1
+        # Enable I2C interface
+        raspi-config nonint do_i2c 0 2>/dev/null || true
+        log "INFO" "I2C interface enabled for SSD1306"
     else
         log "INFO" "Verifying Waveshare e-Paper library installation for $EPD_VERSION..."
         cd /home/$ragnar_USER/e-Paper/RaspberryPi_JetsonNano/python
@@ -1505,26 +1516,28 @@ main() {
             pip3 install spidev --break-system-packages >/dev/null 2>&1
             log "SUCCESS" "SPI dependencies installed for TFT display"
 
-            echo -e "\n${BLUE}Select your TFT LCD display:${NC}"
+            echo -e "\n${BLUE}Select your TFT/OLED display:${NC}"
             echo "1. GC9A01      (1.28\" Round 240x240)"
-            echo "2. No display  (headless install)"
+            echo "2. SSD1306     (0.96\" OLED 128x64)"
+            echo "3. No display  (headless install)"
 
             while true; do
-                read -p "Enter your choice (1-2): " tft_choice
+                read -p "Enter your choice (1-3): " tft_choice
                 case $tft_choice in
                     1) EPD_VERSION="gc9a01"; break;;
-                    2)
+                    2) EPD_VERSION="ssd1306"; break;;
+                    3)
                         select_headless_variant
                         EPD_VERSION=""
                         break
                         ;;
-                    *) echo -e "${RED}Invalid choice. Please select 1-2.${NC}";;
+                    *) echo -e "${RED}Invalid choice. Please select 1-3.${NC}";;
                 esac
             done
 
             if [ -n "$EPD_VERSION" ]; then
-                echo -e "${GREEN}✓ Selected TFT display: $EPD_VERSION${NC}"
-                log "INFO" "TFT display selected: $EPD_VERSION"
+                echo -e "${GREEN}✓ Selected display: $EPD_VERSION${NC}"
+                log "INFO" "Display selected: $EPD_VERSION"
             fi
 
         # ── E-Paper display path ──────────────────────────────────────────────
@@ -1639,10 +1652,13 @@ except:
             echo -e "${CYAN}  TFT LCD displays:${NC}"
             echo "9.  GC9A01       (1.28\" Round 240x240)"
             echo ""
-            echo "10. No display (headless install)"
+            echo -e "${CYAN}  OLED displays:${NC}"
+            echo "10. SSD1306      (0.96\" OLED 128x64)"
+            echo ""
+            echo "11. No display (headless install)"
 
             while true; do
-                read -p "Enter your choice (1-10): " epd_choice
+                read -p "Enter your choice (1-11): " epd_choice
                 case $epd_choice in
                     1) EPD_VERSION="epd2in13"; break;;
                     2) EPD_VERSION="epd2in13_V2"; break;;
@@ -1653,12 +1669,13 @@ except:
                     7) EPD_VERSION="epd2in9_V2"; break;;
                     8) EPD_VERSION="epd3in7"; break;;
                     9) EPD_VERSION="gc9a01"; break;;
-                    10)
+                    10) EPD_VERSION="ssd1306"; break;;
+                    11)
                         select_headless_variant
                         EPD_VERSION=""
                         break
                         ;;
-                    *) echo -e "${RED}Invalid choice. Please select 1-10.${NC}";;
+                    *) echo -e "${RED}Invalid choice. Please select 1-11.${NC}";;
                 esac
             done
 
