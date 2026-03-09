@@ -1231,10 +1231,28 @@ class Display:
         viking_path = os.path.join(fonts_dir, "Creamy.ttf")
         try:
             font_title  = _ImageFont.truetype(viking_path, 22)
-            font_status = _ImageFont.truetype(arial_path,  18)
             font_ssid   = _ImageFont.truetype(arial_path,  14)
+            _font_status_cache = {}
+            def _status_font(text, max_px=200):
+                """Return the largest font that fits `text` within max_px."""
+                for size in (18, 16, 14, 12, 11):
+                    if size not in _font_status_cache:
+                        try:
+                            _font_status_cache[size] = _ImageFont.truetype(arial_path, size)
+                        except Exception:
+                            _font_status_cache[size] = _ImageFont.load_default()
+                    f = _font_status_cache[size]
+                    try:
+                        w = f.getbbox(text)[2] - f.getbbox(text)[0]
+                    except Exception:
+                        w = len(text) * size
+                    if w <= max_px:
+                        return f
+                return _font_status_cache.get(11, _ImageFont.load_default())
         except Exception:
-            font_title = font_status = font_ssid = _ImageFont.load_default()
+            font_title = font_ssid = _ImageFont.load_default()
+            def _status_font(text, max_px=200):
+                return _ImageFont.load_default()
 
         # ── mascot tint colour (user-configurable via web UI) ────────────
         def _parse_hex(hex_str, fallback=(150, 200, 255)):
@@ -1306,7 +1324,7 @@ class Display:
             if any(k in s for k in ("ERROR", "FAIL")):                     return C_RED
             return C_GREEN
 
-        def _render(wifi_on, ssid, ap_on, status_text, mascot_rgba):
+        def _render(wifi_on, ssid, ap_on, status_text, mascot_rgba, info_label, info_col):
             img  = _Image.new("RGB", (SIZE, SIZE), C_BG)
             draw = _ImageDraw.Draw(img)
 
@@ -1334,32 +1352,24 @@ class Display:
                 my = 32 + (MASCOT_SZ - mh) // 2
                 img.paste(mascot_rgba, (mx, my), mascot_rgba)
 
-            # Status text
+            # Status text — auto-shrink to fit circle width
             st = (status_text or "IDLE").upper()
             s_col = _status_col(wifi_on, ap_on, status_text)
+            f_st  = _status_font(st)
             try:
-                sb = font_status.getbbox(st)
+                sb = f_st.getbbox(st)
                 sx = (SIZE - (sb[2] - sb[0])) // 2
             except Exception:
                 sx = 60
-            draw.text((sx, 182), st, font=font_status, fill=s_col)
+            draw.text((sx, 182), st, font=f_st, fill=s_col)
 
-            # Network label
-            if ap_on:
-                net_label = ssid if ssid.startswith("AP") else "AP MODE"
-                net_col   = C_AMBER
-            elif wifi_on:
-                net_label = ssid.removeprefix("WiFi: ") if ssid else "Connected"
-                net_col   = C_GRAY
-            else:
-                net_label = "NOT CONNECTED"
-                net_col   = C_RED
+            # Rotating info line
             try:
-                nb = font_ssid.getbbox(net_label)
+                nb = font_ssid.getbbox(info_label)
                 nx = (SIZE - (nb[2] - nb[0])) // 2
             except Exception:
                 nx = 60
-            draw.text((nx, 207), net_label, font=font_ssid, fill=net_col)
+            draw.text((nx, 207), info_label, font=font_ssid, fill=info_col)
 
             # Apply circular mask (black corners)
             result = _Image.new("RGB", (SIZE, SIZE), C_BG)
@@ -1374,6 +1384,38 @@ class Display:
         _last_status = None
         _last_text   = None
         _last_fidx   = -1
+        _info_tick   = 0   # increments each TICK_SLEEP; drives rotating bottom line
+
+        # Info slots cycle every 20 ticks (10 s each); 3 slots = 30 s period
+        # Slot 0: scan target / current IP
+        # Slot 1: targets found + creds
+        # Slot 2: WiFi/network (the "every 30 s" network glimpse)
+        INFO_SLOT_TICKS = 20   # 10 s per slot
+        INFO_SLOTS      = 3
+
+        def _info_line(slot, wifi_on, ssid, ap_on):
+            sd = self.shared_data
+            if slot == 2:
+                # Network slot
+                if ap_on:
+                    return ssid if ssid.startswith("AP") else "AP MODE", C_AMBER
+                if not wifi_on:
+                    return "NOT CONNECTED", C_RED
+                return (ssid.removeprefix("WiFi: ") if ssid else "Connected"), C_GRAY
+            if slot == 0:
+                # Current scan target — bjornstatustext2 holds network or IP being scanned
+                target = getattr(sd, "bjornstatustext2", "") or ""
+                if target:
+                    label = target if len(target) <= 20 else target[-20:]
+                    return label, C_CYAN
+                # Fallback: gateway
+                gw = (getattr(sd, "gateway_info", {}) or {}).get("gateway_ip", "")
+                return (f"GW: {gw}" if gw else "Scanning..."), C_CYAN
+            # slot == 1: targets + creds
+            targets = getattr(sd, "total_targetnbr", 0) or 0
+            creds   = getattr(sd, "crednbr",        0) or 0
+            vulns   = getattr(sd, "vulnnbr",         0) or 0
+            return f"T:{targets} C:{creds} V:{vulns}", C_GREEN
 
         while not self.shared_data.display_should_exit:
             try:
@@ -1395,17 +1437,21 @@ class Display:
                     _frame_idx  = (_frame_idx + 1) % _frame_count(orch_status)
 
                 tint = _mascot_tint()
-                text_changed  = (wifi_on, ssid, ap_on, status_text) != _last_text
+                info_slot = (_info_tick // INFO_SLOT_TICKS) % INFO_SLOTS
+                info_label, info_col = _info_line(info_slot, wifi_on, ssid, ap_on)
+                _info_tick += 1
+
+                text_changed  = (wifi_on, ssid, ap_on, status_text, info_label) != _last_text
                 frame_changed = _frame_idx != _last_fidx
                 color_changed = tint != getattr(self, "_gc9a01_last_tint", None)
 
                 if text_changed or frame_changed or color_changed:
                     sprite = _get_colorized_frame(orch_status, _frame_idx, tint)
                     self._gc9a01_last_tint = tint
-                    output = _render(wifi_on, ssid, ap_on, status_text, sprite)
+                    output = _render(wifi_on, ssid, ap_on, status_text, sprite, info_label, info_col)
                     output = output.transpose(_Image.Transpose.FLIP_LEFT_RIGHT)
                     self.epd_helper.display_partial(output)
-                    _last_text  = (wifi_on, ssid, ap_on, status_text)
+                    _last_text  = (wifi_on, ssid, ap_on, status_text, info_label)
                     _last_fidx  = _frame_idx
 
                     try:
