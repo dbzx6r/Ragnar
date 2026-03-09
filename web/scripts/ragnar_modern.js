@@ -527,6 +527,8 @@ document.addEventListener('DOMContentLoaded', function() {
     initializePwnUI();
     initializePwnagotchiVisibility();
     initializeWpaSecVisibility();
+    initializeIpCamToggle();
+    initializeAggressiveMode();
     handleHeadlessMode();
 
 });
@@ -4888,6 +4890,50 @@ function initializePwnagotchiVisibility() {
     const isEnabled = arePwnFeaturesEnabled();
     checkbox.checked = isEnabled;
     applyPwnVisibilityPreference(isEnabled);
+}
+
+// ── IP Camera Scanner ─────────────────────────────────────────────────────────
+
+function toggleIpCamEnabled() {
+    const checkbox = document.getElementById('ipcam-enabled');
+    if (!checkbox) return;
+    postAPI('/api/config', { ipcam_enabled: checkbox.checked }).then(() => {
+        showNotification(
+            checkbox.checked ? 'IP Camera Scanner enabled' : 'IP Camera Scanner disabled',
+            checkbox.checked ? 'success' : 'info'
+        );
+    }).catch(() => showNotification('Failed to update IP Camera Scanner setting', 'error'));
+}
+
+function initializeIpCamToggle() {
+    fetchAPI('/api/config').then(data => {
+        if (!data) return;
+        const checkbox = document.getElementById('ipcam-enabled');
+        if (checkbox) checkbox.checked = data.ipcam_enabled !== false;
+    }).catch(() => {});
+}
+
+// ── Aggressive Mode ───────────────────────────────────────────────────────────
+
+function toggleAggressiveMode() {
+    const checkbox = document.getElementById('aggressive-mode-enabled');
+    if (!checkbox) return;
+    const enabled = checkbox.checked;
+    postAPI('/api/config', { aggressive_mode_enabled: enabled }).then(() => {
+        if (enabled) {
+            showNotification('Aggressive Mode ON — fast scan preset applied', 'warning');
+        } else {
+            showNotification('Aggressive Mode OFF — conservative defaults restored', 'info');
+        }
+    }).catch(() => showNotification('Failed to update Aggressive Mode setting', 'error'));
+}
+
+function initializeAggressiveMode() {
+    fetchAPI('/api/config').then(data => {
+        if (!data) return;
+        const checkbox = document.getElementById('aggressive-mode-enabled');
+        if (checkbox) checkbox.checked = Boolean(data.aggressive_mode_enabled);
+    }).catch(() => {});
 }
 
 function updatePwnToggleAvailability(isHeadless) {
