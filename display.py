@@ -1331,6 +1331,7 @@ class Display:
             return C_GREEN
 
         def _render(wifi_on, ssid, ap_on, status_text, mascot_rgba, info_label, info_col):
+            import math as _math
             img  = _Image.new("RGB", (SIZE, SIZE), C_BG)
             draw = _ImageDraw.Draw(img)
 
@@ -1357,6 +1358,50 @@ class Display:
                 mx = (SIZE - mw) // 2
                 my = 32 + (MASCOT_SZ - mh) // 2
                 img.paste(mascot_rgba, (mx, my), mascot_rgba)
+
+            # ── Left panel: WiFi signal ───────────────────────────────────
+            sd = self.shared_data
+            rssi  = getattr(sd, "wifi_signal_dbm",     None)
+            qual  = getattr(sd, "wifi_signal_quality",  None)
+            font_side = font_ssid  # 14px
+            panel_x   = RING_W + 2
+            panel_y   = 70
+
+            if not wifi_on:
+                draw.text((panel_x, panel_y),      "WiFi", font=font_side, fill=C_RED)
+                draw.text((panel_x, panel_y + 16), " OFF", font=font_side, fill=C_RED)
+            elif rssi is not None:
+                # Signal bar indicator (4 bars)
+                bars = 1 if rssi >= -90 else 0
+                bars = 2 if rssi >= -75 else bars
+                bars = 3 if rssi >= -65 else bars
+                bars = 4 if rssi >= -55 else bars
+                bar_col = C_RED if bars <= 1 else C_AMBER if bars == 2 else C_GREEN
+                for b in range(4):
+                    bh = 4 + b * 3   # bar heights: 4,7,10,13
+                    bx = panel_x + b * 7
+                    by = panel_y + 13 - bh
+                    col = bar_col if b < bars else C_GRAY
+                    draw.rectangle([bx, by, bx + 4, panel_y + 13], fill=col)
+                dbm_str = f"{int(rssi)}d"
+                draw.text((panel_x, panel_y + 17), dbm_str, font=font_side, fill=C_GRAY)
+            else:
+                draw.text((panel_x, panel_y), "N/A", font=font_side, fill=C_GRAY)
+
+            # ── Right panel: Target count ─────────────────────────────────
+            targets = getattr(sd, "total_targetnbr", 0) or 0
+            # Right-align within the right sliver
+            tgt_label1 = "TGTS"
+            tgt_label2 = str(targets)
+            try:
+                w1 = font_side.getbbox(tgt_label1)[2] - font_side.getbbox(tgt_label1)[0]
+                w2 = font_side.getbbox(tgt_label2)[2] - font_side.getbbox(tgt_label2)[0]
+            except Exception:
+                w1 = w2 = 28
+            rx1 = SIZE - RING_W - 2 - w1
+            rx2 = SIZE - RING_W - 2 - w2
+            draw.text((rx1, panel_y),      tgt_label1, font=font_side, fill=C_GRAY)
+            draw.text((rx2, panel_y + 16), tgt_label2, font=font_side, fill=C_GREEN)
 
             # Status text — auto-shrink to fit circle width
             st = (status_text or "IDLE").upper()
