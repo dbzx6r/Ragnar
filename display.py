@@ -1180,29 +1180,6 @@ class Display:
         C_AMBER = (220, 160,   0)
         RING_W  = 6
 
-        # Mascot tint colours keyed by partial status name
-        TINT_MAP = {
-            "IDLE":          (150, 200, 255),  # soft blue
-            "NetworkScanner":(0,   220, 220),  # cyan
-            "NmapVuln":      (0,   220, 220),  # cyan
-            "SSHBrute":      (255,  80,  80),  # red
-            "SMBBrute":      (255,  80,  80),
-            "FTPBrute":      (255,  80,  80),
-            "RDPBrute":      (255,  80,  80),
-            "TelnetBrute":   (255,  80,  80),
-            "SQLBrute":      (255, 120,  60),
-            "StealFiles":    (255, 160,  40),  # amber
-            "StealData":     (255, 160,  40),
-            "LogStandalone": (180, 180, 180),  # gray
-        }
-
-        def _tint_for(status):
-            s = status or "IDLE"
-            for key, col in TINT_MAP.items():
-                if key.lower() in s.lower():
-                    return col
-            return C_WHITE
-
         # ── fonts ────────────────────────────────────────────────────────
         fonts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resources", "fonts")
         arial_path  = os.path.join(fonts_dir, "Arial.ttf")
@@ -1214,7 +1191,30 @@ class Display:
         except Exception:
             font_title = font_status = font_ssid = _ImageFont.load_default()
 
-        # ── frame cache: (status, frame_idx) → RGBA tinted sprite ────────
+        # ── load ragnar.png as full-color texture ──────────────────────
+        # Crop to actual character bounds (x=0-1020, y=32-1364) then scale
+        # to MASCOT_SZ. This is used as the colour source for every frame.
+        _ragnar_texture = None
+        ragnar_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                   "web", "images", "ragnar.png")
+        if os.path.isfile(ragnar_path):
+            try:
+                raw = _Image.open(ragnar_path).convert("RGBA")
+                # Crop to tight character bounds measured from the actual image
+                raw = raw.crop((0, 32, 1020, 1364))
+                raw = raw.resize((MASCOT_SZ, MASCOT_SZ), _Image.LANCZOS)
+                # Remove white / near-white background pixels
+                px = raw.load()
+                for _y in range(raw.height):
+                    for _x in range(raw.width):
+                        r, g, b, a = px[_x, _y]
+                        if r > 210 and g > 210 and b > 210:
+                            px[_x, _y] = (r, g, b, 0)
+                _ragnar_texture = raw
+            except Exception as exc:
+                logger.warning("GC9A01: could not load ragnar texture: %s", exc)
+
+        # ── frame cache: (status, frame_idx) → RGBA coloured sprite ─────
         _frame_cache = {}
 
         def _get_colorized_frame(status, idx):
@@ -1224,22 +1224,27 @@ class Display:
             series = getattr(self.shared_data, "image_series", {})
             frames = series.get(status) or series.get("IDLE") or []
             if not frames:
-                _frame_cache[key] = None
-                return None
+                _frame_cache[key] = _ragnar_texture  # fallback: plain texture
+                return _ragnar_texture
             src = frames[idx % len(frames)]
-            tint = _tint_for(status)
             try:
-                # Scale up; convert to grayscale for inversion mask
-                scaled = src.convert("L").resize((MASCOT_SZ, MASCOT_SZ), _Image.LANCZOS)
-                # Invert: dark pixels (drawing) → high alpha; white bg → 0 alpha
-                alpha = _ImageOps.invert(scaled)
-                # Solid tinted layer with the inverted alpha
-                tinted = _Image.new("RGBA", (MASCOT_SZ, MASCOT_SZ), tint + (255,))
-                tinted.putalpha(alpha)
-                _frame_cache[key] = tinted
+                # Build alpha mask from BMP frame: dark pixels = opaque, white = transparent
+                gray  = src.convert("L").resize((MASCOT_SZ, MASCOT_SZ), _Image.LANCZOS)
+                alpha = _ImageOps.invert(gray)  # black→255, white→0
+
+                if _ragnar_texture is not None:
+                    # Stamp the full-colour texture through the BMP silhouette mask
+                    sprite = _ragnar_texture.copy()
+                    sprite.putalpha(alpha)
+                else:
+                    # Fallback: white line art on transparent bg
+                    sprite = _Image.new("RGBA", (MASCOT_SZ, MASCOT_SZ), C_WHITE + (255,))
+                    sprite.putalpha(alpha)
+
+                _frame_cache[key] = sprite
             except Exception as exc:
                 logger.debug("GC9A01: colorize error: %s", exc)
-                _frame_cache[key] = None
+                _frame_cache[key] = _ragnar_texture
             return _frame_cache[key]
 
         def _frame_count(status):
@@ -1353,7 +1358,6 @@ class Display:
                     _frame_idx   = 0
                     _anim_tick   = 0
                     _last_status = orch_status
-                    _frame_cache.clear()  # tint may change with new status
 
                 # Advance animation frame
                 _anim_tick += 1
