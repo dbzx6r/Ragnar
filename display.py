@@ -1170,79 +1170,108 @@ class Display:
     def _run_gc9a01(self):
         """Dedicated render loop for the GC9A01 1.28″ round colour TFT.
 
-        Runs instead of the normal e-paper loop when epd_type == 'gc9a01'.
-        Builds a 240×240 RGB image every loop iteration, but only pushes a
-        new frame to the display when the visible content has changed, keeping
-        the screen completely stable between updates.
+        Animates the existing e-paper BMP frame sequences (resources/images/status/)
+        in full colour on the round display, cycling at ~1 fps.  Each status has
+        its own tint colour so the mascot visually reflects what Ragnar is doing.
 
         Layout (240×240 circle):
           ┌──────────────────────┐
-          │     RAGNAR  (title)  │  y≈10 – white, Viking font
+          │     RAGNAR  (title)  │  y≈8  – white, Viking font
           │   ┌──────────────┐   │
-          │   │  mascot PNG  │   │  y≈30 – 140×140, white→transparent
+          │   │  mascot anim │   │  y≈30–175 – tinted BMP frames, animated
           │   └──────────────┘   │
-          │   ── STATUS TEXT ──  │  y≈185 – coloured by state
-          │      wifi ssid       │  y≈210 – white/dim
+          │   ── STATUS TEXT ──  │  y≈182 – coloured by state
+          │      wifi ssid       │  y≈207 – white/dim
           └──────────────────────┘
-        Outer ring colour: green=connected, amber=AP mode, red=alert, dim=idle
+        Outer ring colour: green=connected, cyan=scanning, amber=AP, red=error/offline
         """
-        from PIL import Image as _Image, ImageDraw as _ImageDraw, ImageFont as _ImageFont
+        from PIL import Image as _Image, ImageDraw as _ImageDraw, ImageFont as _ImageFont, ImageOps as _ImageOps
 
-        SIZE = 240
+        SIZE       = 240
+        MASCOT_SZ  = 140   # px — upscaled from 78×78 source
+        ANIM_TICKS = 2     # loop ticks per frame advance (tick = 0.5 s → 1 s/frame)
+        TICK_SLEEP = 0.5   # seconds per tick
 
-        # Colour palette (R, G, B)
-        C_BG      = (0,   0,   0)
-        C_WHITE   = (255, 255, 255)
-        C_GRAY    = (160, 160, 160)
-        C_GREEN   = (50,  200, 80)
-        C_RED     = (220, 50,  50)
-        C_CYAN    = (0,   200, 220)
-        C_AMBER   = (220, 160, 0)
-        C_RING_DIM= (40,  40,  40)
-        RING_W    = 6           # ring border width in px
+        # ── colour palette ───────────────────────────────────────────────
+        C_BG    = (0,   0,   0)
+        C_WHITE = (255, 255, 255)
+        C_GRAY  = (160, 160, 160)
+        C_GREEN = (50,  200,  80)
+        C_RED   = (220,  50,  50)
+        C_CYAN  = (0,   200, 220)
+        C_AMBER = (220, 160,   0)
+        RING_W  = 6
 
-        fonts_dir = os.path.join(os.path.dirname(__file__), "resources", "fonts")
-        if not os.path.isdir(fonts_dir):
-            fonts_dir = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)), "resources", "fonts"
-            )
+        # Mascot tint colours keyed by partial status name
+        TINT_MAP = {
+            "IDLE":          (150, 200, 255),  # soft blue
+            "NetworkScanner":(0,   220, 220),  # cyan
+            "NmapVuln":      (0,   220, 220),  # cyan
+            "SSHBrute":      (255,  80,  80),  # red
+            "SMBBrute":      (255,  80,  80),
+            "FTPBrute":      (255,  80,  80),
+            "RDPBrute":      (255,  80,  80),
+            "TelnetBrute":   (255,  80,  80),
+            "SQLBrute":      (255, 120,  60),
+            "StealFiles":    (255, 160,  40),  # amber
+            "StealData":     (255, 160,  40),
+            "LogStandalone": (180, 180, 180),  # gray
+        }
+
+        def _tint_for(status):
+            s = status or "IDLE"
+            for key, col in TINT_MAP.items():
+                if key.lower() in s.lower():
+                    return col
+            return C_WHITE
+
+        # ── fonts ────────────────────────────────────────────────────────
+        fonts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resources", "fonts")
         arial_path  = os.path.join(fonts_dir, "Arial.ttf")
         viking_path = os.path.join(fonts_dir, "Creamy.ttf")
-
         try:
             font_title  = _ImageFont.truetype(viking_path, 22)
             font_status = _ImageFont.truetype(arial_path,  18)
             font_ssid   = _ImageFont.truetype(arial_path,  14)
         except Exception:
-            font_title  = _ImageFont.load_default()
-            font_status = font_title
-            font_ssid   = font_title
+            font_title = font_status = font_ssid = _ImageFont.load_default()
 
-        # ── mascot ──────────────────────────────────────────────────────
-        mascot_size = (140, 140)
-        mascot_img  = None
-        mascot_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "web", "images", "ragnar.png"
-        )
-        if os.path.isfile(mascot_path):
+        # ── frame cache: (status, frame_idx) → RGBA tinted sprite ────────
+        _frame_cache = {}
+
+        def _get_colorized_frame(status, idx):
+            key = (status, idx)
+            if key in _frame_cache:
+                return _frame_cache[key]
+            series = getattr(self.shared_data, "image_series", {})
+            frames = series.get(status) or series.get("IDLE") or []
+            if not frames:
+                _frame_cache[key] = None
+                return None
+            src = frames[idx % len(frames)]
+            tint = _tint_for(status)
             try:
-                raw = _Image.open(mascot_path).convert("RGBA")
-                raw.thumbnail(mascot_size, _Image.LANCZOS)
-                # Make white and near-white pixels transparent
-                pixels = raw.load()
-                for y in range(raw.height):
-                    for x in range(raw.width):
-                        r, g, b, a = pixels[x, y]
-                        if r > 200 and g > 200 and b > 200:
-                            pixels[x, y] = (r, g, b, 0)
-                mascot_img = raw
+                # Scale up; convert to grayscale for inversion mask
+                scaled = src.convert("L").resize((MASCOT_SZ, MASCOT_SZ), _Image.LANCZOS)
+                # Invert: dark pixels (drawing) → high alpha; white bg → 0 alpha
+                alpha = _ImageOps.invert(scaled)
+                # Solid tinted layer with the inverted alpha
+                tinted = _Image.new("RGBA", (MASCOT_SZ, MASCOT_SZ), tint + (255,))
+                tinted.putalpha(alpha)
+                _frame_cache[key] = tinted
             except Exception as exc:
-                logger.warning("GC9A01: could not load mascot: %s", exc)
+                logger.debug("GC9A01: colorize error: %s", exc)
+                _frame_cache[key] = None
+            return _frame_cache[key]
 
-        def _state_tuple():
+        def _frame_count(status):
+            series = getattr(self.shared_data, "image_series", {})
+            frames = series.get(status) or series.get("IDLE") or []
+            return max(1, len(frames))
+
+        # ── state helpers ─────────────────────────────────────────────────
+        def _text_state():
             sd = self.shared_data
-            # ragnarstatustext2 is set by schedule_update_shared_data as e.g.
-            # "WiFi: Tango Down", "AP: 2 clients", "AP: No clients"
             net_text = getattr(sd, "ragnarstatustext2", "") or ""
             return (
                 getattr(sd, "wifi_connected",   False),
@@ -1251,31 +1280,23 @@ class Display:
                 getattr(sd, "ragnarstatustext", "IDLE"),
             )
 
-        def _ring_colour(wifi_on, ap_on, status):
-            if ap_on:
-                return C_AMBER
-            if not wifi_on:
-                return C_RED
+        def _ring_col(wifi_on, ap_on, status):
+            if ap_on:            return C_AMBER
+            if not wifi_on:      return C_RED
             s = (status or "").upper()
-            if any(k in s for k in ("SCAN", "ATTACK", "INJECT")):
-                return C_CYAN
-            if "ERROR" in s or "FAIL" in s:
-                return C_RED
+            if any(k in s for k in ("SCAN", "BRUTE", "STEAL", "INJECT")): return C_CYAN
+            if any(k in s for k in ("ERROR", "FAIL")):                     return C_RED
             return C_GREEN
 
-        def _status_colour(wifi_on, ap_on, status):
-            if ap_on:
-                return C_AMBER
-            if not wifi_on:
-                return C_RED
+        def _status_col(wifi_on, ap_on, status):
+            if ap_on:            return C_AMBER
+            if not wifi_on:      return C_RED
             s = (status or "").upper()
-            if any(k in s for k in ("SCAN", "ATTACK", "INJECT")):
-                return C_CYAN
-            if "ERROR" in s or "FAIL" in s:
-                return C_RED
+            if any(k in s for k in ("SCAN", "BRUTE", "STEAL", "INJECT")): return C_CYAN
+            if any(k in s for k in ("ERROR", "FAIL")):                     return C_RED
             return C_GREEN
 
-        def _render_frame(wifi_on, ssid, ap_on, status_text):
+        def _render(wifi_on, ssid, ap_on, status_text, mascot_rgba):
             img  = _Image.new("RGB", (SIZE, SIZE), C_BG)
             draw = _ImageDraw.Draw(img)
 
@@ -1283,9 +1304,9 @@ class Display:
             mask = _Image.new("L", (SIZE, SIZE), 0)
             _ImageDraw.Draw(mask).ellipse((0, 0, SIZE - 1, SIZE - 1), fill=255)
 
-            # Coloured ring border
-            ring_c = _ring_colour(wifi_on, ap_on, status_text)
-            draw.ellipse((0, 0, SIZE - 1, SIZE - 1), outline=ring_c, width=RING_W)
+            # Ring border
+            draw.ellipse((0, 0, SIZE - 1, SIZE - 1),
+                         outline=_ring_col(wifi_on, ap_on, status_text), width=RING_W)
 
             # Title
             title = "RAGNAR"
@@ -1296,16 +1317,16 @@ class Display:
                 tx = 80
             draw.text((tx, 8), title, font=font_title, fill=C_WHITE)
 
-            # Mascot — centred between y=32 and y=172
-            if mascot_img is not None:
-                mw, mh = mascot_img.size
+            # Mascot sprite
+            if mascot_rgba is not None:
+                mw, mh = mascot_rgba.size
                 mx = (SIZE - mw) // 2
-                my = 32 + (140 - mh) // 2
-                img.paste(mascot_img, (mx, my), mascot_img)
+                my = 32 + (MASCOT_SZ - mh) // 2
+                img.paste(mascot_rgba, (mx, my), mascot_rgba)
 
             # Status text
-            s_col = _status_colour(wifi_on, ap_on, status_text)
-            st    = (status_text or "IDLE").upper()
+            st = (status_text or "IDLE").upper()
+            s_col = _status_col(wifi_on, ap_on, status_text)
             try:
                 sb = font_status.getbbox(st)
                 sx = (SIZE - (sb[2] - sb[0])) // 2
@@ -1313,12 +1334,11 @@ class Display:
                 sx = 60
             draw.text((sx, 182), st, font=font_status, fill=s_col)
 
-            # SSID / AP label — net_text is e.g. "WiFi: Tango Down" or "AP: 2 clients"
+            # Network label
             if ap_on:
                 net_label = ssid if ssid.startswith("AP") else "AP MODE"
                 net_col   = C_AMBER
             elif wifi_on:
-                # Strip the "WiFi: " prefix if present for a cleaner label
                 net_label = ssid.removeprefix("WiFi: ") if ssid else "Connected"
                 net_col   = C_GRAY
             else:
@@ -1329,43 +1349,62 @@ class Display:
                 nx = (SIZE - (nb[2] - nb[0])) // 2
             except Exception:
                 nx = 60
-            draw.text((nx, 208), net_label, font=font_ssid, fill=net_col)
+            draw.text((nx, 207), net_label, font=font_ssid, fill=net_col)
 
-            # Apply circular clip so corners are pure black
+            # Apply circular mask (black corners)
             result = _Image.new("RGB", (SIZE, SIZE), C_BG)
             result.paste(img, mask=mask)
             return result
 
+        # ── main animation loop ───────────────────────────────────────────
         self.epd_helper.init_partial_update()
-        _last_state = None
+
+        _anim_tick   = 0
+        _frame_idx   = 0
+        _last_status = None
+        _last_text   = None
+        _last_fidx   = -1
 
         while not self.shared_data.display_should_exit:
             try:
-                state = _state_tuple()
-                if state != _last_state:
-                    wifi_on, ssid, ap_on, status_text = state
-                    frame = _render_frame(wifi_on, ssid, ap_on, status_text)
-                    # Mirror horizontally to correct physical display orientation
-                    frame = frame.transpose(_Image.Transpose.FLIP_LEFT_RIGHT)
-                    self.epd_helper.display_partial(frame)
-                    _last_state = state
+                wifi_on, ssid, ap_on, status_text = _text_state()
+                orch_status = getattr(self.shared_data, "ragnarorch_status", "IDLE") or "IDLE"
 
-                    # Save web preview
+                # Reset animation when status changes
+                if orch_status != _last_status:
+                    _frame_idx   = 0
+                    _anim_tick   = 0
+                    _last_status = orch_status
+                    _frame_cache.clear()  # tint may change with new status
+
+                # Advance animation frame
+                _anim_tick += 1
+                if _anim_tick >= ANIM_TICKS:
+                    _anim_tick  = 0
+                    _frame_idx  = (_frame_idx + 1) % _frame_count(orch_status)
+
+                text_changed  = (wifi_on, ssid, ap_on, status_text) != _last_text
+                frame_changed = _frame_idx != _last_fidx
+
+                if text_changed or frame_changed:
+                    sprite = _get_colorized_frame(orch_status, _frame_idx)
+                    output = _render(wifi_on, ssid, ap_on, status_text, sprite)
+                    output = output.transpose(_Image.Transpose.FLIP_LEFT_RIGHT)
+                    self.epd_helper.display_partial(output)
+                    _last_text  = (wifi_on, ssid, ap_on, status_text)
+                    _last_fidx  = _frame_idx
+
                     try:
-                        web_path = os.path.join(
-                            self.shared_data.webdir, "screen.png"
-                        )
+                        web_path = os.path.join(self.shared_data.webdir, "screen.png")
                         with open(web_path, "wb") as f:
-                            frame.save(f)
-                            f.flush()
-                            os.fsync(f.fileno())
-                    except Exception as exc:
-                        logger.debug("GC9A01: web screen save failed: %s", exc)
+                            output.save(f); f.flush(); os.fsync(f.fileno())
+                    except Exception:
+                        pass
 
             except Exception as exc:
                 logger.error("GC9A01 render error: %s", exc)
 
-            time.sleep(self.shared_data.screen_delay)
+            time.sleep(TICK_SLEEP)
 
     def run(self):
         """Main loop for updating the EPD display with shared data."""
