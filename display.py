@@ -46,9 +46,7 @@ class Display:
         self.commentaire_ia = Commentaireia()
         self.semaphore = threading.Semaphore(10)
         self.screen_reversed = self.shared_data.screen_reversed
-        self.screen_mirrored = self.shared_data.screen_mirrored
         self.web_screen_reversed = self.shared_data.web_screen_reversed
-        self.web_screen_mirrored = self.shared_data.web_screen_mirrored
         self.main_image = None  # Initialize main_image variable
 
         # Frise position (x=0 since frise is resized to full display width)
@@ -1387,9 +1385,7 @@ class Display:
                 self.epd_helper.init_partial_update()
                 # Pull latest orientation settings so web toggles take effect without restarting the service.
                 self.screen_reversed = self.shared_data.screen_reversed
-                self.screen_mirrored = self.shared_data.screen_mirrored
                 self.web_screen_reversed = self.shared_data.web_screen_reversed
-                self.web_screen_mirrored = self.shared_data.web_screen_mirrored
                 self.display_comment(self.shared_data.ragnarorch_status)
                 image = Image.new('1', (self.shared_data.width, self.shared_data.height))
                 draw = ImageDraw.Draw(image)
@@ -1427,14 +1423,11 @@ class Display:
                     # Non-main pages are fully rendered above, skip to display
                     if self.screen_reversed:
                         image = image.transpose(Image.Transpose.ROTATE_180)
-                    if self.screen_mirrored:
-                        image = image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
                     self.epd_helper.display_partial(image)
                     self.epd_helper.display_partial(image)
                     if self.web_screen_reversed:
                         image = image.transpose(Image.Transpose.ROTATE_180)
-                    if self.web_screen_mirrored:
-                        image = image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+                    image = image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
                     with open(os.path.join(self.shared_data.webdir, "screen.png"), 'wb') as img_file:
                         image.save(img_file)
                         img_file.flush()
@@ -1551,16 +1544,13 @@ class Display:
 
                 if self.screen_reversed:
                     image = image.transpose(Image.Transpose.ROTATE_180)
-                if self.screen_mirrored:
-                    image = image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
 
                 self.epd_helper.display_partial(image)
                 self.epd_helper.display_partial(image)
 
                 if self.web_screen_reversed:
                     image = image.transpose(Image.Transpose.ROTATE_180)
-                if self.web_screen_mirrored:
-                    image = image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+                image = image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
                 with open(os.path.join(self.shared_data.webdir, "screen.png"), 'wb') as img_file:
                     image.save(img_file)
                     img_file.flush()
