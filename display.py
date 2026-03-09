@@ -1364,8 +1364,11 @@ class Display:
             rssi  = getattr(sd, "wifi_signal_dbm",     None)
             qual  = getattr(sd, "wifi_signal_quality",  None)
             font_side = font_ssid  # 14px
-            panel_x   = RING_W + 2
-            panel_y   = 70
+            panel_y   = 100
+            # Compute safe inward x so panels stay inside the circle at panel_y
+            _chord = 2 * _math.sqrt(max(0, 120**2 - (panel_y - 120)**2))
+            panel_x = int((SIZE - _chord) / 2) + RING_W + 6   # left panel x
+            right_x_limit = SIZE - panel_x                     # right panel right edge
 
             if not wifi_on:
                 draw.text((panel_x, panel_y),      "WiFi", font=font_side, fill=C_RED)
@@ -1398,8 +1401,8 @@ class Display:
                 w2 = font_side.getbbox(tgt_label2)[2] - font_side.getbbox(tgt_label2)[0]
             except Exception:
                 w1 = w2 = 28
-            rx1 = SIZE - RING_W - 2 - w1
-            rx2 = SIZE - RING_W - 2 - w2
+            rx1 = right_x_limit - w1
+            rx2 = right_x_limit - w2
             draw.text((rx1, panel_y),      tgt_label1, font=font_side, fill=C_GRAY)
             draw.text((rx2, panel_y + 16), tgt_label2, font=font_side, fill=C_GREEN)
 
