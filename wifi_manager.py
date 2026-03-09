@@ -2479,20 +2479,25 @@ port=0
             self.logger.error(f"Error in AP cleanup: {e}")
     
     def get_status(self):
-        """Get current Wi-Fi manager status with real-time SSID check"""
+        """Get current Wi-Fi manager status with real-time SSID check.
+
+        NOTE: This method is intentionally read-only with respect to the
+        network storage layer.  It must NEVER call ``_set_current_ssid()``
+        because that triggers ``set_active_network()`` which, on a transient
+        Wi-Fi check failure, would call ``mark_all_hosts_degraded()`` and
+        wipe every alive host to offline.  The endless-loop monitoring
+        thread is the sole authority for SSID / network-context changes.
+        """
         # Always get fresh connection status and SSID
         network_connected = self.check_network_connectivity()
         wifi_connected = self.check_wifi_connection()
         current_ssid = self.get_current_ssid() if wifi_connected else None
 
-        # Update internal state
+        # Update lightweight connectivity flags only – no storage-layer
+        # side-effects (no _set_current_ssid / set_active_network calls).
         self.wifi_connected = wifi_connected
         self.shared_data.wifi_connected = wifi_connected
         self.shared_data.network_connected = network_connected
-        if current_ssid:
-            self._set_current_ssid(current_ssid)
-        elif not wifi_connected:
-            self._set_current_ssid(None)
         
         status = {
             'wifi_connected': wifi_connected,
