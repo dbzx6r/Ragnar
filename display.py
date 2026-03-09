@@ -1409,8 +1409,9 @@ class Display:
 
                     try:
                         web_path = os.path.join(self.shared_data.webdir, "screen.png")
+                        web_img = output.transpose(_Image.Transpose.FLIP_LEFT_RIGHT)
                         with open(web_path, "wb") as f:
-                            output.save(f); f.flush(); os.fsync(f.fileno())
+                            web_img.save(f); f.flush(); os.fsync(f.fileno())
                     except Exception:
                         pass
 
