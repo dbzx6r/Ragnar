@@ -1235,7 +1235,13 @@ class Display:
             _font_status_cache = {}
             def _status_font(text, max_px=200):
                 """Return the largest font that fits `text` within max_px."""
-                for size in (18, 16, 14, 12, 11):
+                # At y=182 the circle chord is narrower than the full 240px diameter.
+                # Compute usable width: 2*sqrt(r^2 - (y - cx)^2) minus ring border.
+                import math
+                _r, _cx, _cy = 120, 120, 120
+                _chord = 2 * math.sqrt(max(0, _r**2 - (182 - _cy)**2))
+                max_px = min(max_px, int(_chord) - 2 * RING_W - 8)  # 8px safety margin
+                for size in (18, 16, 14, 12, 11, 10, 9):
                     if size not in _font_status_cache:
                         try:
                             _font_status_cache[size] = _ImageFont.truetype(arial_path, size)
@@ -1248,7 +1254,7 @@ class Display:
                         w = len(text) * size
                     if w <= max_px:
                         return f
-                return _font_status_cache.get(11, _ImageFont.load_default())
+                return _font_status_cache.get(9, _ImageFont.load_default())
         except Exception:
             font_title = font_ssid = _ImageFont.load_default()
             def _status_font(text, max_px=200):
