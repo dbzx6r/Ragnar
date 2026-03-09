@@ -1236,11 +1236,24 @@ class Display:
         except Exception:
             font_title = font_status = font_ssid = _ImageFont.load_default()
 
-        # ── frame cache: (status, frame_idx) → RGBA tinted sprite ────────
+        # ── mascot tint colour (user-configurable via web UI) ────────────
+        def _parse_hex(hex_str, fallback=(150, 200, 255)):
+            try:
+                h = hex_str.lstrip("#")
+                return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
+            except Exception:
+                return fallback
+
+        def _mascot_tint():
+            """Return current tint RGB, re-read from config each call so live
+            web-UI changes take effect without restarting the service."""
+            return _parse_hex(self.config.get("gc9a01_mascot_color", "#96C8FF"))
+
+        # ── frame cache: (status, frame_idx, tint) → RGBA sprite ─────────
         _frame_cache = {}
 
-        def _get_colorized_frame(status, idx):
-            key = (status, idx)
+        def _get_colorized_frame(status, idx, tint):
+            key = (status, idx, tint)
             if key in _frame_cache:
                 return _frame_cache[key]
             series = getattr(self.shared_data, "image_series", {})
@@ -1251,14 +1264,11 @@ class Display:
             src = frames[idx % len(frames)]
             tint = _tint_for(status)
             try:
-                # Scale up; convert to grayscale for inversion mask
-                scaled = src.convert("L").resize((MASCOT_SZ, MASCOT_SZ), _Image.LANCZOS)
-                # Invert: dark pixels (drawing) → high alpha; white bg → 0 alpha
-                alpha = _ImageOps.invert(scaled)
-                # Solid tinted layer with the inverted alpha
-                tinted = _Image.new("RGBA", (MASCOT_SZ, MASCOT_SZ), tint + (255,))
-                tinted.putalpha(alpha)
-                _frame_cache[key] = tinted
+                gray  = src.convert("L").resize((MASCOT_SZ, MASCOT_SZ), _Image.LANCZOS)
+                alpha = _ImageOps.invert(gray)   # dark pixels → opaque, white → transparent
+                sprite = _Image.new("RGBA", (MASCOT_SZ, MASCOT_SZ), tint + (255,))
+                sprite.putalpha(alpha)
+                _frame_cache[key] = sprite
             except Exception as exc:
                 logger.debug("GC9A01: colorize error: %s", exc)
                 _frame_cache[key] = None
@@ -1383,11 +1393,14 @@ class Display:
                     _anim_tick  = 0
                     _frame_idx  = (_frame_idx + 1) % _frame_count(orch_status)
 
+                tint = _mascot_tint()
                 text_changed  = (wifi_on, ssid, ap_on, status_text) != _last_text
                 frame_changed = _frame_idx != _last_fidx
+                color_changed = tint != getattr(self, "_gc9a01_last_tint", None)
 
-                if text_changed or frame_changed:
-                    sprite = _get_colorized_frame(orch_status, _frame_idx)
+                if text_changed or frame_changed or color_changed:
+                    sprite = _get_colorized_frame(orch_status, _frame_idx, tint)
+                    self._gc9a01_last_tint = tint
                     output = _render(wifi_on, ssid, ap_on, status_text, sprite)
                     output = output.transpose(_Image.Transpose.FLIP_LEFT_RIGHT)
                     self.epd_helper.display_partial(output)
