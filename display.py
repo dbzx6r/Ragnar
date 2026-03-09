@@ -1191,60 +1191,41 @@ class Display:
         except Exception:
             font_title = font_status = font_ssid = _ImageFont.load_default()
 
-        # ── load ragnar.png as full-color texture ──────────────────────
-        # Crop to actual character bounds (x=0-1020, y=32-1364) then scale
-        # to MASCOT_SZ. This is used as the colour source for every frame.
-        _ragnar_texture = None
-        ragnar_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                   "web", "images", "ragnar.png")
-        if os.path.isfile(ragnar_path):
+        # ── mascot tint colour (user-configurable via web UI) ────────────
+        def _parse_hex(hex_str, fallback=(150, 200, 255)):
             try:
-                raw = _Image.open(ragnar_path).convert("RGBA")
-                # Crop to tight character bounds measured from the actual image
-                raw = raw.crop((0, 32, 1020, 1364))
-                raw = raw.resize((MASCOT_SZ, MASCOT_SZ), _Image.LANCZOS)
-                # Remove white / near-white background pixels
-                px = raw.load()
-                for _y in range(raw.height):
-                    for _x in range(raw.width):
-                        r, g, b, a = px[_x, _y]
-                        if r > 210 and g > 210 and b > 210:
-                            px[_x, _y] = (r, g, b, 0)
-                _ragnar_texture = raw
-            except Exception as exc:
-                logger.warning("GC9A01: could not load ragnar texture: %s", exc)
+                h = hex_str.lstrip("#")
+                return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
+            except Exception:
+                return fallback
 
-        # ── frame cache: (status, frame_idx) → RGBA coloured sprite ─────
+        def _mascot_tint():
+            """Return current tint RGB, re-read from config each call so live
+            web-UI changes take effect without restarting the service."""
+            return _parse_hex(self.config.get("gc9a01_mascot_color", "#96C8FF"))
+
+        # ── frame cache: (status, frame_idx, tint) → RGBA sprite ─────────
         _frame_cache = {}
 
-        def _get_colorized_frame(status, idx):
-            key = (status, idx)
+        def _get_colorized_frame(status, idx, tint):
+            key = (status, idx, tint)
             if key in _frame_cache:
                 return _frame_cache[key]
             series = getattr(self.shared_data, "image_series", {})
             frames = series.get(status) or series.get("IDLE") or []
             if not frames:
-                _frame_cache[key] = _ragnar_texture  # fallback: plain texture
-                return _ragnar_texture
+                _frame_cache[key] = None
+                return None
             src = frames[idx % len(frames)]
             try:
-                # Build alpha mask from BMP frame: dark pixels = opaque, white = transparent
                 gray  = src.convert("L").resize((MASCOT_SZ, MASCOT_SZ), _Image.LANCZOS)
-                alpha = _ImageOps.invert(gray)  # black→255, white→0
-
-                if _ragnar_texture is not None:
-                    # Stamp the full-colour texture through the BMP silhouette mask
-                    sprite = _ragnar_texture.copy()
-                    sprite.putalpha(alpha)
-                else:
-                    # Fallback: white line art on transparent bg
-                    sprite = _Image.new("RGBA", (MASCOT_SZ, MASCOT_SZ), C_WHITE + (255,))
-                    sprite.putalpha(alpha)
-
+                alpha = _ImageOps.invert(gray)   # dark pixels → opaque, white → transparent
+                sprite = _Image.new("RGBA", (MASCOT_SZ, MASCOT_SZ), tint + (255,))
+                sprite.putalpha(alpha)
                 _frame_cache[key] = sprite
             except Exception as exc:
                 logger.debug("GC9A01: colorize error: %s", exc)
-                _frame_cache[key] = _ragnar_texture
+                _frame_cache[key] = None
             return _frame_cache[key]
 
         def _frame_count(status):
@@ -1365,11 +1346,14 @@ class Display:
                     _anim_tick  = 0
                     _frame_idx  = (_frame_idx + 1) % _frame_count(orch_status)
 
+                tint = _mascot_tint()
                 text_changed  = (wifi_on, ssid, ap_on, status_text) != _last_text
                 frame_changed = _frame_idx != _last_fidx
+                color_changed = tint != getattr(self, "_gc9a01_last_tint", None)
 
-                if text_changed or frame_changed:
-                    sprite = _get_colorized_frame(orch_status, _frame_idx)
+                if text_changed or frame_changed or color_changed:
+                    sprite = _get_colorized_frame(orch_status, _frame_idx, tint)
+                    self._gc9a01_last_tint = tint
                     output = _render(wifi_on, ssid, ap_on, status_text, sprite)
                     output = output.transpose(_Image.Transpose.FLIP_LEFT_RIGHT)
                     self.epd_helper.display_partial(output)

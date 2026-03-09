@@ -508,6 +508,7 @@ class SharedData:
             "ref_height": default_profile["ref_height"],
             "epd_type": DEFAULT_EPD_TYPE,
             "screen_reversed": default_profile.get("default_flip", False),
+            "gc9a01_mascot_color": "#96C8FF",
             
             
             "__title_lists__": "List Settings",
