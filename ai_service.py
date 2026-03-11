@@ -476,6 +476,91 @@ Limit to 2-3 most viable attack paths. Be specific and tactical.
 
 
     # ===================================================================
+    #   VULNERABILITY EXPLAINER
+    # ===================================================================
+
+    def explain_vulnerability(self, finding: Dict) -> Optional[Dict]:
+        """Return a plain-English 3-part explanation of a single vulnerability.
+
+        Returns a dict with keys:
+            what        – what the vulnerability is (no jargon, 1-2 sentences)
+            how_exploited – how attackers typically abuse it (concrete scenario)
+            how_to_fix  – actionable remediation steps in plain language
+        Returns None when AI is disabled or the call fails.
+        """
+        if not self.is_enabled():
+            return None
+
+        title       = finding.get("title", "") or finding.get("vulnerability", "") or ""
+        description = finding.get("description", "") or ""
+        cve_ids     = finding.get("cve_ids", []) or []
+        cvss        = finding.get("cvss_score", "") or finding.get("cvss", "")
+        severity    = finding.get("severity", "") or ""
+        remediation = finding.get("remediation", "") or ""
+
+        cve_str = ", ".join(cve_ids) if isinstance(cve_ids, list) else str(cve_ids)
+
+        cache_key = self._cache_key("vuln_explain", {
+            "title": title,
+            "cve": cve_str,
+        })
+        cached = self._cache_get(cache_key)
+        if cached:
+            return cached
+
+        context_parts = [f"Vulnerability: {title}"]
+        if cve_str:
+            context_parts.append(f"CVE(s): {cve_str}")
+        if cvss:
+            context_parts.append(f"CVSS Score: {cvss}")
+        if severity:
+            context_parts.append(f"Severity: {severity}")
+        if description:
+            context_parts.append(f"Technical Description: {description[:600]}")
+        if remediation:
+            context_parts.append(f"Known Fix: {remediation[:400]}")
+
+        context = "\n".join(context_parts)
+
+        system = (
+            "You are a cybersecurity educator who explains vulnerabilities to non-technical users. "
+            "Be clear, direct, and avoid jargon. Never use acronyms without explaining them first. "
+            "Always respond with valid JSON only — no markdown, no code fences."
+        )
+
+        user = f"""{context}
+
+Explain this vulnerability so that a non-technical person can understand it.
+Respond with a JSON object with exactly these three keys:
+
+{{
+  "what": "What this vulnerability is in 1-2 plain sentences. Avoid all technical jargon.",
+  "how_exploited": "A concrete, real-world scenario showing how an attacker would actually abuse this. 2-3 sentences. Make it vivid and understandable.",
+  "how_to_fix": "What the user or admin should do to fix or mitigate this. 1-3 short, actionable steps in plain language."
+}}"""
+
+        raw = self._ask(system, user)
+        if not raw:
+            return None
+
+        try:
+            # Strip any accidental markdown fences
+            clean = raw.strip()
+            if clean.startswith("```"):
+                clean = clean.split("```")[1]
+                if clean.startswith("json"):
+                    clean = clean[4:]
+            result = json.loads(clean)
+            # Validate expected keys present
+            if all(k in result for k in ("what", "how_exploited", "how_to_fix")):
+                self._cache_set(cache_key, result)
+                return result
+        except Exception as exc:
+            self.logger.warning("explain_vulnerability JSON parse failed: %s — raw: %.200s", exc, raw)
+
+        return None
+
+    # ===================================================================
     #   CACHE CLEAR
     # ===================================================================
 

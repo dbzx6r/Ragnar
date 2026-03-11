@@ -11708,91 +11708,150 @@ function showVulnerabilityDetails(vuln) {
         'low': 'text-blue-400'
     };
     
-    // Extract CVE IDs from vulnerability text and create links
-    function formatVulnerabilityWithLinks(vulnText) {
-        // Match CVE patterns (CVE-YYYY-NNNNN)
+    // Extract CVE IDs from vulnerability text and build Learn More links
+    function buildLearnMoreLinks(vulnText, cveIds) {
         const cvePattern = /(CVE-\d{4}-\d{4,7})/gi;
-        const cves = vulnText.match(cvePattern);
+        const textCVEs = vulnText ? (vulnText.match(cvePattern) || []) : [];
+        const allCVEs = [...new Set([...(cveIds || []), ...textCVEs])];
         
-        if (!cves || cves.length === 0) {
-            return `<div class="text-white font-mono text-sm break-all">${vulnText}</div>`;
-        }
+        if (!allCVEs.length) return '';
         
-        // Create links section
-        let linksHtml = '<div class="mt-3 pt-3 border-t border-slate-700">';
-        linksHtml += '<div class="text-sm text-slate-400 mb-2">CVE References:</div>';
-        linksHtml += '<div class="flex flex-wrap gap-2">';
-        
-        const uniqueCVEs = [...new Set(cves)]; // Remove duplicates
-        uniqueCVEs.forEach(cve => {
-            const nvdUrl = `https://nvd.nist.gov/vuln/detail/${cve}`;
+        let html = '<div class="mt-3 pt-3 border-t border-slate-700">';
+        html += '<div class="text-xs text-slate-500 mb-2">Learn More (Technical References)</div>';
+        html += '<div class="flex flex-wrap gap-2">';
+        allCVEs.forEach(cve => {
+            const nvdUrl  = `https://nvd.nist.gov/vuln/detail/${cve}`;
             const mitreUrl = `https://cve.mitre.org/cgi-bin/cvename.cgi?name=${cve}`;
-            
-            linksHtml += `
+            html += `
                 <div class="bg-slate-700/50 rounded px-3 py-2 flex items-center space-x-2">
-                    <span class="text-Ragnar-400 font-mono text-sm">${cve}</span>
-                    <a href="${nvdUrl}" target="_blank" rel="noopener noreferrer" 
-                       class="text-blue-400 hover:text-blue-300 transition-colors" 
-                       title="View on NIST NVD">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
-                                  d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
-                        </svg>
-                    </a>
-                    <a href="${mitreUrl}" target="_blank" rel="noopener noreferrer" 
-                       class="text-green-400 hover:text-green-300 transition-colors" 
-                       title="View on MITRE">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
-                                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                        </svg>
-                    </a>
-                </div>
-            `;
+                    <span class="text-Ragnar-400 font-mono text-xs">${cve}</span>
+                    <a href="${nvdUrl}" target="_blank" rel="noopener noreferrer"
+                       class="text-blue-400 hover:text-blue-300 transition-colors text-xs" title="NIST NVD">NVD</a>
+                    <span class="text-slate-600">·</span>
+                    <a href="${mitreUrl}" target="_blank" rel="noopener noreferrer"
+                       class="text-green-400 hover:text-green-300 transition-colors text-xs" title="MITRE CVE">MITRE</a>
+                </div>`;
         });
-        
-        linksHtml += '</div></div>';
-        
-        return `<div class="text-white font-mono text-sm break-all">${vulnText}</div>${linksHtml}`;
+        html += '</div></div>';
+        return html;
     }
-    
+
+    // Render placeholder while fetching explanation
+    const learnMore = buildLearnMoreLinks(vuln.vulnerability, vuln.cve_ids);
     content.innerHTML = `
         <div class="space-y-4">
             <div class="bg-slate-800/50 rounded-lg p-4">
                 <div class="text-sm text-slate-400 mb-1">Severity</div>
-                <div class="${severityColors[vuln.severity]} text-2xl font-bold uppercase">${vuln.severity}</div>
+                <div class="${severityColors[vuln.severity] || 'text-slate-300'} text-2xl font-bold uppercase">${vuln.severity || 'unknown'}</div>
+                ${vuln.cvss_score ? `<div class="text-slate-400 text-sm mt-1">CVSS ${vuln.cvss_score}</div>` : ''}
             </div>
-            
+
             <div class="bg-slate-800/50 rounded-lg p-4">
                 <div class="text-sm text-slate-400 mb-1">Vulnerability</div>
-                ${formatVulnerabilityWithLinks(vuln.vulnerability)}
+                <div class="text-white font-mono text-sm break-all">${vuln.vulnerability || vuln.title || ''}</div>
+                ${learnMore}
             </div>
-            
+
             <div class="grid grid-cols-2 gap-4">
                 <div class="bg-slate-800/50 rounded-lg p-4">
                     <div class="text-sm text-slate-400 mb-1">Service</div>
-                    <div class="text-white">${vuln.service}</div>
+                    <div class="text-white">${vuln.service || '—'}</div>
                 </div>
                 <div class="bg-slate-800/50 rounded-lg p-4">
                     <div class="text-sm text-slate-400 mb-1">Port</div>
-                    <div class="text-white">${vuln.port}</div>
+                    <div class="text-white">${vuln.port || '—'}</div>
                 </div>
             </div>
-            
-            <div class="bg-slate-800/50 rounded-lg p-4">
-                <div class="text-sm text-slate-400 mb-1">Discovered</div>
-                <div class="text-white">${new Date(vuln.discovered).toLocaleString()}</div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <div class="bg-slate-800/50 rounded-lg p-4">
+                    <div class="text-sm text-slate-400 mb-1">Discovered</div>
+                    <div class="text-white">${vuln.discovered ? new Date(vuln.discovered).toLocaleString() : '—'}</div>
+                </div>
+                <div class="bg-slate-800/50 rounded-lg p-4">
+                    <div class="text-sm text-slate-400 mb-1">Status</div>
+                    <div class="text-white capitalize">${vuln.status || '—'}</div>
+                </div>
             </div>
-            
-            <div class="bg-slate-800/50 rounded-lg p-4">
-                <div class="text-sm text-slate-400 mb-1">Status</div>
-                <div class="text-white capitalize">${vuln.status}</div>
+
+            <!-- Plain-English Explainer Section -->
+            <div id="vuln-explainer-section">
+                <div class="flex items-center gap-2 mb-3">
+                    <svg class="w-4 h-4 text-Ragnar-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.346.346a5.5 5.5 0 01-7.072 0l-.346-.346z"/>
+                    </svg>
+                    <span class="text-sm font-semibold text-Ragnar-300">Plain English Explanation</span>
+                </div>
+                <div id="vuln-explainer-cards" class="space-y-3">
+                    <div class="flex items-center justify-center py-6 bg-slate-800/30 rounded-lg">
+                        <div class="flex items-center gap-3 text-slate-400 text-sm">
+                            <svg class="animate-spin w-5 h-5 text-Ragnar-400" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
+                            </svg>
+                            Loading explanation…
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     `;
     
     modal.classList.remove('hidden');
     modal.classList.add('flex');
+
+    // Fetch plain-English explanation asynchronously
+    const explainerCards = document.getElementById('vuln-explainer-cards');
+    fetch('/api/vuln/explain', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            title:       vuln.vulnerability || vuln.title || '',
+            vulnerability: vuln.vulnerability || '',
+            description: vuln.description || '',
+            cve_ids:     vuln.cve_ids || [],
+            cvss_score:  vuln.cvss_score || vuln.cvss || '',
+            severity:    vuln.severity || '',
+            remediation: vuln.remediation || '',
+        })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.error || (!data.what && !data.how_exploited && !data.how_to_fix)) {
+            explainerCards.innerHTML = `<div class="text-slate-500 text-sm text-center py-4">No explanation available.</div>`;
+            return;
+        }
+        const aiLabel = data.source === 'ai'
+            ? `<span class="ml-2 text-xs bg-Ragnar-900/50 text-Ragnar-300 px-2 py-0.5 rounded-full border border-Ragnar-700/40">AI</span>`
+            : '';
+        explainerCards.innerHTML = `
+            <div class="vuln-explain-card bg-slate-800/60 border border-slate-700/50 rounded-lg p-4">
+                <div class="flex items-center gap-2 mb-2">
+                    <span class="text-xl">🔍</span>
+                    <span class="text-sm font-semibold text-slate-200">What is it?</span>${aiLabel}
+                </div>
+                <p class="text-slate-300 text-sm leading-relaxed">${data.what || '—'}</p>
+            </div>
+            <div class="vuln-explain-card bg-slate-800/60 border border-red-900/30 rounded-lg p-4">
+                <div class="flex items-center gap-2 mb-2">
+                    <span class="text-xl">⚔️</span>
+                    <span class="text-sm font-semibold text-slate-200">How do attackers use it?</span>
+                </div>
+                <p class="text-slate-300 text-sm leading-relaxed">${data.how_exploited || '—'}</p>
+            </div>
+            <div class="vuln-explain-card bg-slate-800/60 border border-green-900/30 rounded-lg p-4">
+                <div class="flex items-center gap-2 mb-2">
+                    <span class="text-xl">🛡️</span>
+                    <span class="text-sm font-semibold text-slate-200">How do you fix it?</span>
+                </div>
+                <p class="text-slate-300 text-sm leading-relaxed">${data.how_to_fix || '—'}</p>
+            </div>
+        `;
+    })
+    .catch(() => {
+        explainerCards.innerHTML = `<div class="text-slate-500 text-sm text-center py-4">Explanation unavailable.</div>`;
+    });
 }
 
 // Close vulnerability modal
