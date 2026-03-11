@@ -1163,8 +1163,532 @@ class Display:
             ]
             self._draw_stat_rows(draw, y, stats)
 
+    # ------------------------------------------------------------------
+    # GC9A01 round-display renderer
+    # ------------------------------------------------------------------
+
+    def _run_gc9a01(self):
+        """Dedicated render loop for the GC9A01 1.28″ round colour TFT.
+
+        Animates the existing e-paper BMP frame sequences (resources/images/status/)
+        in full colour on the round display, cycling at ~1 fps.  Each status has
+        its own tint colour so the mascot visually reflects what Ragnar is doing.
+
+        Layout (240×240 circle):
+          ┌──────────────────────┐
+          │     RAGNAR  (title)  │  y≈8  – white, Viking font
+          │   ┌──────────────┐   │
+          │   │  mascot anim │   │  y≈30–175 – tinted BMP frames, animated
+          │   └──────────────┘   │
+          │   ── STATUS TEXT ──  │  y≈182 – coloured by state
+          │      wifi ssid       │  y≈207 – white/dim
+          └──────────────────────┘
+        Outer ring colour: green=connected, cyan=scanning, amber=AP, red=error/offline
+        """
+        from PIL import Image as _Image, ImageDraw as _ImageDraw, ImageFont as _ImageFont, ImageOps as _ImageOps
+
+        SIZE       = 240
+        MASCOT_SZ  = 140   # px — upscaled from 78×78 source
+        ANIM_TICKS = 2     # loop ticks per frame advance (tick = 0.5 s → 1 s/frame)
+        TICK_SLEEP = 0.5   # seconds per tick
+
+        # ── colour palette ───────────────────────────────────────────────
+        C_BG    = (0,   0,   0)
+        C_WHITE = (255, 255, 255)
+        C_GRAY  = (160, 160, 160)
+        C_GREEN = (50,  200,  80)
+        C_RED   = (220,  50,  50)
+        C_CYAN  = (0,   200, 220)
+        C_AMBER = (220, 160,   0)
+        RING_W  = 6
+
+        # Mascot tint colours keyed by partial status name
+        TINT_MAP = {
+            "IDLE":          (150, 200, 255),  # soft blue
+            "NetworkScanner":(0,   220, 220),  # cyan
+            "NmapVuln":      (0,   220, 220),  # cyan
+            "SSHBrute":      (255,  80,  80),  # red
+            "SMBBrute":      (255,  80,  80),
+            "FTPBrute":      (255,  80,  80),
+            "RDPBrute":      (255,  80,  80),
+            "TelnetBrute":   (255,  80,  80),
+            "SQLBrute":      (255, 120,  60),
+            "StealFiles":    (255, 160,  40),  # amber
+            "StealData":     (255, 160,  40),
+            "LogStandalone": (180, 180, 180),  # gray
+        }
+
+        def _tint_for(status):
+            s = status or "IDLE"
+            for key, col in TINT_MAP.items():
+                if key.lower() in s.lower():
+                    return col
+            return C_WHITE
+
+        # ── fonts ────────────────────────────────────────────────────────
+        fonts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resources", "fonts")
+        arial_path  = os.path.join(fonts_dir, "Arial.ttf")
+        viking_path = os.path.join(fonts_dir, "Creamy.ttf")
+        try:
+            font_title  = _ImageFont.truetype(viking_path, 22)
+            font_ssid   = _ImageFont.truetype(arial_path,  14)
+            _font_status_cache = {}
+            def _status_font(text, max_px=200):
+                """Return the largest font that fits `text` within max_px."""
+                # At y=182 the circle chord is narrower than the full 240px diameter.
+                # Compute usable width: 2*sqrt(r^2 - (y - cx)^2) minus ring border.
+                import math
+                _r, _cx, _cy = 120, 120, 120
+                _chord = 2 * math.sqrt(max(0, _r**2 - (182 - _cy)**2))
+                max_px = min(max_px, int(_chord) - 2 * RING_W - 8)  # 8px safety margin
+                for size in (18, 16, 14, 12, 11, 10, 9):
+                    if size not in _font_status_cache:
+                        try:
+                            _font_status_cache[size] = _ImageFont.truetype(arial_path, size)
+                        except Exception:
+                            _font_status_cache[size] = _ImageFont.load_default()
+                    f = _font_status_cache[size]
+                    try:
+                        w = f.getbbox(text)[2] - f.getbbox(text)[0]
+                    except Exception:
+                        w = len(text) * size
+                    if w <= max_px:
+                        return f
+                return _font_status_cache.get(9, _ImageFont.load_default())
+        except Exception:
+            font_title = font_ssid = _ImageFont.load_default()
+            def _status_font(text, max_px=200):
+                return _ImageFont.load_default()
+
+        # ── mascot tint colour (user-configurable via web UI) ────────────
+        def _parse_hex(hex_str, fallback=(150, 200, 255)):
+            try:
+                h = hex_str.lstrip("#")
+                return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
+            except Exception:
+                return fallback
+
+        def _mascot_tint():
+            """Return current tint RGB, re-read from config each call so live
+            web-UI changes take effect without restarting the service."""
+            return _parse_hex(self.config.get("gc9a01_mascot_color", "#96C8FF"))
+
+        # ── frame cache: (status, frame_idx, tint) → RGBA sprite ─────────
+        _frame_cache = {}
+
+        def _get_colorized_frame(status, idx, tint):
+            key = (status, idx, tint)
+            if key in _frame_cache:
+                return _frame_cache[key]
+            series = getattr(self.shared_data, "image_series", {})
+            frames = series.get(status) or series.get("IDLE") or []
+            if not frames:
+                _frame_cache[key] = None
+                return None
+            src = frames[idx % len(frames)]
+            tint = _tint_for(status)
+            try:
+                gray  = src.convert("L").resize((MASCOT_SZ, MASCOT_SZ), _Image.LANCZOS)
+                alpha = _ImageOps.invert(gray)   # dark pixels → opaque, white → transparent
+                sprite = _Image.new("RGBA", (MASCOT_SZ, MASCOT_SZ), tint + (255,))
+                sprite.putalpha(alpha)
+                _frame_cache[key] = sprite
+            except Exception as exc:
+                logger.debug("GC9A01: colorize error: %s", exc)
+                _frame_cache[key] = None
+            return _frame_cache[key]
+
+        def _frame_count(status):
+            series = getattr(self.shared_data, "image_series", {})
+            frames = series.get(status) or series.get("IDLE") or []
+            return max(1, len(frames))
+
+        # ── state helpers ─────────────────────────────────────────────────
+        def _text_state():
+            sd = self.shared_data
+            net_text = getattr(sd, "ragnarstatustext2", "") or ""
+            return (
+                getattr(sd, "wifi_connected",   False),
+                net_text,
+                getattr(sd, "ap_mode_active",   False),
+                getattr(sd, "ragnarstatustext", "IDLE"),
+            )
+
+        def _ring_col(wifi_on, ap_on, status):
+            if ap_on:            return C_AMBER
+            if not wifi_on:      return C_RED
+            s = (status or "").upper()
+            if any(k in s for k in ("SCAN", "BRUTE", "STEAL", "INJECT")): return C_CYAN
+            if any(k in s for k in ("ERROR", "FAIL")):                     return C_RED
+            return C_GREEN
+
+        def _status_col(wifi_on, ap_on, status):
+            if ap_on:            return C_AMBER
+            if not wifi_on:      return C_RED
+            s = (status or "").upper()
+            if any(k in s for k in ("SCAN", "BRUTE", "STEAL", "INJECT")): return C_CYAN
+            if any(k in s for k in ("ERROR", "FAIL")):                     return C_RED
+            return C_GREEN
+
+        def _render(wifi_on, ssid, ap_on, status_text, mascot_rgba, info_label, info_col):
+            import math as _math
+            img  = _Image.new("RGB", (SIZE, SIZE), C_BG)
+            draw = _ImageDraw.Draw(img)
+
+            # Circular clip mask
+            mask = _Image.new("L", (SIZE, SIZE), 0)
+            _ImageDraw.Draw(mask).ellipse((0, 0, SIZE - 1, SIZE - 1), fill=255)
+
+            # Ring border
+            draw.ellipse((0, 0, SIZE - 1, SIZE - 1),
+                         outline=_ring_col(wifi_on, ap_on, status_text), width=RING_W)
+
+            # Title
+            title = "RAGNAR"
+            try:
+                tb = font_title.getbbox(title)
+                tx = (SIZE - (tb[2] - tb[0])) // 2
+            except Exception:
+                tx = 80
+            draw.text((tx, 8), title, font=font_title, fill=C_WHITE)
+
+            # Mascot sprite
+            if mascot_rgba is not None:
+                mw, mh = mascot_rgba.size
+                mx = (SIZE - mw) // 2
+                my = 32 + (MASCOT_SZ - mh) // 2
+                img.paste(mascot_rgba, (mx, my), mascot_rgba)
+
+            # ── Left panel: WiFi signal ───────────────────────────────────
+            sd = self.shared_data
+            rssi  = getattr(sd, "wifi_signal_dbm",     None)
+            qual  = getattr(sd, "wifi_signal_quality",  None)
+            font_side = font_ssid  # 14px
+            panel_y   = 100
+            # Compute safe inward x so panels stay inside the circle at panel_y
+            _chord = 2 * _math.sqrt(max(0, 120**2 - (panel_y - 120)**2))
+            panel_x = int((SIZE - _chord) / 2) + RING_W + 6   # left panel x
+            right_x_limit = SIZE - panel_x                     # right panel right edge
+
+            if not wifi_on:
+                draw.text((panel_x, panel_y),      "WiFi", font=font_side, fill=C_RED)
+                draw.text((panel_x, panel_y + 16), " OFF", font=font_side, fill=C_RED)
+            elif rssi is not None:
+                # Signal bar indicator (4 bars)
+                bars = 1 if rssi >= -90 else 0
+                bars = 2 if rssi >= -75 else bars
+                bars = 3 if rssi >= -65 else bars
+                bars = 4 if rssi >= -55 else bars
+                bar_col = C_RED if bars <= 1 else C_AMBER if bars == 2 else C_GREEN
+                for b in range(4):
+                    bh = 4 + b * 3   # bar heights: 4,7,10,13
+                    bx = panel_x + b * 7
+                    by = panel_y + 13 - bh
+                    col = bar_col if b < bars else C_GRAY
+                    draw.rectangle([bx, by, bx + 4, panel_y + 13], fill=col)
+                dbm_str = f"{int(rssi)}d"
+                draw.text((panel_x, panel_y + 17), dbm_str, font=font_side, fill=C_GRAY)
+            else:
+                draw.text((panel_x, panel_y), "N/A", font=font_side, fill=C_GRAY)
+
+            # ── Right panel: Target count ─────────────────────────────────
+            targets = getattr(sd, "total_targetnbr", 0) or 0
+            # Right-align within the right sliver
+            tgt_label1 = "TGTS"
+            tgt_label2 = str(targets)
+            try:
+                w1 = font_side.getbbox(tgt_label1)[2] - font_side.getbbox(tgt_label1)[0]
+                w2 = font_side.getbbox(tgt_label2)[2] - font_side.getbbox(tgt_label2)[0]
+            except Exception:
+                w1 = w2 = 28
+            rx1 = right_x_limit - w1
+            rx2 = right_x_limit - w2
+            draw.text((rx1, panel_y),      tgt_label1, font=font_side, fill=C_GRAY)
+            draw.text((rx2, panel_y + 16), tgt_label2, font=font_side, fill=C_GREEN)
+
+            # Status text — same size as info line below (font_ssid / 14px)
+            st = (status_text or "IDLE").upper()
+            s_col = _status_col(wifi_on, ap_on, status_text)
+            f_st  = font_ssid
+            try:
+                sb = f_st.getbbox(st)
+                sx = (SIZE - (sb[2] - sb[0])) // 2
+            except Exception:
+                sx = 60
+            draw.text((sx, 182), st, font=f_st, fill=s_col)
+
+            # Rotating info line
+            try:
+                nb = font_ssid.getbbox(info_label)
+                nx = (SIZE - (nb[2] - nb[0])) // 2
+            except Exception:
+                nx = 60
+            draw.text((nx, 207), info_label, font=font_ssid, fill=info_col)
+
+            # Apply circular mask (black corners)
+            result = _Image.new("RGB", (SIZE, SIZE), C_BG)
+            result.paste(img, mask=mask)
+            return result
+
+        # ── main animation loop ───────────────────────────────────────────
+        self.epd_helper.init_partial_update()
+
+        _anim_tick   = 0
+        _frame_idx   = 0
+        _last_status = None
+        _last_text   = None
+        _last_fidx   = -1
+        _info_tick   = 0   # increments each TICK_SLEEP; drives rotating bottom line
+
+        # Info slots cycle every 20 ticks (10 s each); 3 slots = 30 s period
+        # Slot 0: scan target / current IP
+        # Slot 1: targets found + creds
+        # Slot 2: WiFi/network (the "every 30 s" network glimpse)
+        INFO_SLOT_TICKS = 20   # 10 s per slot
+        INFO_SLOTS      = 3
+
+        def _info_line(slot, wifi_on, ssid, ap_on):
+            sd = self.shared_data
+            if slot == 2:
+                # Network slot
+                if ap_on:
+                    return ssid if ssid.startswith("AP") else "AP MODE", C_AMBER
+                if not wifi_on:
+                    return "NOT CONNECTED", C_RED
+                return (ssid.removeprefix("WiFi: ") if ssid else "Connected"), C_GRAY
+            if slot == 0:
+                # Current scan target — bjornstatustext2 holds network or IP being scanned
+                target = getattr(sd, "bjornstatustext2", "") or ""
+                if target:
+                    label = target if len(target) <= 20 else target[-20:]
+                    return label, C_CYAN
+                # Fallback: gateway
+                gw = (getattr(sd, "gateway_info", {}) or {}).get("gateway_ip", "")
+                return (f"GW: {gw}" if gw else "Scanning..."), C_CYAN
+            # slot == 1: targets + creds
+            targets = getattr(sd, "total_targetnbr", 0) or 0
+            creds   = getattr(sd, "crednbr",        0) or 0
+            vulns   = getattr(sd, "vulnnbr",         0) or 0
+            return f"T:{targets} C:{creds} V:{vulns}", C_GREEN
+
+        while not self.shared_data.display_should_exit:
+            try:
+                wifi_on, ssid, ap_on, status_text = _text_state()
+                orch_status = getattr(self.shared_data, "ragnarorch_status", "IDLE") or "IDLE"
+                self.shared_data.update_ragnarstatus()
+
+                # Reset animation when status changes
+                if orch_status != _last_status:
+                    _frame_idx   = 0
+                    _anim_tick   = 0
+                    _last_status = orch_status
+                    _frame_cache.clear()  # tint may change with new status
+
+                # Advance animation frame
+                _anim_tick += 1
+                if _anim_tick >= ANIM_TICKS:
+                    _anim_tick  = 0
+                    _frame_idx  = (_frame_idx + 1) % _frame_count(orch_status)
+
+                tint = _mascot_tint()
+                info_slot = (_info_tick // INFO_SLOT_TICKS) % INFO_SLOTS
+                info_label, info_col = _info_line(info_slot, wifi_on, ssid, ap_on)
+                _info_tick += 1
+
+                text_changed  = (wifi_on, ssid, ap_on, status_text, info_label) != _last_text
+                frame_changed = _frame_idx != _last_fidx
+                color_changed = tint != getattr(self, "_gc9a01_last_tint", None)
+
+                if text_changed or frame_changed or color_changed:
+                    sprite = _get_colorized_frame(orch_status, _frame_idx, tint)
+                    self._gc9a01_last_tint = tint
+                    output = _render(wifi_on, ssid, ap_on, status_text, sprite, info_label, info_col)
+                    output = output.transpose(_Image.Transpose.FLIP_LEFT_RIGHT)
+                    self.epd_helper.display_partial(output)
+                    _last_text  = (wifi_on, ssid, ap_on, status_text, info_label)
+                    _last_fidx  = _frame_idx
+
+                    try:
+                        web_path = os.path.join(self.shared_data.webdir, "screen.png")
+                        web_img = output.transpose(_Image.Transpose.FLIP_LEFT_RIGHT)
+                        with open(web_path, "wb") as f:
+                            web_img.save(f); f.flush(); os.fsync(f.fileno())
+                    except Exception:
+                        pass
+
+            except Exception as exc:
+                logger.error("GC9A01 render error: %s", exc)
+
+            time.sleep(TICK_SLEEP)
+
+    # ------------------------------------------------------------------
+    # SSD1306 0.96" 128x64 monochrome OLED display loop
+    # ------------------------------------------------------------------
+
+    def _run_ssd1306(self):
+        """Main display loop for SSD1306 0.96\" 128x64 monochrome OLED.
+
+        Renders a compact status dashboard with header bar, WiFi info,
+        target/credential counters, and a cycling info ticker at the bottom.
+        """
+        from PIL import Image as _Image, ImageDraw as _ImageDraw, ImageFont as _ImageFont
+        import os
+
+        W          = 128
+        H          = 64
+        TICK_SLEEP = 0.5    # seconds between ticks
+        PNG_EVERY  = 10     # save screen.png every N ticks
+
+        # ── Initialise display ──────────────────────────────────────────
+        from resources.waveshare_epd import ssd1306 as _ssd1306_mod
+        _i2c_raw = self.config.get("ssd1306_i2c_address", "0x3C")
+        i2c_addr = int(_i2c_raw, 16) if isinstance(_i2c_raw, str) else int(_i2c_raw)
+        epd = _ssd1306_mod.EPD(i2c_address=i2c_addr)
+        epd.init()
+
+        # ── Load fonts once ─────────────────────────────────────────────
+        _font_path = os.path.join(
+            os.path.dirname(__file__), "resources", "fonts", "Arial.ttf"
+        )
+
+        def _load_font(size):
+            try:
+                return _ImageFont.truetype(_font_path, size)
+            except Exception:
+                return _ImageFont.load_default()
+
+        font_hdr  = _load_font(10)   # header bar text
+        font_body = _load_font(9)    # all other lines
+
+        _png_counter  = 0
+        _scroll_pos   = 0   # pixel offset for header scroll
+
+        # Width (px) available in the header beside "RAGNAR " prefix
+        _RAGNAR_LABEL = "RAGNAR "
+        try:
+            _ragnar_w = font_hdr.getbbox(_RAGNAR_LABEL)[2]
+        except Exception:
+            _ragnar_w = len(_RAGNAR_LABEL) * 6
+        _HDR_STATUS_W = W - _ragnar_w - 2   # pixels available for scrolling status
+
+        # ── WiFi helper (same method used by gc9a01) ─────────────────────
+        def _get_wifi():
+            """Return (connected: bool, ssid: str, ip: str)."""
+            import subprocess
+            try:
+                result = subprocess.run(
+                    ["iwgetid", "-r"], capture_output=True, text=True, timeout=2
+                )
+                ssid = result.stdout.strip()
+                if ssid:
+                    # Get IP from shared_data
+                    ip = getattr(self.shared_data, "ipaddress", "") or ""
+                    return True, ssid, ip
+            except Exception:
+                pass
+            if getattr(self.shared_data, "ap_enabled", False):
+                return True, "AP MODE", getattr(self.shared_data, "ipaddress", "") or ""
+            return False, "", getattr(self.shared_data, "ipaddress", "") or ""
+
+        # ── Render helper ───────────────────────────────────────────────
+        def _render(scroll_px):
+            sd = self.shared_data
+
+            # --- collect data --------------------------------------------------
+            orch_status = (getattr(sd, "ragnarorch_status", "IDLE") or "IDLE").upper()
+            wifi_on, ssid, ip = _get_wifi()
+
+            targets = getattr(sd, "total_targetnbr", 0) or 0
+            creds   = getattr(sd, "crednbr",        0) or 0
+            vulns   = getattr(sd, "vulnnbr",         0) or 0
+
+            status2 = (getattr(sd, "bjornstatustext2", "") or "").strip()
+
+            # --- layout strings ------------------------------------------------
+            wifi_line    = ("WiFi: " + ssid[:18]) if wifi_on else "NOT CONNECTED"
+            target_line  = (">" + status2[:20]) if status2 else ("IP: " + ip if ip else "Scanning...")
+            tc_line      = "TARGETS: {}   CREDS: {}".format(targets, creds)
+            vuln_line    = "VULNERABILITIES: {}".format(vulns)
+
+            # --- draw ----------------------------------------------------------
+            img  = _Image.new("1", (W, H), 0)
+            draw = _ImageDraw.Draw(img)
+
+            # Header bar: white filled rectangle
+            draw.rectangle((0, 0, W - 1, 12), fill=255)
+            draw.text((2, 1), _RAGNAR_LABEL, font=font_hdr, fill=0)
+
+            # Scrolling status text clipped to right portion of header
+            # Build scroll string with padding so it wraps smoothly
+            scroll_str = orch_status + "   "
+            try:
+                full_w = font_hdr.getbbox(scroll_str)[2]
+            except Exception:
+                full_w = len(scroll_str) * 6
+            # Render into a temp image and paste a window of it
+            tmp = _Image.new("1", (max(full_w * 2, _HDR_STATUS_W + 4), 12), 255)
+            tdraw = _ImageDraw.Draw(tmp)
+            tdraw.text((0, 1),        scroll_str, font=font_hdr, fill=0)
+            tdraw.text((full_w, 1),   scroll_str, font=font_hdr, fill=0)
+            offset = scroll_px % full_w
+            crop   = tmp.crop((offset, 0, offset + _HDR_STATUS_W, 12))
+            img.paste(crop, (_ragnar_w, 0))
+
+            # Thin divider line at y=13
+            draw.line((0, 13, W - 1, 13), fill=255)
+
+            # Body lines
+            draw.text((0, 15), wifi_line,   font=font_body, fill=255)
+            draw.text((0, 26), target_line, font=font_body, fill=255)
+            draw.text((0, 37), tc_line,     font=font_body, fill=255)
+            draw.text((0, 48), vuln_line,   font=font_body, fill=255)
+
+            return img
+
+        # ── Main loop ───────────────────────────────────────────────────
+        while not self.shared_data.display_should_exit:
+            try:
+                self.shared_data.update_ragnarstatus()
+                img = _render(_scroll_pos)
+                epd.init()
+                buf = epd.getbuffer(img)
+                epd.displayPartial(buf)
+                _scroll_pos += 2   # advance scroll 2px per tick (0.5s → ~4px/s)
+                # Save screen.png for web preview every PNG_EVERY ticks
+                _png_counter += 1
+                if _png_counter >= PNG_EVERY:
+                    _png_counter = 0
+                    try:
+                        web_path = os.path.join(self.shared_data.webdir, "screen.png")
+                        with open(web_path, "wb") as f:
+                            img.save(f)
+                            f.flush()
+                            os.fsync(f.fileno())
+                    except Exception:
+                        pass
+
+            except Exception as exc:
+                logger.error("SSD1306 render error: %s", exc)
+
+            time.sleep(TICK_SLEEP)
+
+        # ── Cleanup on exit ─────────────────────────────────────────────
+        try:
+            epd.Clear()
+            epd.sleep()
+        except Exception as exc:
+            logger.error("SSD1306 shutdown error: %s", exc)
+
     def run(self):
         """Main loop for updating the EPD display with shared data."""
+        if self.config.get("epd_type") == "gc9a01":
+            self._run_gc9a01()
+            return
+
+        if self.config.get("epd_type") == "ssd1306":
+            self._run_ssd1306()
+            return
+
         # Wait for deferred initialization (fonts, images) to finish
         # before attempting to render anything.
         if hasattr(self.shared_data, 'wait_for_deferred_init'):

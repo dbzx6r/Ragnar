@@ -34,6 +34,7 @@ HEADLESS_VARIANT=""
 HEADLESS_VARIANT_LABEL=""
 RAGNAR_ENTRYPOINT="Ragnar.py"
 SERVER_INSTALL=false
+TFT_MODE=false
 
 # Platform detection variables
 OS_ID=""
@@ -640,13 +641,13 @@ setup_ragnar() {
 
     cd Ragnar
 
-    # Update the default EPD type in shared.py with the detected version
-    log "INFO" "Updating E-Paper display default configuration in shared.py..."
+    # Update the default display type in shared.py with the detected/selected version
+    log "INFO" "Updating display default configuration in shared.py..."
     if [ -z "${EPD_VERSION:-}" ]; then
         if [ "$HEADLESS_MODE" = true ]; then
-            log "INFO" "Headless mode selected - skipping shared.py default E-Paper configuration"
+            log "INFO" "Headless mode selected - skipping shared.py default display configuration"
         else
-            log "WARNING" "EPD version not detected - skipping shared.py update"
+            log "WARNING" "Display version not detected - skipping shared.py update"
         fi
     elif [ -f "$ragnar_PATH/shared.py" ]; then
         # Replace whatever epd_type default is currently in shared.py with the user's selection.
@@ -781,9 +782,30 @@ print('SUCCESS: Set shared_config.json epd_type to $EPD_VERSION')
         log "WARNING" "You can install it manually later with: sudo pip3 install --break-system-packages cryptography>=41.0.0"
     }
 
-    # Verify Waveshare e-Paper Python library (already installed in main())
+    # Verify display driver availability
     if [ "$HEADLESS_MODE" = true ] || [ -z "${EPD_VERSION:-}" ]; then
-        log "INFO" "Headless mode or unknown E-Paper version detected - skipping driver verification"
+        log "INFO" "Headless mode or unknown display version detected - skipping driver verification"
+    elif [ "$EPD_VERSION" = "gc9a01" ]; then
+        # TFT drivers ship with Ragnar in resources/waveshare_epd/, verify the file exists
+        if [ -f "$ragnar_PATH/resources/waveshare_epd/gc9a01.py" ]; then
+            log "SUCCESS" "GC9A01 TFT driver verified (resources/waveshare_epd/gc9a01.py)"
+        else
+            log "ERROR" "GC9A01 TFT driver not found at $ragnar_PATH/resources/waveshare_epd/gc9a01.py"
+        fi
+        # Ensure spidev is installed for TFT SPI communication
+        pip3 install spidev --break-system-packages >/dev/null 2>&1
+        log "INFO" "SPI dependencies installed for TFT display"
+    elif [ "$EPD_VERSION" = "ssd1306" ]; then
+        if [ -f "$ragnar_PATH/resources/waveshare_epd/ssd1306.py" ]; then
+            log "SUCCESS" "SSD1306 OLED driver verified (resources/waveshare_epd/ssd1306.py)"
+        else
+            log "ERROR" "SSD1306 OLED driver not found at $ragnar_PATH/resources/waveshare_epd/ssd1306.py"
+        fi
+        # Install smbus2 for I2C communication
+        pip3 install smbus2 --break-system-packages >/dev/null 2>&1
+        # Enable I2C interface
+        raspi-config nonint do_i2c 0 2>/dev/null || true
+        log "INFO" "I2C interface enabled for SSD1306"
     else
         log "INFO" "Verifying Waveshare e-Paper library installation for $EPD_VERSION..."
         cd /home/$ragnar_USER/e-Paper/RaspberryPi_JetsonNano/python
@@ -1334,12 +1356,13 @@ BANNER
     echo ""
     if [ "$is_pi" = true ]; then
         echo -e "   ${CYAN}*${YELLOW} 1)${CYAN} Raspberry Pi with e-Paper display              ${NC}"
-        echo -e "   ${CYAN}*${YELLOW} 2)${CYAN} Server install with e-Paper display             ${NC}"
-        echo -e "   ${CYAN}*${YELLOW} 3)${CYAN} Server install (headless, no e-Paper)           ${NC}"
-        echo -e "   ${CYAN}*${YELLOW} 4)${CYAN} WiFi Pineapple Pager ${RED}(WIP)                    ${NC}"
+        echo -e "   ${CYAN}*${YELLOW} 2)${CYAN} Raspberry Pi with TFT LCD display              ${NC}"
+        echo -e "   ${CYAN}*${YELLOW} 3)${CYAN} Server install with display                    ${NC}"
+        echo -e "   ${CYAN}*${YELLOW} 4)${CYAN} Server install (headless, no display)           ${NC}"
+        echo -e "   ${CYAN}*${YELLOW} 5)${CYAN} WiFi Pineapple Pager ${RED}(WIP)                    ${NC}"
     else
-        echo -e "   ${CYAN}*${YELLOW} 1)${CYAN} Server install with e-Paper display             ${NC}"
-        echo -e "   ${CYAN}*${YELLOW} 2)${CYAN} Server install (headless, no e-Paper)           ${NC}"
+        echo -e "   ${CYAN}*${YELLOW} 1)${CYAN} Server install with display                    ${NC}"
+        echo -e "   ${CYAN}*${YELLOW} 2)${CYAN} Server install (headless, no display)           ${NC}"
         echo -e "   ${CYAN}*${YELLOW} 3)${CYAN} WiFi Pineapple Pager                            ${NC}"
     fi
     echo ""
@@ -1378,6 +1401,7 @@ main() {
                 1)
                     SERVER_INSTALL=false
                     HEADLESS_MODE=false
+                    TFT_MODE=false
                     HEADLESS_VARIANT=""
                     HEADLESS_VARIANT_LABEL=""
                     RAGNAR_ENTRYPOINT="Ragnar.py"
@@ -1385,24 +1409,36 @@ main() {
                     break
                     ;;
                 2)
-                    SERVER_INSTALL=true
+                    SERVER_INSTALL=false
                     HEADLESS_MODE=false
+                    TFT_MODE=true
                     HEADLESS_VARIANT=""
-                    HEADLESS_VARIANT_LABEL="Server install with e-Paper"
+                    HEADLESS_VARIANT_LABEL=""
                     RAGNAR_ENTRYPOINT="Ragnar.py"
-                    log "INFO" "Server install with e-Paper selected on Raspberry Pi hardware"
+                    log "INFO" "Raspberry Pi with TFT LCD installation selected"
                     break
                     ;;
                 3)
                     SERVER_INSTALL=true
+                    HEADLESS_MODE=false
+                    TFT_MODE=false
+                    HEADLESS_VARIANT=""
+                    HEADLESS_VARIANT_LABEL="Server install with display"
+                    RAGNAR_ENTRYPOINT="Ragnar.py"
+                    log "INFO" "Server install with display selected on Raspberry Pi hardware"
+                    break
+                    ;;
+                4)
+                    SERVER_INSTALL=true
                     HEADLESS_MODE=true
+                    TFT_MODE=false
                     HEADLESS_VARIANT="server"
                     HEADLESS_VARIANT_LABEL="Server install"
                     RAGNAR_ENTRYPOINT="headlessRagnar.py"
                     log "INFO" "Server install (headless) selected on Raspberry Pi hardware"
                     break
                     ;;
-                4)
+                5)
                     log "INFO" "WiFi Pineapple Pager installation selected"
                     echo ""
                     echo -e "${BLUE}   This will package and deploy Ragnar to your Pineapple Pager.${NC}"
@@ -1426,7 +1462,7 @@ main() {
                     clean_exit $pager_exit_code
                     ;;
                 *)
-                    echo -e "\n   ${RED}Invalid option. Please select 1, 2, 3, or 4.${NC}"
+                    echo -e "\n   ${RED}Invalid option. Please select 1, 2, 3, 4, or 5.${NC}"
                     sleep 1
                     ;;
             esac
@@ -1479,6 +1515,40 @@ main() {
 
     # Only attempt e-paper setup when not in server/headless profile
     if [ "$HEADLESS_MODE" != true ]; then
+
+        # ── TFT LCD display path ──────────────────────────────────────────────
+        if [ "$TFT_MODE" = true ]; then
+            echo -e "\n${BLUE}TFT LCD Display Setup${NC}"
+            echo -e "${YELLOW}Installing SPI dependencies for TFT display...${NC}"
+            pip3 install spidev --break-system-packages >/dev/null 2>&1
+            log "SUCCESS" "SPI dependencies installed for TFT display"
+
+            echo -e "\n${BLUE}Select your TFT/OLED display:${NC}"
+            echo "1. GC9A01      (1.28\" Round 240x240)"
+            echo "2. SSD1306     (0.96\" OLED 128x64)"
+            echo "3. No display  (headless install)"
+
+            while true; do
+                read -p "Enter your choice (1-3): " tft_choice
+                case $tft_choice in
+                    1) EPD_VERSION="gc9a01"; break;;
+                    2) EPD_VERSION="ssd1306"; break;;
+                    3)
+                        select_headless_variant
+                        EPD_VERSION=""
+                        break
+                        ;;
+                    *) echo -e "${RED}Invalid choice. Please select 1-3.${NC}";;
+                esac
+            done
+
+            if [ -n "$EPD_VERSION" ]; then
+                echo -e "${GREEN}✓ Selected display: $EPD_VERSION${NC}"
+                log "INFO" "Display selected: $EPD_VERSION"
+            fi
+
+        # ── E-Paper display path ──────────────────────────────────────────────
+        else
         echo -e "\n${BLUE}Installing Waveshare e-Paper library...${NC}"
         log "INFO" "Installing Waveshare e-Paper library for auto-detection"
         
@@ -1574,19 +1644,28 @@ except:
         fi
         
         if [ -z "$EPD_VERSION" ]; then
-            echo -e "\n${BLUE}Please select your E-Paper Display version:${NC}"
-            echo "1. epd2in13     (2.13\" 122x250)"
-            echo "2. epd2in13_V2  (2.13\" V2 122x250)"
-            echo "3. epd2in13_V3  (2.13\" V3 122x250)"
-            echo "4. epd2in13_V4  (2.13\" V4 122x250)"
-            echo "5. epd2in7_V2   (2.7\"  V2 176x264)"
-            echo "6. epd2in7      (2.7\"  V1 176x264)"
-            echo "7. epd2in9_V2   (2.9\"  128x296)"
-            echo "8. epd3in7      (3.7\"  280x480)"
-            echo "9. No e-Paper (headless install)"
+            echo -e "\n${BLUE}Please select your display:${NC}"
+            echo ""
+            echo -e "${CYAN}  E-Paper displays:${NC}"
+            echo "1.  epd2in13     (2.13\" 122x250)"
+            echo "2.  epd2in13_V2  (2.13\" V2 122x250)"
+            echo "3.  epd2in13_V3  (2.13\" V3 122x250)"
+            echo "4.  epd2in13_V4  (2.13\" V4 122x250)"
+            echo "5.  epd2in7_V2   (2.7\"  V2 176x264)"
+            echo "6.  epd2in7      (2.7\"  V1 176x264)"
+            echo "7.  epd2in9_V2   (2.9\"  128x296)"
+            echo "8.  epd3in7      (3.7\"  280x480)"
+            echo ""
+            echo -e "${CYAN}  TFT LCD displays:${NC}"
+            echo "9.  GC9A01       (1.28\" Round 240x240)"
+            echo ""
+            echo -e "${CYAN}  OLED displays:${NC}"
+            echo "10. SSD1306      (0.96\" OLED 128x64)"
+            echo ""
+            echo "11. No display (headless install)"
 
             while true; do
-                read -p "Enter your choice (1-9): " epd_choice
+                read -p "Enter your choice (1-11): " epd_choice
                 case $epd_choice in
                     1) EPD_VERSION="epd2in13"; break;;
                     2) EPD_VERSION="epd2in13_V2"; break;;
@@ -1596,21 +1675,24 @@ except:
                     6) EPD_VERSION="epd2in7"; break;;
                     7) EPD_VERSION="epd2in9_V2"; break;;
                     8) EPD_VERSION="epd3in7"; break;;
-                    9)
+                    9) EPD_VERSION="gc9a01"; break;;
+                    10) EPD_VERSION="ssd1306"; break;;
+                    11)
                         select_headless_variant
                         EPD_VERSION=""
                         break
                         ;;
-                    *) echo -e "${RED}Invalid choice. Please select 1-9.${NC}";;
+                    *) echo -e "${RED}Invalid choice. Please select 1-11.${NC}";;
                 esac
             done
 
             if [ "$HEADLESS_MODE" = true ]; then
-                log "INFO" "No e-Paper selected. Headless mode enabled (${HEADLESS_VARIANT_LABEL:-unspecified})."
+                log "INFO" "No display selected. Headless mode enabled (${HEADLESS_VARIANT_LABEL:-unspecified})."
             else
-                log "INFO" "Manually selected E-Paper Display version: $EPD_VERSION"
+                log "INFO" "Manually selected display: $EPD_VERSION"
             fi
         fi
+        fi  # end TFT_MODE else
     else
         log "INFO" "Headless/server profile selected; skipping e-Paper detection"
     fi

@@ -16,6 +16,8 @@ KNOWN_EPD_TYPES = [
     "epd2in13",
     "epd2in9_V2",
     "epd3in7",
+    "gc9a01",
+    "ssd1306",
 ]
 
 class EPDHelper:
