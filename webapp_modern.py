@@ -8207,6 +8207,42 @@ def scan_wifi_networks():
             'manual_entry_available': True
         }), 500
 
+@app.route('/api/wifi/locations', methods=['GET'])
+def get_wifi_locations():
+    """Return all SSIDs that have a stored physical location (lat/lng)."""
+    try:
+        db = get_db(currentdir=shared_data.currentdir)
+        locations = db.get_wifi_locations()
+        return jsonify(locations)
+    except Exception as e:
+        logger.error(f"Error getting WiFi locations: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/wifi/location', methods=['POST'])
+def set_wifi_location():
+    """Save or update the physical location for an SSID."""
+    try:
+        data = request.get_json(force=True) or {}
+        ssid = data.get('ssid', '').strip()
+        if not ssid:
+            return jsonify({'success': False, 'error': 'ssid is required'}), 400
+        try:
+            latitude = float(data['latitude'])
+            longitude = float(data['longitude'])
+        except (KeyError, TypeError, ValueError):
+            return jsonify({'success': False, 'error': 'latitude and longitude must be numbers'}), 400
+        location_name = str(data.get('location_name', '')).strip()
+        db = get_db(currentdir=shared_data.currentdir)
+        ok = db.set_wifi_location(ssid, latitude, longitude, location_name)
+        if ok:
+            return jsonify({'success': True, 'ssid': ssid, 'latitude': latitude, 'longitude': longitude})
+        return jsonify({'success': False, 'error': 'Failed to save location'}), 500
+    except Exception as e:
+        logger.error(f"Error setting WiFi location: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/wifi/networks')
 def get_wifi_networks():
     """Get available and known Wi-Fi networks - optimized for Pi Zero W2 AP mode"""

@@ -255,6 +255,17 @@ class DatabaseManager:
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_wifi_scan_cache_signal ON wifi_scan_cache(signal)
             """)
+
+            # Migration: add location columns for SSID location map feature
+            for col, col_def in [
+                ("latitude", "REAL"),
+                ("longitude", "REAL"),
+                ("location_name", "TEXT"),
+            ]:
+                try:
+                    cursor.execute(f"ALTER TABLE wifi_scan_cache ADD COLUMN {col} {col_def}")
+                except Exception:
+                    pass  # Column already exists on upgraded installs
             
             # Create WiFi connection history table for tracking all attempts
             cursor.execute("""
@@ -1868,6 +1879,48 @@ class DatabaseManager:
                 
         except Exception as e:
             logger.error(f"Error cleaning up WiFi data: {e}")
+
+    # ========================================================================
+    # SSID Location Methods
+    # ========================================================================
+
+    def set_wifi_location(self, ssid: str, latitude: float, longitude: float, location_name: str = "") -> bool:
+        """Save or update the physical location for a known SSID."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO wifi_scan_cache (ssid, latitude, longitude, location_name, scan_count)
+                    VALUES (?, ?, ?, ?, 0)
+                    ON CONFLICT(ssid) DO UPDATE SET
+                        latitude = excluded.latitude,
+                        longitude = excluded.longitude,
+                        location_name = excluded.location_name
+                """, (ssid, latitude, longitude, location_name))
+                conn.commit()
+                logger.info(f"Saved location for SSID '{ssid}': ({latitude}, {longitude})")
+                return True
+        except Exception as e:
+            logger.error(f"Error saving WiFi location for '{ssid}': {e}")
+            return False
+
+    def get_wifi_locations(self) -> List[Dict[str, Any]]:
+        """Return all SSIDs that have a stored latitude/longitude."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT ssid, latitude, longitude, location_name,
+                           signal, security, channel, frequency, last_seen, scan_count
+                    FROM wifi_scan_cache
+                    WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+                    ORDER BY last_seen DESC
+                """)
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Error retrieving WiFi locations: {e}")
+            return []
 
     # ========================================================================
     # Advanced Vulnerability Scanner Persistence Methods
