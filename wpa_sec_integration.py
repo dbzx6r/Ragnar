@@ -12,6 +12,9 @@ Configuration keys (set via the Ragnar web Config tab):
   wpasec_poll_interval  - int:   seconds between polls (default 3600)
   wpasec_auto_connect   - bool:  add cracked networks to known list (default True)
   wpasec_priority       - int:   priority assigned to auto-added networks (default 5)
+  wigle_api_name        - str:   WiGLE API name (AID... from wigle.net/account)
+  wigle_api_token       - str:   WiGLE API token (from wigle.net/account)
+  wigle_lookup_enabled  - bool:  auto-lookup GPS location for each BSSID via WiGLE (default True)
 """
 
 import json
@@ -31,6 +34,7 @@ from logger import Logger
 
 WPA_SEC_URL = "https://wpa-sec.stanev.org/?api&dl=1"
 CACHE_FILENAME = "wpa_sec_imported.json"
+WIGLE_SEARCH_URL = "https://api.wigle.net/api/v2/network/search"
 
 
 class WpaSecIntegration:
@@ -142,6 +146,7 @@ class WpaSecIntegration:
             return result
 
         wifi_manager = self._get_wifi_manager()
+        wigle_enabled = self._get_config('wigle_lookup_enabled', True)
 
         for entry in new_entries:
             ssid = entry['ssid']
@@ -161,9 +166,30 @@ class WpaSecIntegration:
                 result['added'] += 1
 
             self._imported_bssids.add(bssid)
+            self._imported_ssid_keys.add(f"{ssid}|{password}")
+
+            # WiGLE: look up GPS location for this BSSID and store in map
+            if wigle_enabled:
+                location = self._lookup_wigle_location(bssid)
+                if location:
+                    self._save_location_to_db(ssid, location['lat'], location['lon'], location['location_name'])
+                    result.setdefault('located', 0)
+                    result['located'] += 1
+                # Brief pause to avoid WiGLE rate limits
+                time.sleep(1)
 
         self._save_cache(new_entries)
-        self.logger.info(f"wpa-sec poll complete: {result['added']} new network(s) added ({len(entries)} total cracked)")
+        self._save_poll_meta(len(entries), result['added'])
+        located = result.get('located', 0)
+        self.logger.info(f"wpa-sec poll complete: {result['added']} new network(s) added, {located} located via WiGLE ({len(entries)} total cracked)")
+        if result['added'] > 0:
+            try:
+                self.shared_data.log_activity(
+                    "wpasec", f"wpa-sec: {result['added']} new network(s) imported",
+                    f"{len(entries)} total cracked", "wifi"
+                )
+            except Exception:
+                pass
         return result
 
     # ------------------------------------------------------------------
@@ -251,3 +277,88 @@ class WpaSecIntegration:
         if ragnar and hasattr(ragnar, 'wifi_manager'):
             return ragnar.wifi_manager
         return None
+
+    # ------------------------------------------------------------------
+    # WiGLE location lookup
+    # ------------------------------------------------------------------
+
+    def _lookup_wigle_location(self, bssid: str) -> dict | None:
+        """
+        Query WiGLE API v2 for the GPS location of a BSSID.
+        Returns {'lat': float, 'lon': float, 'location_name': str} or None.
+        Requires wigle_api_name and wigle_api_token in config.
+        """
+        if not HAS_REQUESTS:
+            return None
+        api_name = self._get_config('wigle_api_name', '').strip()
+        api_token = self._get_config('wigle_api_token', '').strip()
+        if not api_name or not api_token:
+            return None
+
+        # Format BSSID as colon-separated uppercase if not already
+        clean = bssid.replace(':', '').replace('-', '').lower()
+        if len(clean) == 12:
+            formatted = ':'.join(clean[i:i+2] for i in range(0, 12, 2)).upper()
+        else:
+            formatted = bssid.upper()
+
+        try:
+            resp = requests.get(
+                WIGLE_SEARCH_URL,
+                params={'netid': formatted, 'onlymine': 'false', 'freenet': 'false', 'paynet': 'false'},
+                auth=(api_name, api_token),
+                timeout=10,
+            )
+            if resp.status_code == 401:
+                self.logger.warning("WiGLE API: invalid credentials (401)")
+                return None
+            if resp.status_code == 429:
+                self.logger.warning("WiGLE API: rate limited (429) — slowing down")
+                time.sleep(60)
+                return None
+            if not resp.ok:
+                self.logger.debug(f"WiGLE API: HTTP {resp.status_code} for BSSID {formatted}")
+                return None
+
+            data = resp.json()
+            results = data.get('results', [])
+            if not results:
+                return None
+
+            best = results[0]
+            lat = best.get('trilat') or best.get('lat')
+            lon = best.get('trilong') or best.get('lon')
+            if lat is None or lon is None:
+                return None
+
+            location_name = best.get('ssid', '') or ''
+            city = best.get('city', '')
+            country = best.get('country', '')
+            parts = [p for p in [city, country] if p]
+            if parts:
+                location_name = ', '.join(parts)
+
+            return {'lat': float(lat), 'lon': float(lon), 'location_name': location_name}
+
+        except Exception as exc:
+            self.logger.debug(f"WiGLE lookup failed for {formatted}: {exc}")
+            return None
+
+    def _save_location_to_db(self, ssid: str, lat: float, lon: float, location_name: str):
+        """Persist WiGLE-sourced location into wifi_scan_cache."""
+        try:
+            ragnar = getattr(self.shared_data, 'ragnar_instance', None)
+            db = None
+            if ragnar and hasattr(ragnar, 'db_manager'):
+                db = ragnar.db_manager
+            if db is None:
+                # Try importing directly
+                import importlib
+                db_mod = importlib.import_module('db_manager')
+                current_dir = getattr(self.shared_data, 'currentdir', os.path.dirname(__file__))
+                db = db_mod.get_db(currentdir=current_dir)
+            if db:
+                db.set_wifi_location(ssid, lat, lon, location_name)
+                self.logger.info(f"WiGLE location saved: '{ssid}' → ({lat:.4f}, {lon:.4f}) {location_name}")
+        except Exception as exc:
+            self.logger.debug(f"Could not save WiGLE location for '{ssid}': {exc}")
