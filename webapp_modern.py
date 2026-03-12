@@ -3042,6 +3042,16 @@ def update_config():
                 os.system('systemctl restart ragnar.service')
             threading.Thread(target=_delayed_restart, daemon=True).start()
 
+        # Start or stop wpa-sec poller when wpasec_enabled changes
+        if 'wpasec_enabled' in data:
+            ragnar_inst = getattr(shared_data, 'ragnar_instance', None)
+            wpa_sec = getattr(ragnar_inst, 'wpa_sec', None) if ragnar_inst else None
+            if wpa_sec:
+                if data['wpasec_enabled']:
+                    wpa_sec.start()
+                else:
+                    wpa_sec.stop()
+
         return jsonify(response)
     except Exception as e:
         logger.error(f"Error updating config: {e}")
@@ -3442,6 +3452,37 @@ def detect_hardware():
             'detection_method': 'fallback',
             'error': str(e)
         }), 200
+
+@app.route('/api/wpasec/poll', methods=['POST'])
+def wpasec_poll_now():
+    """Trigger an immediate wpa-sec poll outside the background schedule."""
+    try:
+        ragnar_inst = getattr(shared_data, 'ragnar_instance', None)
+        wpa_sec = getattr(ragnar_inst, 'wpa_sec', None) if ragnar_inst else None
+        if not wpa_sec:
+            return jsonify({'error': 'wpa_sec_unavailable'}), 503
+        result = wpa_sec.poll_now()
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"wpa-sec manual poll failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/wpasec/imported', methods=['GET'])
+def wpasec_imported_networks():
+    """Return the list of networks imported from wpa-sec."""
+    try:
+        import json as _json
+        cache_path = os.path.join(shared_data.datadir, 'wpa_sec_imported.json')
+        if not os.path.exists(cache_path):
+            return jsonify({'imported': []})
+        with open(cache_path, 'r', encoding='utf-8') as fh:
+            data = _json.load(fh)
+        return jsonify(data)
+    except Exception as e:
+        logger.error(f"Failed to read wpa-sec imported list: {e}")
+        return jsonify({'error': str(e)}), 500
+
 
 @app.route('/api/config/apply-profile', methods=['POST'])
 def apply_hardware_profile():
@@ -8165,6 +8206,120 @@ def scan_wifi_networks():
             'error': 'Scanning failed',
             'manual_entry_available': True
         }), 500
+
+@app.route('/api/wifi/locations', methods=['GET'])
+def get_wifi_locations():
+    """Return all SSIDs that have a stored physical location (lat/lng)."""
+    try:
+        db = get_db(currentdir=shared_data.currentdir)
+        locations = db.get_wifi_locations()
+        return jsonify(locations)
+    except Exception as e:
+        logger.error(f"Error getting WiFi locations: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/wifi/location', methods=['POST'])
+def set_wifi_location():
+    """Save or update the physical location for an SSID."""
+    try:
+        data = request.get_json(force=True) or {}
+        ssid = data.get('ssid', '').strip()
+        if not ssid:
+            return jsonify({'success': False, 'error': 'ssid is required'}), 400
+        try:
+            latitude = float(data['latitude'])
+            longitude = float(data['longitude'])
+        except (KeyError, TypeError, ValueError):
+            return jsonify({'success': False, 'error': 'latitude and longitude must be numbers'}), 400
+        location_name = str(data.get('location_name', '')).strip()
+        db = get_db(currentdir=shared_data.currentdir)
+        ok = db.set_wifi_location(ssid, latitude, longitude, location_name)
+        if ok:
+            return jsonify({'success': True, 'ssid': ssid, 'latitude': latitude, 'longitude': longitude})
+        return jsonify({'success': False, 'error': 'Failed to save location'}), 500
+    except Exception as e:
+        logger.error(f"Error setting WiFi location: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+_wigle_job = {'status': 'idle', 'located': 0, 'skipped': 0, 'errors': 0, 'total': 0}
+
+
+@app.route('/api/wifi/locations/wigle', methods=['POST'])
+def wigle_lookup_all():
+    """
+    Bulk WiGLE lookup: starts a background thread that queries WiGLE for every
+    BSSID in the wpa-sec imported cache without a stored location.
+    Returns immediately with {status: 'started'|'running'|...} so the UI
+    doesn't time out. Poll GET /api/wifi/locations/wigle for progress.
+    """
+    global _wigle_job
+    if _wigle_job['status'] == 'running':
+        return jsonify({'status': 'running', **_wigle_job})
+
+    try:
+        wpa_sec = getattr(getattr(shared_data, 'ragnar_instance', None), 'wpa_sec', None)
+        if not wpa_sec:
+            return jsonify({'error': 'wpa_sec_unavailable'}), 503
+
+        cache_path = os.path.join(shared_data.datadir, 'wpa_sec_imported.json')
+        if not os.path.exists(cache_path):
+            return jsonify({'status': 'done', 'located': 0, 'skipped': 0, 'errors': 0, 'message': 'No wpa-sec cache found'})
+
+        with open(cache_path, 'r', encoding='utf-8') as fh:
+            cache = json.load(fh)
+
+        imported = cache.get('imported', [])
+        if not imported:
+            return jsonify({'status': 'done', 'located': 0, 'skipped': 0, 'errors': 0, 'message': 'No imported networks'})
+
+        _wigle_job = {'status': 'running', 'located': 0, 'skipped': 0, 'errors': 0, 'total': len(imported)}
+
+        def _run():
+            global _wigle_job
+            import time as _t
+            db = get_db(currentdir=shared_data.currentdir)
+            existing = {loc['ssid'] for loc in db.get_wifi_locations()}
+            located = skipped = errors = 0
+            for entry in imported:
+                ssid = entry.get('ssid', '').strip()
+                bssid = entry.get('bssid', '').strip()
+                if not ssid or not bssid:
+                    continue
+                if ssid in existing:
+                    skipped += 1
+                    _wigle_job['skipped'] = skipped
+                    continue
+                try:
+                    loc = wpa_sec._lookup_wigle_location(bssid)
+                    if loc:
+                        db.set_wifi_location(ssid, loc['lat'], loc['lon'], loc['location_name'])
+                        existing.add(ssid)
+                        located += 1
+                    else:
+                        skipped += 1
+                    _wigle_job['located'] = located
+                    _wigle_job['skipped'] = skipped
+                    _t.sleep(1)
+                except Exception as exc:
+                    errors += 1
+                    _wigle_job['errors'] = errors
+            _wigle_job['status'] = 'done'
+
+        import threading as _th
+        _th.Thread(target=_run, daemon=True, name='WiGLEBulkLookup').start()
+        return jsonify({'status': 'started', **_wigle_job})
+    except Exception as e:
+        logger.error(f"WiGLE bulk lookup error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/wifi/locations/wigle', methods=['GET'])
+def wigle_lookup_status():
+    """Poll the status of the running WiGLE bulk lookup job."""
+    return jsonify(_wigle_job)
+
 
 @app.route('/api/wifi/networks')
 def get_wifi_networks():

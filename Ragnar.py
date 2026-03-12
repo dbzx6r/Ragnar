@@ -33,6 +33,7 @@ from comment import Commentaireia
 from orchestrator import Orchestrator
 from logger import Logger
 from wifi_manager import WiFiManager
+from wpa_sec_integration import WpaSecIntegration
 from env_manager import load_env
 
 logger = Logger(name="Ragnar.py", level=logging.DEBUG)
@@ -45,6 +46,7 @@ class Ragnar:
         self.orchestrator_thread = None
         self.orchestrator = None
         self.wifi_manager = WiFiManager(shared_data)
+        self.wpa_sec = WpaSecIntegration(shared_data)
 
         # Set reference to this instance in shared_data for other modules
         self.shared_data.ragnar_instance = self
@@ -75,6 +77,9 @@ class Ragnar:
         logger.info("Starting Wi-Fi management system...")
         self.wifi_manager.start()
         logger.info("Wi-Fi management system started")
+
+        # Start wpa-sec integration (polls for cracked WiFi passwords)
+        self.wpa_sec.start()
         
         # Main loop to keep Ragnar running
         logger.info("Entering main Ragnar loop...")
@@ -163,6 +168,10 @@ class Ragnar:
         # Stop Wi-Fi manager
         if hasattr(self, 'wifi_manager'):
             self.wifi_manager.stop()
+
+        # Stop wpa-sec poller
+        if hasattr(self, 'wpa_sec'):
+            self.wpa_sec.stop()
         
         # Set exit flags
         self.shared_data.should_exit = True

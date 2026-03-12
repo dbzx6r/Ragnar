@@ -526,6 +526,7 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeThreatIntelFilters();
     initializePwnUI();
     initializePwnagotchiVisibility();
+    initializeWpaSecVisibility();
     handleHeadlessMode();
 
 });
@@ -4737,6 +4738,145 @@ function togglePwnagotchiVisibility() {
     const isEnabled = checkbox.checked;
     localStorage.setItem('pwnagotchi-enabled', isEnabled ? 'true' : 'false');
     applyPwnVisibilityPreference(isEnabled);
+}
+
+// ── wpa-sec integration ───────────────────────────────────────────────────────
+
+function toggleWpaSecVisibility() {
+    const checkbox = document.getElementById('wpasec-enabled');
+    if (!checkbox) return;
+    const isEnabled = checkbox.checked;
+    localStorage.setItem('wpasec-section-visible', isEnabled ? 'true' : 'false');
+    const section = document.getElementById('wpasec-section');
+    if (section) section.style.display = isEnabled ? 'block' : 'none';
+    if (isEnabled) loadWpaSecImported();
+}
+
+function initializeWpaSecVisibility() {
+    const checkbox = document.getElementById('wpasec-enabled');
+    if (!checkbox) return;
+
+    // Restore toggle state from localStorage
+    const stored = localStorage.getItem('wpasec-section-visible');
+    const isVisible = stored === 'true';
+    checkbox.checked = isVisible;
+    const section = document.getElementById('wpasec-section');
+    if (section) section.style.display = isVisible ? 'block' : 'none';
+    if (isVisible) loadWpaSecImported();
+
+    // Populate fields from live config
+    fetchAPI('/api/config').then(data => {
+        if (!data) return;
+        const apiKeyEl = document.getElementById('wpasec-api-key');
+        const intervalEl = document.getElementById('wpasec-poll-interval');
+        const priorityEl = document.getElementById('wpasec-priority');
+        const enabledEl = document.getElementById('wpasec-auto-connect');
+        const autoConnectEl = document.getElementById('wpasec-auto-connect-toggle');
+        const badgeEl = document.getElementById('wpasec-status-badge');
+        const activeEl = document.getElementById('wpasec-status-active');
+
+        if (apiKeyEl && data.wpasec_api_key) apiKeyEl.value = data.wpasec_api_key;
+        if (intervalEl && data.wpasec_poll_interval != null) intervalEl.value = data.wpasec_poll_interval;
+        if (priorityEl && data.wpasec_priority != null) priorityEl.value = data.wpasec_priority;
+        if (enabledEl) enabledEl.checked = Boolean(data.wpasec_enabled);
+        if (autoConnectEl) autoConnectEl.checked = data.wpasec_auto_connect !== false;
+
+        const enabled = Boolean(data.wpasec_enabled);
+        if (badgeEl) {
+            badgeEl.textContent = enabled ? 'Active' : 'Disabled';
+            badgeEl.className = `text-xs font-semibold uppercase tracking-wide px-3 py-1 rounded-full ${enabled ? 'bg-cyan-900/40 text-cyan-300 border border-cyan-700' : 'bg-slate-700 text-slate-200'}`;
+        }
+        if (activeEl) activeEl.textContent = enabled ? 'Yes' : 'No';
+    }).catch(() => {});
+}
+
+async function saveWpaSecConfig() {
+    const apiKey = (document.getElementById('wpasec-api-key')?.value || '').trim();
+    const pollInterval = parseInt(document.getElementById('wpasec-poll-interval')?.value || '3600', 10);
+    const priority = parseInt(document.getElementById('wpasec-priority')?.value || '5', 10);
+    const enabled = document.getElementById('wpasec-auto-connect')?.checked || false;
+    const autoConnect = document.getElementById('wpasec-auto-connect-toggle')?.checked !== false;
+
+    const payload = {
+        wpasec_enabled: enabled,
+        wpasec_api_key: apiKey,
+        wpasec_poll_interval: Math.max(300, pollInterval),
+        wpasec_priority: Math.min(10, Math.max(1, priority)),
+        wpasec_auto_connect: autoConnect
+    };
+
+    try {
+        const result = await postAPI('/api/config', payload);
+        if (result) {
+            showNotification('wpa-sec settings saved', 'success');
+            initializeWpaSecVisibility();
+        }
+    } catch (e) {
+        showNotification('Failed to save wpa-sec settings', 'error');
+    }
+}
+
+async function pollWpaSecNow() {
+    const resultEl = document.getElementById('wpasec-last-result');
+    const addedEl = document.getElementById('wpasec-networks-added');
+    if (resultEl) resultEl.textContent = 'Polling…';
+    try {
+        const result = await postAPI('/api/wpasec/poll', {});
+        if (result && result.error) {
+            if (resultEl) resultEl.textContent = `Error: ${result.error}`;
+            showNotification(`wpa-sec poll failed: ${result.error}`, 'error');
+        } else if (result) {
+            const added = result.added || 0;
+            const total = result.total_cracked || 0;
+            if (resultEl) resultEl.textContent = `OK — ${total} cracked total`;
+            if (addedEl) addedEl.textContent = `${added} new`;
+            showNotification(`wpa-sec poll complete: ${added} new network(s) added`, added > 0 ? 'success' : 'info');
+            loadWpaSecImported();
+        }
+    } catch (e) {
+        if (resultEl) resultEl.textContent = 'Request failed';
+        showNotification('wpa-sec poll request failed', 'error');
+    }
+}
+
+async function loadWpaSecImported() {
+    const listEl = document.getElementById('wpasec-imported-list');
+    const countEl = document.getElementById('wpasec-import-count');
+    if (!listEl) return;
+
+    try {
+        const data = await fetchAPI('/api/wpasec/imported');
+        const entries = (data && data.imported) ? data.imported : [];
+
+        if (countEl) countEl.textContent = `${entries.length} network${entries.length !== 1 ? 's' : ''}`;
+
+        if (entries.length === 0) {
+            listEl.innerHTML = '<p class="text-gray-500 text-sm p-4 text-center">No networks imported yet — click Poll Now to fetch from wpa-sec.</p>';
+            return;
+        }
+
+        const rows = entries.map(e => {
+            const date = e.imported_at ? new Date(e.imported_at).toLocaleDateString() : '—';
+            const ssid = escapeHtml(e.ssid || 'Unknown');
+            const bssid = escapeHtml(e.bssid || '—');
+            return `<div class="flex items-center justify-between px-4 py-2.5 border-b border-slate-800/60 hover:bg-slate-800/40 transition-colors">
+                <div class="flex items-center gap-3 min-w-0">
+                    <svg class="w-4 h-4 text-cyan-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"></path>
+                    </svg>
+                    <div class="min-w-0">
+                        <p class="text-sm font-medium text-white truncate">${ssid}</p>
+                        <p class="text-xs text-gray-500 font-mono">${bssid}</p>
+                    </div>
+                </div>
+                <span class="text-xs text-gray-500 flex-shrink-0 ml-2">${date}</span>
+            </div>`;
+        }).join('');
+
+        listEl.innerHTML = rows;
+    } catch (e) {
+        listEl.innerHTML = '<p class="text-red-400 text-sm p-4 text-center">Failed to load imported networks.</p>';
+    }
 }
 
 function initializePwnagotchiVisibility() {
@@ -15856,7 +15996,249 @@ function refreshNetworkMap() {
     loadNetworkMap();
 }
 
-// Helper function to escape HTML
+// ── SSID Location Map ────────────────────────────────────────
+
+let _ssidMapInitialized = false;
+let _leafletMap = null;
+let _leafletLoaded = false;
+
+function switchMapView(view) {
+    const topology = document.getElementById('map-view-topology');
+    const ssid = document.getElementById('map-view-ssid');
+    const btnTopology = document.getElementById('btn-map-topology');
+    const btnSsid = document.getElementById('btn-map-ssid');
+    if (!topology || !ssid) return;
+
+    if (view === 'ssid') {
+        topology.classList.add('hidden');
+        ssid.classList.remove('hidden');
+        btnTopology.className = 'px-4 py-1.5 rounded-lg text-sm font-medium transition-colors bg-slate-700 text-gray-300 hover:bg-slate-600';
+        btnSsid.className = 'px-4 py-1.5 rounded-lg text-sm font-medium transition-colors bg-Ragnar-600 text-white';
+        loadSSIDMap();
+    } else {
+        ssid.classList.add('hidden');
+        topology.classList.remove('hidden');
+        btnSsid.className = 'px-4 py-1.5 rounded-lg text-sm font-medium transition-colors bg-slate-700 text-gray-300 hover:bg-slate-600';
+        btnTopology.className = 'px-4 py-1.5 rounded-lg text-sm font-medium transition-colors bg-Ragnar-600 text-white';
+    }
+}
+
+async function loadSSIDMap() {
+    await _ensureLeaflet();
+
+    let locations = [];
+    try {
+        const resp = await fetch('/api/wifi/locations');
+        locations = await resp.json();
+        if (!Array.isArray(locations)) locations = [];
+    } catch (e) {
+        console.error('Failed to fetch SSID locations:', e);
+    }
+
+    const statusEl = document.getElementById('ssid-map-status');
+    if (statusEl) {
+        statusEl.textContent = locations.length
+            ? `${locations.length} network${locations.length !== 1 ? 's' : ''} tagged with a location.`
+            : 'No networks tagged yet. Connect to a network and click "Tag Current Network".';
+    }
+
+    const container = document.getElementById('ssid-leaflet-map');
+    if (!container) return;
+
+    if (_leafletMap) {
+        _leafletMap.remove();
+        _leafletMap = null;
+    }
+
+    const defaultCenter = locations.length
+        ? [locations[0].latitude, locations[0].longitude]
+        : [20, 0];
+    const defaultZoom = locations.length ? 13 : 2;
+
+    _leafletMap = L.map('ssid-leaflet-map', { zoomControl: true }).setView(defaultCenter, defaultZoom);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        maxZoom: 19,
+    }).addTo(_leafletMap);
+
+    if (locations.length === 0) return;
+
+    renderSSIDMarkers(locations);
+
+    const bounds = locations.map(l => [l.latitude, l.longitude]);
+    if (bounds.length === 1) {
+        _leafletMap.setView(bounds[0], 15);
+    } else {
+        _leafletMap.fitBounds(bounds, { padding: [40, 40] });
+    }
+}
+
+function renderSSIDMarkers(locations) {
+    if (!_leafletMap) return;
+
+    const securityColor = { WPA3: '#22d3ee', WPA2: '#6366f1', WPA: '#f59e0b', Open: '#f87171' };
+
+    locations.forEach(loc => {
+        const color = securityColor[loc.security] || '#94a3b8';
+        const icon = L.divIcon({
+            className: '',
+            html: `<div style="
+                width:16px;height:16px;border-radius:50%;
+                background:${color};border:2px solid white;
+                box-shadow:0 0 6px rgba(0,0,0,0.5);
+            "></div>`,
+            iconSize: [16, 16],
+            iconAnchor: [8, 8],
+        });
+
+        const lastSeen = loc.last_seen
+            ? new Date(loc.last_seen).toLocaleString()
+            : 'Unknown';
+        const signal = loc.signal ? `${loc.signal} dBm` : '—';
+        const channel = loc.channel ? `Ch ${loc.channel}` : '—';
+        const name = loc.location_name ? `<br><span style="color:#94a3b8">${loc.location_name}</span>` : '';
+
+        const popup = `
+            <div style="font-family:monospace;min-width:180px;">
+                <strong style="font-size:13px;">${loc.ssid}</strong>${name}
+                <hr style="border-color:#334155;margin:4px 0;">
+                <span style="color:#94a3b8">Security:</span> ${loc.security || '—'}<br>
+                <span style="color:#94a3b8">Signal:</span> ${signal}<br>
+                <span style="color:#94a3b8">Channel:</span> ${channel}<br>
+                <span style="color:#94a3b8">Last seen:</span> ${lastSeen}
+            </div>`;
+
+        L.marker([loc.latitude, loc.longitude], { icon })
+            .addTo(_leafletMap)
+            .bindPopup(popup);
+    });
+}
+
+async function tagCurrentNetwork() {
+    if (!navigator.geolocation) {
+        alert('Geolocation is not supported by your browser.');
+        return;
+    }
+
+    let currentSsid = null;
+    try {
+        const statusResp = await fetch('/api/wifi/status');
+        const statusData = await statusResp.json();
+        currentSsid = statusData.current_ssid || statusData.connected_ssid || null;
+    } catch (e) {
+        console.error('Failed to get current SSID:', e);
+    }
+
+    if (!currentSsid) {
+        alert('No active WiFi network detected. Connect to a network first.');
+        return;
+    }
+
+    const statusEl = document.getElementById('ssid-map-status');
+    if (statusEl) statusEl.textContent = `Getting location for "${currentSsid}"…`;
+
+    navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+            const { latitude, longitude } = pos.coords;
+            try {
+                const resp = await fetch('/api/wifi/location', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ssid: currentSsid, latitude, longitude, location_name: '' }),
+                });
+                const result = await resp.json();
+                if (result.success) {
+                    if (statusEl) statusEl.textContent = `✅ Tagged "${currentSsid}" at (${latitude.toFixed(5)}, ${longitude.toFixed(5)})`;
+                    _ssidMapInitialized = false;
+                    await loadSSIDMap();
+                } else {
+                    if (statusEl) statusEl.textContent = `❌ Failed: ${result.error}`;
+                }
+            } catch (e) {
+                console.error('Failed to save location:', e);
+                if (statusEl) statusEl.textContent = '❌ Failed to save location.';
+            }
+        },
+        (err) => {
+            const msgs = { 1: 'Location permission denied.', 2: 'Location unavailable.', 3: 'Location request timed out.' };
+            const msg = msgs[err.code] || 'Geolocation error.';
+            if (statusEl) statusEl.textContent = `❌ ${msg}`;
+            alert(msg);
+        },
+        { enableHighAccuracy: true, timeout: 10000 }
+    );
+}
+
+async function wigleLookupAll() {
+    const btn = document.getElementById('btn-wigle-lookup');
+    const statusEl = document.getElementById('ssid-map-status');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Starting…'; }
+    if (statusEl) statusEl.textContent = 'Starting WiGLE lookup in background…';
+    try {
+        const res = await fetch('/api/wifi/locations/wigle', { method: 'POST' });
+        const data = await res.json();
+        if (data.error) {
+            if (statusEl) statusEl.textContent = `❌ ${data.error}`;
+            showNotification(`WiGLE lookup failed: ${data.error}`, 'error');
+            if (btn) { btn.disabled = false; btn.textContent = '🌐 Lookup via WiGLE'; }
+            return;
+        }
+        if (data.status === 'done') {
+            const msg = `✅ WiGLE: ${data.located} located, ${data.skipped} skipped`;
+            if (statusEl) statusEl.textContent = msg;
+            if (data.located > 0) await loadSSIDMap();
+            if (btn) { btn.disabled = false; btn.textContent = '🌐 Lookup via WiGLE'; }
+            return;
+        }
+        // Poll until done
+        if (btn) btn.textContent = '⏳ Looking up…';
+        const poll = setInterval(async () => {
+            try {
+                const pr = await fetch('/api/wifi/locations/wigle');
+                const pd = await pr.json();
+                if (statusEl) statusEl.textContent = `⏳ WiGLE: ${pd.located} located, ${pd.skipped} skipped, ${pd.errors} errors (of ~${pd.total})`;
+                if (pd.status === 'done') {
+                    clearInterval(poll);
+                    const msg = `✅ WiGLE complete: ${pd.located} located, ${pd.skipped} skipped, ${pd.errors} errors`;
+                    if (statusEl) statusEl.textContent = msg;
+                    showNotification(msg, pd.located > 0 ? 'success' : 'info');
+                    if (pd.located > 0) await loadSSIDMap();
+                    if (btn) { btn.disabled = false; btn.textContent = '🌐 Lookup via WiGLE'; }
+                }
+            } catch(e) { clearInterval(poll); if (btn) { btn.disabled = false; btn.textContent = '🌐 Lookup via WiGLE'; } }
+        }, 5000);
+    } catch (e) {
+        if (statusEl) statusEl.textContent = '❌ Request failed';
+        showNotification('WiGLE lookup request failed', 'error');
+        if (btn) { btn.disabled = false; btn.textContent = '🌐 Lookup via WiGLE'; }
+    }
+}
+
+async function _ensureLeaflet() {
+    if (_leafletLoaded && typeof L !== 'undefined') return;
+    // Load Leaflet CSS
+    if (!document.getElementById('leaflet-css')) {
+        const link = document.createElement('link');
+        link.id = 'leaflet-css';
+        link.rel = 'stylesheet';
+        link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+        document.head.appendChild(link);
+    }
+    // Load Leaflet JS
+    if (typeof L === 'undefined') {
+        await new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+            script.onload = resolve;
+            script.onerror = reject;
+            document.head.appendChild(script);
+        });
+    }
+    _leafletLoaded = true;
+}
+
+
 function escapeHtml(text) {
     if (!text) return '';
     const div = document.createElement('div');
