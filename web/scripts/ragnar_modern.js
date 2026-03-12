@@ -16278,25 +16278,45 @@ async function tagCurrentNetwork() {
 async function wigleLookupAll() {
     const btn = document.getElementById('btn-wigle-lookup');
     const statusEl = document.getElementById('ssid-map-status');
-    if (btn) { btn.disabled = true; btn.textContent = '⏳ Looking up…'; }
-    if (statusEl) statusEl.textContent = 'Querying WiGLE for all imported networks — this may take a minute…';
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Starting…'; }
+    if (statusEl) statusEl.textContent = 'Starting WiGLE lookup in background…';
     try {
         const res = await fetch('/api/wifi/locations/wigle', { method: 'POST' });
         const data = await res.json();
         if (data.error) {
             if (statusEl) statusEl.textContent = `❌ ${data.error}`;
             showNotification(`WiGLE lookup failed: ${data.error}`, 'error');
-        } else {
-            const msg = `✅ WiGLE: ${data.located} located, ${data.skipped} skipped, ${data.errors} errors`;
-            if (statusEl) statusEl.textContent = msg;
-            showNotification(msg, data.located > 0 ? 'success' : 'info');
-            if (data.located > 0) await loadSSIDMap();
+            if (btn) { btn.disabled = false; btn.textContent = '🌐 Lookup via WiGLE'; }
+            return;
         }
+        if (data.status === 'done') {
+            const msg = `✅ WiGLE: ${data.located} located, ${data.skipped} skipped`;
+            if (statusEl) statusEl.textContent = msg;
+            if (data.located > 0) await loadSSIDMap();
+            if (btn) { btn.disabled = false; btn.textContent = '🌐 Lookup via WiGLE'; }
+            return;
+        }
+        // Poll until done
+        if (btn) btn.textContent = '⏳ Looking up…';
+        const poll = setInterval(async () => {
+            try {
+                const pr = await fetch('/api/wifi/locations/wigle');
+                const pd = await pr.json();
+                if (statusEl) statusEl.textContent = `⏳ WiGLE: ${pd.located} located, ${pd.skipped} skipped, ${pd.errors} errors (of ~${pd.total})`;
+                if (pd.status === 'done') {
+                    clearInterval(poll);
+                    const msg = `✅ WiGLE complete: ${pd.located} located, ${pd.skipped} skipped, ${pd.errors} errors`;
+                    if (statusEl) statusEl.textContent = msg;
+                    showNotification(msg, pd.located > 0 ? 'success' : 'info');
+                    if (pd.located > 0) await loadSSIDMap();
+                    if (btn) { btn.disabled = false; btn.textContent = '🌐 Lookup via WiGLE'; }
+                }
+            } catch(e) { clearInterval(poll); if (btn) { btn.disabled = false; btn.textContent = '🌐 Lookup via WiGLE'; } }
+        }, 5000);
     } catch (e) {
-        if (statusEl) statusEl.textContent = `❌ Request failed`;
+        if (statusEl) statusEl.textContent = '❌ Request failed';
         showNotification('WiGLE lookup request failed', 'error');
-    } finally {
-        if (btn) { btn.disabled = false; btn.innerHTML = '<svg class="w-4 h-4 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064"/></svg>Lookup via WiGLE'; }
+        if (btn) { btn.disabled = false; btn.textContent = '🌐 Lookup via WiGLE'; }
     }
 }
 
