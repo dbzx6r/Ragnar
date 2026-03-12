@@ -35,6 +35,7 @@ from logger import Logger
 WPA_SEC_URL = "https://wpa-sec.stanev.org/?api&dl=1"
 CACHE_FILENAME = "wpa_sec_imported.json"
 WIGLE_SEARCH_URL = "https://api.wigle.net/api/v2/network/search"
+WIGLE_DETAIL_URL = "https://api.wigle.net/api/v2/network/detail"
 
 
 class WpaSecIntegration:
@@ -304,10 +305,10 @@ class WpaSecIntegration:
 
         try:
             resp = requests.get(
-                WIGLE_SEARCH_URL,
-                params={'netid': formatted, 'onlymine': 'false', 'freenet': 'false', 'paynet': 'false'},
+                WIGLE_DETAIL_URL,
+                params={'netid': formatted},
                 auth=(api_name, api_token),
-                timeout=10,
+                timeout=15,
             )
             if resp.status_code == 401:
                 self.logger.warning("WiGLE API: invalid credentials (401)")
@@ -331,11 +332,11 @@ class WpaSecIntegration:
             if lat is None or lon is None:
                 return None
 
-            location_name = best.get('ssid', '') or ''
-            city = best.get('city', '')
-            country = best.get('country', '')
-            parts = [p for p in [city, country] if p]
-            if parts:
+            location_name = ''
+            addresses = data.get('addresses', [])
+            if addresses:
+                addr = addresses[0]
+                parts = [p for p in [addr.get('city'), addr.get('country')] if p]
                 location_name = ', '.join(parts)
 
             return {'lat': float(lat), 'lon': float(lon), 'location_name': location_name}
