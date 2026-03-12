@@ -20,6 +20,28 @@ Ragnar is a fork of the awesome [Bjorn](https://github.com/infinition/Bjorn) pro
 
 ---
 
+## ✨ Features in this fork (dbzx6r/Ragnar)
+
+These features are unique to this fork and not yet in upstream:
+
+### 📡 wpa-sec Integration
+Automatically imports cracked WPA passwords from [wpa-sec.stanev.org](https://wpa-sec.stanev.org) into Ragnar's known networks list. When Ragnar encounters a network whose password has been cracked and uploaded to wpa-sec, it can connect automatically.
+
+- Configure your wpa-sec API key in the **Advanced Settings** tab
+- Set a poll interval (default: hourly) — Ragnar fetches new cracked networks in the background
+- Optionally auto-add cracked networks to Ragnar's known WiFi list
+
+### 🗺️ SSID Location Map
+Adds a geographic map to the **Map tab** showing where each known SSID was seen in the real world.
+
+- Uses [WiGLE.net](https://wigle.net) API to automatically look up GPS coordinates for every BSSID imported via wpa-sec — no manual tagging required
+- One-click **"Lookup via WiGLE"** bulk geo-locates all imported networks
+- **"Tag Current Network"** pins the currently connected SSID using your browser's GPS
+- Interactive [Leaflet.js](https://leafletjs.com) + OpenStreetMap map with color-coded pins by security type (WPA3/WPA2/WEP/Open)
+- Configure WiGLE API credentials (`wigle_api_name`, `wigle_api_token`) in `config/shared_config.json`
+
+---
+
 ## Quick Install
 
 ```bash
