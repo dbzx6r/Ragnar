@@ -16101,7 +16101,204 @@ function refreshNetworkMap() {
     loadNetworkMap();
 }
 
-// Helper function to escape HTML
+// ── SSID Location Map ────────────────────────────────────────
+
+let _ssidMapInitialized = false;
+let _leafletMap = null;
+let _leafletLoaded = false;
+
+function switchMapView(view) {
+    const topology = document.getElementById('map-view-topology');
+    const ssid = document.getElementById('map-view-ssid');
+    const btnTopology = document.getElementById('btn-map-topology');
+    const btnSsid = document.getElementById('btn-map-ssid');
+    if (!topology || !ssid) return;
+
+    if (view === 'ssid') {
+        topology.classList.add('hidden');
+        ssid.classList.remove('hidden');
+        btnTopology.className = 'px-4 py-1.5 rounded-lg text-sm font-medium transition-colors bg-slate-700 text-gray-300 hover:bg-slate-600';
+        btnSsid.className = 'px-4 py-1.5 rounded-lg text-sm font-medium transition-colors bg-Ragnar-600 text-white';
+        loadSSIDMap();
+    } else {
+        ssid.classList.add('hidden');
+        topology.classList.remove('hidden');
+        btnSsid.className = 'px-4 py-1.5 rounded-lg text-sm font-medium transition-colors bg-slate-700 text-gray-300 hover:bg-slate-600';
+        btnTopology.className = 'px-4 py-1.5 rounded-lg text-sm font-medium transition-colors bg-Ragnar-600 text-white';
+    }
+}
+
+async function loadSSIDMap() {
+    await _ensureLeaflet();
+
+    let locations = [];
+    try {
+        const resp = await fetch('/api/wifi/locations');
+        locations = await resp.json();
+        if (!Array.isArray(locations)) locations = [];
+    } catch (e) {
+        console.error('Failed to fetch SSID locations:', e);
+    }
+
+    const statusEl = document.getElementById('ssid-map-status');
+    if (statusEl) {
+        statusEl.textContent = locations.length
+            ? `${locations.length} network${locations.length !== 1 ? 's' : ''} tagged with a location.`
+            : 'No networks tagged yet. Connect to a network and click "Tag Current Network".';
+    }
+
+    const container = document.getElementById('ssid-leaflet-map');
+    if (!container) return;
+
+    if (_leafletMap) {
+        _leafletMap.remove();
+        _leafletMap = null;
+    }
+
+    const defaultCenter = locations.length
+        ? [locations[0].latitude, locations[0].longitude]
+        : [20, 0];
+    const defaultZoom = locations.length ? 13 : 2;
+
+    _leafletMap = L.map('ssid-leaflet-map', { zoomControl: true }).setView(defaultCenter, defaultZoom);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        maxZoom: 19,
+    }).addTo(_leafletMap);
+
+    if (locations.length === 0) return;
+
+    renderSSIDMarkers(locations);
+
+    const bounds = locations.map(l => [l.latitude, l.longitude]);
+    if (bounds.length === 1) {
+        _leafletMap.setView(bounds[0], 15);
+    } else {
+        _leafletMap.fitBounds(bounds, { padding: [40, 40] });
+    }
+}
+
+function renderSSIDMarkers(locations) {
+    if (!_leafletMap) return;
+
+    const securityColor = { WPA3: '#22d3ee', WPA2: '#6366f1', WPA: '#f59e0b', Open: '#f87171' };
+
+    locations.forEach(loc => {
+        const color = securityColor[loc.security] || '#94a3b8';
+        const icon = L.divIcon({
+            className: '',
+            html: `<div style="
+                width:16px;height:16px;border-radius:50%;
+                background:${color};border:2px solid white;
+                box-shadow:0 0 6px rgba(0,0,0,0.5);
+            "></div>`,
+            iconSize: [16, 16],
+            iconAnchor: [8, 8],
+        });
+
+        const lastSeen = loc.last_seen
+            ? new Date(loc.last_seen).toLocaleString()
+            : 'Unknown';
+        const signal = loc.signal ? `${loc.signal} dBm` : '—';
+        const channel = loc.channel ? `Ch ${loc.channel}` : '—';
+        const name = loc.location_name ? `<br><span style="color:#94a3b8">${loc.location_name}</span>` : '';
+
+        const popup = `
+            <div style="font-family:monospace;min-width:180px;">
+                <strong style="font-size:13px;">${loc.ssid}</strong>${name}
+                <hr style="border-color:#334155;margin:4px 0;">
+                <span style="color:#94a3b8">Security:</span> ${loc.security || '—'}<br>
+                <span style="color:#94a3b8">Signal:</span> ${signal}<br>
+                <span style="color:#94a3b8">Channel:</span> ${channel}<br>
+                <span style="color:#94a3b8">Last seen:</span> ${lastSeen}
+            </div>`;
+
+        L.marker([loc.latitude, loc.longitude], { icon })
+            .addTo(_leafletMap)
+            .bindPopup(popup);
+    });
+}
+
+async function tagCurrentNetwork() {
+    if (!navigator.geolocation) {
+        alert('Geolocation is not supported by your browser.');
+        return;
+    }
+
+    let currentSsid = null;
+    try {
+        const statusResp = await fetch('/api/wifi/status');
+        const statusData = await statusResp.json();
+        currentSsid = statusData.current_ssid || statusData.connected_ssid || null;
+    } catch (e) {
+        console.error('Failed to get current SSID:', e);
+    }
+
+    if (!currentSsid) {
+        alert('No active WiFi network detected. Connect to a network first.');
+        return;
+    }
+
+    const statusEl = document.getElementById('ssid-map-status');
+    if (statusEl) statusEl.textContent = `Getting location for "${currentSsid}"…`;
+
+    navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+            const { latitude, longitude } = pos.coords;
+            try {
+                const resp = await fetch('/api/wifi/location', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ssid: currentSsid, latitude, longitude, location_name: '' }),
+                });
+                const result = await resp.json();
+                if (result.success) {
+                    if (statusEl) statusEl.textContent = `✅ Tagged "${currentSsid}" at (${latitude.toFixed(5)}, ${longitude.toFixed(5)})`;
+                    _ssidMapInitialized = false;
+                    await loadSSIDMap();
+                } else {
+                    if (statusEl) statusEl.textContent = `❌ Failed: ${result.error}`;
+                }
+            } catch (e) {
+                console.error('Failed to save location:', e);
+                if (statusEl) statusEl.textContent = '❌ Failed to save location.';
+            }
+        },
+        (err) => {
+            const msgs = { 1: 'Location permission denied.', 2: 'Location unavailable.', 3: 'Location request timed out.' };
+            const msg = msgs[err.code] || 'Geolocation error.';
+            if (statusEl) statusEl.textContent = `❌ ${msg}`;
+            alert(msg);
+        },
+        { enableHighAccuracy: true, timeout: 10000 }
+    );
+}
+
+async function _ensureLeaflet() {
+    if (_leafletLoaded && typeof L !== 'undefined') return;
+    // Load Leaflet CSS
+    if (!document.getElementById('leaflet-css')) {
+        const link = document.createElement('link');
+        link.id = 'leaflet-css';
+        link.rel = 'stylesheet';
+        link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+        document.head.appendChild(link);
+    }
+    // Load Leaflet JS
+    if (typeof L === 'undefined') {
+        await new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+            script.onload = resolve;
+            script.onerror = reject;
+            document.head.appendChild(script);
+        });
+    }
+    _leafletLoaded = true;
+}
+
+
 function escapeHtml(text) {
     if (!text) return '';
     const div = document.createElement('div');

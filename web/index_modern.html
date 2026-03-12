@@ -895,6 +895,21 @@
                 </div>
                 <!-- Device type legend (own row beneath header) -->
                 <div id="map-legend" class="flex flex-wrap items-center gap-3 text-xs text-gray-400 mb-3"></div>
+
+                <!-- Sub-tab toggle: Network Topology | SSID Locations -->
+                <div class="flex gap-2 mb-4">
+                    <button id="btn-map-topology" onclick="switchMapView('topology')"
+                        class="px-4 py-1.5 rounded-lg text-sm font-medium transition-colors bg-Ragnar-600 text-white">
+                        Network Topology
+                    </button>
+                    <button id="btn-map-ssid" onclick="switchMapView('ssid')"
+                        class="px-4 py-1.5 rounded-lg text-sm font-medium transition-colors bg-slate-700 text-gray-300 hover:bg-slate-600">
+                        📍 SSID Locations
+                    </button>
+                </div>
+
+                <!-- ── Topology view (existing) ────────────────────────── -->
+                <div id="map-view-topology">
                 <!-- Subnet manager (collapsible) -->
                 <div id="subnet-manager" class="mb-3">
                     <button onclick="toggleSubnetPanel()" class="text-sm text-green-400 hover:text-green-300 flex items-center gap-1.5 mb-2 transition-colors font-medium">
@@ -930,6 +945,25 @@
                     <svg id="network-map-svg" class="w-full h-full" style="display:none;"></svg>
                 </div>
                 <p class="text-xs text-gray-500 mt-2">Click a node to open host details. Scroll to zoom. Drag to pan.</p>
+                </div><!-- /map-view-topology -->
+
+                <!-- ── SSID Locations view ────────────────────────────── -->
+                <div id="map-view-ssid" class="hidden">
+                    <div class="flex items-center justify-between mb-3">
+                        <p class="text-sm text-gray-400">SSIDs tagged with a physical location appear as pins on the map.</p>
+                        <button onclick="tagCurrentNetwork()"
+                            class="flex items-center gap-2 bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-4 py-2 rounded-lg text-sm transition-colors shrink-0">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+                            </svg>
+                            Tag Current Network
+                        </button>
+                    </div>
+                    <p id="ssid-map-status" class="text-xs text-gray-500 mb-2"></p>
+                    <div id="ssid-leaflet-map" class="w-full rounded-lg border border-slate-700" style="height:600px;"></div>
+                    <p class="text-xs text-gray-500 mt-2">Click a pin to see SSID details. Drag the map to explore.</p>
+                </div><!-- /map-view-ssid -->
             </div>
         </div>
 
