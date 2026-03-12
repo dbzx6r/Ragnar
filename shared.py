@@ -448,6 +448,22 @@ class SharedData:
         """Public entry point for Wi-Fi manager to switch all storage."""
         if not hasattr(self, 'storage_manager'):
             return
+
+        # Guard against transient Wi-Fi blips: if the new SSID is None
+        # (Wi-Fi momentarily lost) but we already have an active real
+        # network, do NOT switch.  A genuine disconnection will be
+        # handled by the Wi-Fi monitoring loop which performs sustained
+        # validation before acting.  Without this guard, a single
+        # failed check_wifi_connection() call (common on the resource-
+        # constrained Pi Zero W2) would call mark_all_hosts_degraded()
+        # and wipe the entire target list to zero.
+        if not ssid and self.active_network_ssid:
+            logger.debug(
+                f"Ignoring transient SSID=None switch (current network: "
+                f"{self.active_network_ssid})"
+            )
+            return
+
         try:
             if self.network_intelligence:
                 self.network_intelligence.save_intelligence_data()

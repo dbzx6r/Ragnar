@@ -650,28 +650,35 @@ setup_ragnar() {
             log "WARNING" "Display version not detected - skipping shared.py update"
         fi
     elif [ -f "$ragnar_PATH/shared.py" ]; then
-        # Replace the hardcoded default epd_type in get_default_config() method
-        sed -i "s/\"epd_type\": \"epd2in13_V4\"/\"epd_type\": \"$EPD_VERSION\"/" "$ragnar_PATH/shared.py"
-        check_success "Updated shared.py default display configuration to $EPD_VERSION"
+        # Replace whatever epd_type default is currently in shared.py with the user's selection.
+        # Using a wildcard pattern instead of hardcoding "epd2in13_V4" so this works correctly
+        # on reinstalls where a previous run already changed the default to a different version.
+        sed -i "s/\"epd_type\": \"[^\"]*\"/\"epd_type\": \"$EPD_VERSION\"/" "$ragnar_PATH/shared.py"
+        check_success "Updated shared.py default EPD configuration to $EPD_VERSION"
         log "INFO" "Modified: $ragnar_PATH/shared.py"
 
-        # Also update shared_config.json if it exists (from previous install)
+        # Always write the selected epd_type into shared_config.json so the running service
+        # uses the right driver immediately — even on a fresh install where the file doesn't
+        # exist yet (previous code skipped this, leaving Ragnar to regenerate config from
+        # shared.py defaults, which could be stale if sed failed for any reason).
         local config_json="$ragnar_PATH/config/shared_config.json"
-        if [ -f "$config_json" ]; then
-            python3 -c "
-import json, sys
-try:
-    with open('$config_json', 'r') as f:
-        cfg = json.load(f)
-    cfg['epd_type'] = '$EPD_VERSION'
-    with open('$config_json', 'w') as f:
-        json.dump(cfg, f, indent=4)
-    print('SUCCESS: Updated shared_config.json epd_type to $EPD_VERSION')
-except Exception as e:
-    print(f'WARNING: Could not update shared_config.json: {e}')
-"
-            log "INFO" "Updated config JSON: $config_json -> epd_type=$EPD_VERSION"
-        fi
+        mkdir -p "$(dirname "$config_json")"
+        python3 -c "
+import json, os
+config_path = '$config_json'
+cfg = {}
+if os.path.exists(config_path):
+    try:
+        with open(config_path, 'r') as f:
+            cfg = json.load(f)
+    except Exception:
+        cfg = {}
+cfg['epd_type'] = '$EPD_VERSION'
+with open(config_path, 'w') as f:
+    json.dump(cfg, f, indent=4)
+print('SUCCESS: Set shared_config.json epd_type to $EPD_VERSION')
+" && log "INFO" "Config JSON epd_type set to $EPD_VERSION" \
+  || log "WARNING" "Could not write shared_config.json — epd_type will be read from shared.py on first run"
     else
         log "WARNING" "shared.py not found at $ragnar_PATH/shared.py - skipping E-Paper configuration update"
     fi
@@ -782,6 +789,7 @@ except Exception as e:
         log "WARNING" "Failed to install PyBluez. Bluetooth WiFi control will be disabled."
         log "WARNING" "You can install it manually later with: sudo pip3 install --break-system-packages 'git+https://github.com/pybluez/pybluez.git#egg=PyBluez'"
     }
+
 
     # Verify display driver availability
     if [ "$HEADLESS_MODE" = true ] || [ -z "${EPD_VERSION:-}" ]; then
