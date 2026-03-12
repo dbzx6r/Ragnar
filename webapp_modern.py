@@ -8386,6 +8386,61 @@ def set_wifi_location():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/wifi/locations/wigle', methods=['POST'])
+def wigle_lookup_all():
+    """
+    Bulk WiGLE lookup: for every BSSID in the wpa-sec imported cache that
+    does not yet have a location in wifi_scan_cache, query WiGLE and store.
+    Returns {located: int, skipped: int, errors: int}.
+    """
+    try:
+        wpa_sec = getattr(getattr(shared_data, 'ragnar_instance', None), 'wpa_sec', None)
+        if not wpa_sec:
+            return jsonify({'error': 'wpa_sec_unavailable'}), 503
+
+        cache_path = os.path.join(shared_data.datadir, 'wpa_sec_imported.json')
+        if not os.path.exists(cache_path):
+            return jsonify({'located': 0, 'skipped': 0, 'errors': 0, 'message': 'No wpa-sec cache found'})
+
+        with open(cache_path, 'r', encoding='utf-8') as fh:
+            cache = json.load(fh)
+
+        imported = cache.get('imported', [])
+        if not imported:
+            return jsonify({'located': 0, 'skipped': 0, 'errors': 0, 'message': 'No imported networks'})
+
+        db = get_db(currentdir=shared_data.currentdir)
+        existing = {loc['ssid'] for loc in db.get_wifi_locations()}
+
+        located = skipped = errors = 0
+        for entry in imported:
+            ssid = entry.get('ssid', '').strip()
+            bssid = entry.get('bssid', '').strip()
+            if not ssid or not bssid:
+                continue
+            if ssid in existing:
+                skipped += 1
+                continue
+            try:
+                loc = wpa_sec._lookup_wigle_location(bssid)
+                if loc:
+                    db.set_wifi_location(ssid, loc['lat'], loc['lon'], loc['location_name'])
+                    existing.add(ssid)
+                    located += 1
+                else:
+                    skipped += 1
+                import time as _t
+                _t.sleep(1)
+            except Exception as exc:
+                logger.debug(f"WiGLE bulk lookup error for {bssid}: {exc}")
+                errors += 1
+
+        return jsonify({'located': located, 'skipped': skipped, 'errors': errors})
+    except Exception as e:
+        logger.error(f"WiGLE bulk lookup error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/wifi/networks')
 def get_wifi_networks():
     """Get available and known Wi-Fi networks - optimized for Pi Zero W2 AP mode"""

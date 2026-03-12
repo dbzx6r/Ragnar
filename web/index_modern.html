@@ -951,14 +951,24 @@
                 <div id="map-view-ssid" class="hidden">
                     <div class="flex items-center justify-between mb-3">
                         <p class="text-sm text-gray-400">SSIDs tagged with a physical location appear as pins on the map.</p>
-                        <button onclick="tagCurrentNetwork()"
-                            class="flex items-center gap-2 bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-4 py-2 rounded-lg text-sm transition-colors shrink-0">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
-                            </svg>
-                            Tag Current Network
-                        </button>
+                        <div class="flex items-center gap-2">
+                            <button onclick="wigleLookupAll()"
+                                id="btn-wigle-lookup"
+                                class="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-gray-200 px-4 py-2 rounded-lg text-sm transition-colors shrink-0">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064"/>
+                                </svg>
+                                Lookup via WiGLE
+                            </button>
+                            <button onclick="tagCurrentNetwork()"
+                                class="flex items-center gap-2 bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-4 py-2 rounded-lg text-sm transition-colors shrink-0">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                </svg>
+                                Tag Current Network
+                            </button>
+                        </div>
                     </div>
                     <p id="ssid-map-status" class="text-xs text-gray-500 mb-2"></p>
                     <div id="ssid-leaflet-map" class="w-full rounded-lg border border-slate-700" style="height:600px;"></div>
