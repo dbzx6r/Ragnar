@@ -84,10 +84,38 @@
         "b_parent": "TelnetBruteforce"
     },
     {
+        "b_module": "ipcam_scanner",
+        "b_class": "IpCameraScanner",
+        "b_port": 554,
+        "b_status": "ipcam_scan",
+        "b_parent": null
+    },
+    {
         "b_module": "telnet_connector",
         "b_class": "TelnetBruteforce",
         "b_port": 23,
         "b_status": "brute_force_telnet",
+        "b_parent": null
+    },
+    {
+        "b_module": "router_scanner",
+        "b_class": "RouterScanner",
+        "b_port": null,
+        "b_status": "router_scan",
+        "b_parent": null
+    },
+    {
+        "b_module": "mqtt_scanner",
+        "b_class": "MQTTScanner",
+        "b_port": 1883,
+        "b_status": "mqtt_scan",
+        "b_parent": null
+    },
+    {
+        "b_module": "snmp_scanner",
+        "b_class": "SNMPScanner",
+        "b_port": 161,
+        "b_status": "snmp_scan",
         "b_parent": null
     }
 ]

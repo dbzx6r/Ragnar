@@ -81,6 +81,14 @@ The portal supports network scanning with signal strength, manual entry for hidd
 
 ---
 
+## ✨ Features in this fork
+
+This fork ([dbzx6r/Ragnar](https://github.com/dbzx6r/Ragnar)) adds the following on top of upstream:
+
+- **IP Camera Scanner** — Scans the local network for IP cameras on port 554 (RTSP), fingerprints brand/model, tests default credentials, and captures snapshots. Includes aggressive mode and detection for routers, MQTT brokers, and SNMP devices.
+
+---
+
 ## 📌 Supported Platforms & Prerequisites
 
 ### Raspberry Pi (Zero W / W2 / 4 / 5)

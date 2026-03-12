@@ -527,6 +527,11 @@ document.addEventListener('DOMContentLoaded', function() {
     initializePwnUI();
     initializePwnagotchiVisibility();
     initializeWpaSecVisibility();
+    initializeIpCamToggle();
+    initializeRouterScannerToggle();
+    initializeMQTTScannerToggle();
+    initializeSNMPScannerToggle();
+    initializeAggressiveMode();
     handleHeadlessMode();
 
 });
@@ -815,6 +820,12 @@ function setupAutoRefresh() {
             loadDashboardData();
         }
     }, 20000); // Every 20 seconds when on dashboard (reduced from 15s)
+
+    // Activity feed — refresh every 10s when on dashboard
+    autoRefreshIntervals.activityFeed = setInterval(() => {
+        if (currentTab === 'dashboard') loadActivityFeed();
+    }, 10000);
+    loadActivityFeed(); // Load immediately on page open
     
     // Set up periodic update checking
     autoRefreshIntervals.updates = setInterval(() => {
@@ -1089,11 +1100,11 @@ async function loadTabData(tabName) {
         case 'adv-vuln':
             loadAdvancedVulnData(); // Non-blocking - tab shows immediately, data fills in
             break;
-        case 'network-map':
-            if (!_mapInitialized) { loadNetworkMap(); }
-            break;
         case 'credentials':
             loadCredentials();
+            break;
+        case 'network-map':
+            if (!_mapInitialized) { _mapInitialized = true; loadNetworkMap(); }
             break;
     }
 }
@@ -1124,14 +1135,7 @@ async function loadDashboardData() {
         if (data) {
             // Update status block immediately
             updateDashboardStatus(data);
-            // Only fetch network-specific stats if a specific network is selected;
-            // otherwise /api/dashboard/quick already has the correct data (instant).
-            const { network } = getSelectedDashboardNetworkKey();
-            if (network) {
-                await refreshDashboardStatsForCurrentSelection({ forceRefresh: true, fallbackData: data });
-            } else {
-                updateDashboardStats(data);
-            }
+            await refreshDashboardStatsForCurrentSelection({ forceRefresh: true, fallbackData: data });
         }
         
         // Load AI insights if configured
@@ -2786,9 +2790,6 @@ async function loadLootData() {
 
 // Attack Logs Functions
 let currentAttackFilter = 'all';
-let currentAttackGroupBy = 'ip';
-let currentAttackNetworkFilter = 'all';
-let currentAttackIPSearch = '';
 let attackLogsCache = null;
 let attackLogsETag = null;
 let attackLogsInFlight = null;
@@ -2880,116 +2881,6 @@ async function refreshAttackLogs() {
     await loadAttackLogs({ force: true });
 }
 
-function setAttackGroupBy(groupBy) {
-    currentAttackGroupBy = groupBy;
-    document.querySelectorAll('.attack-groupby-btn').forEach(btn => {
-        const isActive = btn.getAttribute('data-groupby') === groupBy;
-        btn.classList.toggle('bg-Ragnar-600', isActive);
-        btn.classList.toggle('text-white', isActive);
-        btn.classList.toggle('text-gray-400', !isActive);
-        btn.classList.toggle('hover:text-white', !isActive);
-    });
-    if (attackLogsCache) displayAttackLogs(attackLogsCache);
-}
-
-function filterAttackByNetwork(network) {
-    currentAttackNetworkFilter = network;
-    if (attackLogsCache) displayAttackLogs(attackLogsCache);
-}
-
-function onAttackIPSearch(value) {
-    currentAttackIPSearch = value.trim().toLowerCase();
-    if (attackLogsCache) displayAttackLogs(attackLogsCache);
-}
-
-function _updateAttackNetworkDropdown(networks) {
-    const select = document.getElementById('attack-network-filter');
-    if (!select) return;
-    const current = select.value;
-    // Rebuild options preserving selection
-    select.innerHTML = '<option value="all">All Networks</option>';
-    (networks || []).forEach(n => {
-        const opt = document.createElement('option');
-        opt.value = n;
-        opt.textContent = n === 'unknown' ? 'Unknown Network' : n;
-        if (n === current) opt.selected = true;
-        select.appendChild(opt);
-    });
-}
-
-function _buildAttackHostBlock(ip, hostLogs) {
-    const successCount = hostLogs.filter(l => l.status === 'success').length;
-    const failedCount  = hostLogs.filter(l => l.status === 'failed').length;
-    const timeoutCount = hostLogs.filter(l => l.status === 'timeout').length;
-    const safeId = ip.replace(/[^a-zA-Z0-9]/g, '-');
-
-    let html = `
-        <div class="bg-slate-800 bg-opacity-50 rounded-lg border border-slate-700 overflow-hidden">
-            <div class="px-4 py-3 bg-slate-900 bg-opacity-50 flex items-center justify-between cursor-pointer hover:bg-opacity-70 transition-colors" onclick="toggleAttackHost('${safeId}')">
-                <div class="flex items-center space-x-3">
-                    <svg class="w-5 h-5 text-Ragnar-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path>
-                    </svg>
-                    <span class="font-semibold text-lg">${ip}</span>
-                    <span class="text-sm text-gray-400">(${hostLogs.length} attacks)</span>
-                </div>
-                <div class="flex items-center space-x-4">
-                    <span class="text-sm text-green-400">✓ ${successCount}</span>
-                    <span class="text-sm text-red-400">✗ ${failedCount}</span>
-                    <span class="text-sm text-yellow-400">⏱ ${timeoutCount}</span>
-                    <svg id="attack-chevron-${safeId}" class="w-5 h-5 text-gray-400 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                    </svg>
-                </div>
-            </div>
-            <div id="attack-host-${safeId}" class="hidden px-4 py-3 space-y-2">
-    `;
-
-    hostLogs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-
-    hostLogs.forEach(log => {
-        const statusColors = {
-            'success': 'bg-green-900 bg-opacity-30 border-green-500',
-            'failed':  'bg-red-900 bg-opacity-30 border-red-500',
-            'timeout': 'bg-yellow-900 bg-opacity-30 border-yellow-500'
-        };
-        const statusIcons      = { 'success': '✓', 'failed': '✗', 'timeout': '⏱' };
-        const statusTextColors = { 'success': 'text-green-400', 'failed': 'text-red-400', 'timeout': 'text-yellow-400' };
-
-        const colorClass = statusColors[log.status]     || 'bg-gray-900 bg-opacity-30 border-gray-500';
-        const icon       = statusIcons[log.status]      || '•';
-        const textColor  = statusTextColors[log.status] || 'text-gray-400';
-
-        html += `
-            <div class="border-l-4 ${colorClass} p-3 rounded-r-lg">
-                <div class="flex items-start justify-between">
-                    <div class="flex-1">
-                        <div class="flex items-center space-x-2 mb-1">
-                            <span class="font-semibold ${textColor}">${icon} ${log.attack_type}</span>
-                            ${log.target_port ? `<span class="text-xs text-gray-400">Port ${log.target_port}</span>` : ''}
-                            <span class="text-xs text-gray-500">${log.timestamp}</span>
-                        </div>
-                        ${log.message ? `<p class="text-sm text-gray-300 mb-2">${escapeHtml(log.message)}</p>` : ''}
-                        ${Object.keys(log.details || {}).length > 0 ? `
-                            <div class="text-xs space-y-1 mt-2">
-                                ${Object.entries(log.details).map(([key, value]) => `
-                                    <div class="flex items-center space-x-2">
-                                        <span class="text-gray-500">${key}:</span>
-                                        <span class="text-gray-300 font-mono">${escapeHtml(String(value))}</span>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        ` : ''}
-                    </div>
-                </div>
-            </div>
-        `;
-    });
-
-    html += `</div></div>`;
-    return html;
-}
-
 function displayAttackLogs(data) {
     if (!data || !data.attack_logs) {
         document.getElementById('attack-logs-container').innerHTML = `
@@ -3002,117 +2893,149 @@ function displayAttackLogs(data) {
         `;
         return;
     }
-
+    
     // Update statistics
     document.getElementById('attack-stat-total').textContent = data.total_count || 0;
     document.getElementById('attack-stat-success').textContent = data.success_count || 0;
     document.getElementById('attack-stat-failed').textContent = data.failed_count || 0;
+    
+    // Calculate timeout count
     const timeoutCount = data.attack_logs.filter(log => log.status === 'timeout').length;
     document.getElementById('attack-stat-timeout').textContent = timeoutCount;
-
-    // Populate network dropdown from available_networks returned by the API
-    _updateAttackNetworkDropdown(data.available_networks || []);
-
-    // Apply status filter
+    
+    // Filter logs based on current filter
     let logs = data.attack_logs;
     if (currentAttackFilter !== 'all') {
         logs = logs.filter(log => log.status === currentAttackFilter);
     }
-
-    // Apply network filter
-    if (currentAttackNetworkFilter !== 'all') {
-        logs = logs.filter(log => (log.network_ssid || 'unknown') === currentAttackNetworkFilter);
-    }
-
-    // Apply IP search filter
-    if (currentAttackIPSearch) {
-        logs = logs.filter(log => (log.target_ip || '').toLowerCase().includes(currentAttackIPSearch));
-    }
-
+    
     if (logs.length === 0) {
         document.getElementById('attack-logs-container').innerHTML = `
             <div class="text-center text-gray-400 py-8">
                 <svg class="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
                 </svg>
-                <p>No attacks match the current filters</p>
+                <p>No ${currentAttackFilter === 'all' ? '' : currentAttackFilter} attacks found</p>
             </div>
         `;
         return;
     }
-
+    
+    // Group logs by IP address
+    const logsByIP = {};
+    logs.forEach(log => {
+        const ip = log.target_ip || 'Unknown';
+        if (!logsByIP[ip]) {
+            logsByIP[ip] = [];
+        }
+        logsByIP[ip].push(log);
+    });
+    
+    // Sort IPs
+    const sortedIPs = Object.keys(logsByIP).sort();
+    
+    // Build HTML
     let html = '<div class="space-y-4">';
-
-    if (currentAttackGroupBy === 'network') {
-        // --- Group by Network (SSID), then sub-group by IP ---
-        const logsByNetwork = {};
-        logs.forEach(log => {
-            const net = log.network_ssid || 'unknown';
-            if (!logsByNetwork[net]) logsByNetwork[net] = {};
-            const ip = log.target_ip || 'Unknown';
-            if (!logsByNetwork[net][ip]) logsByNetwork[net][ip] = [];
-            logsByNetwork[net][ip].push(log);
+    
+    sortedIPs.forEach(ip => {
+        const hostLogs = logsByIP[ip];
+        const successCount = hostLogs.filter(l => l.status === 'success').length;
+        const failedCount = hostLogs.filter(l => l.status === 'failed').length;
+        const timeoutCount = hostLogs.filter(l => l.status === 'timeout').length;
+        
+        html += `
+            <div class="bg-slate-800 bg-opacity-50 rounded-lg border border-slate-700 overflow-hidden">
+                <div class="px-4 py-3 bg-slate-900 bg-opacity-50 flex items-center justify-between cursor-pointer hover:bg-opacity-70 transition-colors" onclick="toggleAttackHost('${ip}')">
+                    <div class="flex items-center space-x-3">
+                        <svg class="w-5 h-5 text-Ragnar-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path>
+                        </svg>
+                        <span class="font-semibold text-lg">${ip}</span>
+                        <span class="text-sm text-gray-400">(${hostLogs.length} attacks)</span>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <span class="text-sm text-green-400">✓ ${successCount}</span>
+                        <span class="text-sm text-red-400">✗ ${failedCount}</span>
+                        <span class="text-sm text-yellow-400">⏱ ${timeoutCount}</span>
+                        <svg id="attack-chevron-${ip.replace(/\./g, '-')}" class="w-5 h-5 text-gray-400 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                        </svg>
+                    </div>
+                </div>
+                <div id="attack-host-${ip.replace(/\./g, '-')}" class="hidden px-4 py-3 space-y-2">
+        `;
+        
+        // Sort logs by timestamp (most recent first)
+        hostLogs.sort((a, b) => {
+            return new Date(b.timestamp) - new Date(a.timestamp);
         });
-
-        Object.keys(logsByNetwork).sort().forEach(net => {
-            const netId = net.replace(/[^a-zA-Z0-9]/g, '-');
-            const netLogs = Object.values(logsByNetwork[net]).flat();
-            const netSuccess = netLogs.filter(l => l.status === 'success').length;
-            const netFailed  = netLogs.filter(l => l.status === 'failed').length;
-            const netTimeout = netLogs.filter(l => l.status === 'timeout').length;
-            const ipCount = Object.keys(logsByNetwork[net]).length;
-
+        
+        hostLogs.forEach(log => {
+            const statusColors = {
+                'success': 'bg-green-900 bg-opacity-30 border-green-500',
+                'failed': 'bg-red-900 bg-opacity-30 border-red-500',
+                'timeout': 'bg-yellow-900 bg-opacity-30 border-yellow-500'
+            };
+            
+            const statusIcons = {
+                'success': '✓',
+                'failed': '✗',
+                'timeout': '⏱'
+            };
+            
+            const statusTextColors = {
+                'success': 'text-green-400',
+                'failed': 'text-red-400',
+                'timeout': 'text-yellow-400'
+            };
+            
+            const colorClass = statusColors[log.status] || 'bg-gray-900 bg-opacity-30 border-gray-500';
+            const icon = statusIcons[log.status] || '•';
+            const textColor = statusTextColors[log.status] || 'text-gray-400';
+            
             html += `
-                <div class="bg-slate-900 bg-opacity-60 rounded-xl border border-slate-600 overflow-hidden">
-                    <div class="px-4 py-3 bg-slate-900 flex items-center justify-between cursor-pointer hover:bg-slate-800 transition-colors" onclick="toggleAttackHost('net-${netId}')">
-                        <div class="flex items-center space-x-3">
-                            <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"></path>
-                            </svg>
-                            <span class="font-bold text-blue-300">${escapeHtml(net === 'unknown' ? 'Unknown Network' : net)}</span>
-                            <span class="text-sm text-gray-400">${ipCount} host${ipCount !== 1 ? 's' : ''} · ${netLogs.length} attack${netLogs.length !== 1 ? 's' : ''}</span>
-                        </div>
-                        <div class="flex items-center space-x-4">
-                            <span class="text-sm text-green-400">✓ ${netSuccess}</span>
-                            <span class="text-sm text-red-400">✗ ${netFailed}</span>
-                            <span class="text-sm text-yellow-400">⏱ ${netTimeout}</span>
-                            <svg id="attack-chevron-net-${netId}" class="w-5 h-5 text-gray-400 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                            </svg>
+                <div class="border-l-4 ${colorClass} p-3 rounded-r-lg">
+                    <div class="flex items-start justify-between">
+                        <div class="flex-1">
+                            <div class="flex items-center space-x-2 mb-1">
+                                <span class="font-semibold ${textColor}">${icon} ${log.attack_type}</span>
+                                ${log.target_port ? `<span class="text-xs text-gray-400">Port ${log.target_port}</span>` : ''}
+                                <span class="text-xs text-gray-500">${log.timestamp}</span>
+                            </div>
+                            ${log.message ? `<p class="text-sm text-gray-300 mb-2">${escapeHtml(log.message)}</p>` : ''}
+                            ${Object.keys(log.details || {}).length > 0 ? `
+                                <div class="text-xs space-y-1 mt-2">
+                                    ${Object.entries(log.details).map(([key, value]) => `
+                                        <div class="flex items-center space-x-2">
+                                            <span class="text-gray-500">${key}:</span>
+                                            <span class="text-gray-300 font-mono">${escapeHtml(String(value))}</span>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            ` : ''}
                         </div>
                     </div>
-                    <div id="attack-host-net-${netId}" class="hidden px-4 py-3 space-y-3">
+                </div>
             `;
-
-            Object.keys(logsByNetwork[net]).sort().forEach(ip => {
-                html += _buildAttackHostBlock(ip, logsByNetwork[net][ip]);
-            });
-
-            html += `</div></div>`;
         });
-
-    } else {
-        // --- Default: Group by IP ---
-        const logsByIP = {};
-        logs.forEach(log => {
-            const ip = log.target_ip || 'Unknown';
-            if (!logsByIP[ip]) logsByIP[ip] = [];
-            logsByIP[ip].push(log);
-        });
-
-        Object.keys(logsByIP).sort().forEach(ip => {
-            html += _buildAttackHostBlock(ip, logsByIP[ip]);
-        });
-    }
-
+        
+        html += `
+                </div>
+            </div>
+        `;
+    });
+    
     html += '</div>';
+    
     document.getElementById('attack-logs-container').innerHTML = html;
 }
 
-function toggleAttackHost(safeId) {
-    const container = document.getElementById(`attack-host-${safeId}`);
-    const chevron   = document.getElementById(`attack-chevron-${safeId}`);
-    if (!container || !chevron) return;
+function toggleAttackHost(ip) {
+    const containerId = `attack-host-${ip.replace(/\./g, '-')}`;
+    const chevronId = `attack-chevron-${ip.replace(/\./g, '-')}`;
+    const container = document.getElementById(containerId);
+    const chevron = document.getElementById(chevronId);
+    
     if (container.classList.contains('hidden')) {
         container.classList.remove('hidden');
         chevron.classList.add('rotate-180');
@@ -3337,9 +3260,6 @@ async function loadConfigData() {
 
         // Load AI configuration
         loadAIConfiguration(config);
-
-        // Load Pushover configuration
-        loadPushoverConfiguration(config);
 
         // Load hardware profiles
         await loadHardwareProfiles();
@@ -3750,16 +3670,6 @@ function initializePwnUI() {
     updatePwnButtons();
     resetPwnLogState();
     refreshPwnagotchiStatus({ silent: true });
-
-    // Pwnagotchi config card buttons
-    const cfgReloadBtn = document.getElementById('pwn-config-reload-btn');
-    if (cfgReloadBtn) {
-        cfgReloadBtn.addEventListener('click', () => loadPwnConfig());
-    }
-    const cfgSaveBtn = document.getElementById('pwn-config-save-btn');
-    if (cfgSaveBtn) {
-        cfgSaveBtn.addEventListener('click', () => savePwnConfig());
-    }
 }
 
 async function refreshPwnagotchiStatus(options = {}) {
@@ -3868,16 +3778,6 @@ function updatePwnButtons() {
     if (swapCard) {
         swapCard.style.display = pwnStatus.installed ? '' : 'none';
     }
-    // Show config card only when installed
-    const configCard = document.getElementById('pwn-config-card');
-    if (configCard) {
-        const wasHidden = configCard.style.display === 'none';
-        configCard.style.display = pwnStatus.installed ? '' : 'none';
-        if (wasHidden && pwnStatus.installed && !configCard._loaded) {
-            configCard._loaded = true;
-            loadPwnConfig();
-        }
-    }
 
     const installBtn = document.getElementById('pwn-install-btn');
     if (installBtn) {
@@ -3961,115 +3861,6 @@ function updatePwnButtons() {
             hint = 'Switch scheduled. Wait for the service hand-off to complete.';
         }
         swapHint.textContent = hint;
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Pwnagotchi TOML Config — Load / Save
-// ---------------------------------------------------------------------------
-
-async function loadPwnConfig() {
-    const alert = document.getElementById('pwn-config-alert');
-    try {
-        const response = await fetchAPI('/api/pwnagotchi/config');
-        if (!response || !response.success) {
-            _showPwnConfigAlert(alert, response?.error || 'Failed to load config', 'error');
-            return;
-        }
-        const cfg = response.config;
-        _setPwnCfgValue('pwn-cfg-name', cfg['main.name']);
-        _setPwnCfgValue('pwn-cfg-whitelist', cfg['main.whitelist']);
-        _setPwnCfgChecked('pwn-cfg-deauth', cfg['personality.deauth']);
-        _setPwnCfgChecked('pwn-cfg-associate', cfg['personality.associate']);
-        _setPwnCfgChecked('pwn-cfg-advertise', cfg['personality.advertise']);
-        _setPwnCfgValue('pwn-cfg-min-rssi', String(cfg['personality.min_rssi']));
-        _setPwnCfgValue('pwn-cfg-channels', cfg['personality.channels']);
-        _setPwnCfgChecked('pwn-cfg-display-enabled', cfg['ui.display.enabled']);
-        _setPwnCfgChecked('pwn-cfg-invert', cfg['ui.invert']);
-        _setPwnCfgValue('pwn-cfg-rotation', String(cfg['ui.display.rotation']));
-        _setPwnCfgValue('pwn-cfg-display-type', cfg['ui.display.type']);
-        _setPwnCfgValue('pwn-cfg-web-user', cfg['ui.web.username']);
-        _setPwnCfgValue('pwn-cfg-web-pass', cfg['ui.web.password']);
-        _setPwnCfgValue('pwn-cfg-web-port', String(cfg['ui.web.port']));
-        _setPwnCfgChecked('pwn-cfg-auto-tune', cfg['main.plugins.auto-tune.enabled']);
-        _setPwnCfgChecked('pwn-cfg-webcfg', cfg['main.plugins.webcfg.enabled']);
-        _setPwnCfgChecked('pwn-cfg-memtemp', cfg['main.plugins.memtemp.enabled']);
-        _setPwnCfgChecked('pwn-cfg-grid', cfg['main.plugins.grid.enabled']);
-        _setPwnCfgChecked('pwn-cfg-fix-services', cfg['main.plugins.fix_services.enabled']);
-        _showPwnConfigAlert(alert, 'Configuration loaded', 'success');
-        setTimeout(() => { if (alert) alert.classList.add('hidden'); }, 2000);
-    } catch (error) {
-        console.error('Error loading Pwnagotchi config:', error);
-        _showPwnConfigAlert(alert, `Load failed: ${error.message}`, 'error');
-    }
-}
-
-async function savePwnConfig() {
-    const alert = document.getElementById('pwn-config-alert');
-    const saveBtn = document.getElementById('pwn-config-save-btn');
-    try {
-        if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving...'; }
-
-        const config = {
-            'main.name': document.getElementById('pwn-cfg-name')?.value || 'pwnagotchi',
-            'main.whitelist': document.getElementById('pwn-cfg-whitelist')?.value || '',
-            'personality.deauth': document.getElementById('pwn-cfg-deauth')?.checked || false,
-            'personality.associate': document.getElementById('pwn-cfg-associate')?.checked || false,
-            'personality.advertise': document.getElementById('pwn-cfg-advertise')?.checked || false,
-            'personality.min_rssi': parseInt(document.getElementById('pwn-cfg-min-rssi')?.value || '-200', 10),
-            'personality.channels': document.getElementById('pwn-cfg-channels')?.value || '',
-            'ui.display.enabled': document.getElementById('pwn-cfg-display-enabled')?.checked || false,
-            'ui.invert': document.getElementById('pwn-cfg-invert')?.checked || false,
-            'ui.display.rotation': parseInt(document.getElementById('pwn-cfg-rotation')?.value || '180', 10),
-            'ui.display.type': document.getElementById('pwn-cfg-display-type')?.value || 'waveshare_4',
-            'ui.web.username': document.getElementById('pwn-cfg-web-user')?.value || 'ragnar',
-            'ui.web.password': document.getElementById('pwn-cfg-web-pass')?.value || 'ragnar',
-            'ui.web.port': parseInt(document.getElementById('pwn-cfg-web-port')?.value || '8080', 10),
-            'main.plugins.auto-tune.enabled': document.getElementById('pwn-cfg-auto-tune')?.checked || false,
-            'main.plugins.webcfg.enabled': document.getElementById('pwn-cfg-webcfg')?.checked || false,
-            'main.plugins.memtemp.enabled': document.getElementById('pwn-cfg-memtemp')?.checked || false,
-            'main.plugins.grid.enabled': document.getElementById('pwn-cfg-grid')?.checked || false,
-            'main.plugins.fix_services.enabled': document.getElementById('pwn-cfg-fix-services')?.checked || false,
-        };
-
-        const response = await fetchAPI('/api/pwnagotchi/config', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ config })
-        });
-
-        if (response && response.success) {
-            _showPwnConfigAlert(alert, `Saved ${response.updated?.length || 0} setting(s). Changes apply on next Pwnagotchi start.`, 'success');
-            addConsoleMessage('Pwnagotchi config saved', 'info');
-        } else {
-            _showPwnConfigAlert(alert, response?.error || 'Save failed', 'error');
-        }
-    } catch (error) {
-        console.error('Error saving Pwnagotchi config:', error);
-        _showPwnConfigAlert(alert, `Save failed: ${error.message}`, 'error');
-    } finally {
-        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save Changes'; }
-    }
-}
-
-function _setPwnCfgValue(id, val) {
-    const el = document.getElementById(id);
-    if (el) el.value = val ?? '';
-}
-
-function _setPwnCfgChecked(id, val) {
-    const el = document.getElementById(id);
-    if (el) el.checked = Boolean(val);
-}
-
-function _showPwnConfigAlert(el, msg, type) {
-    if (!el) return;
-    el.classList.remove('hidden');
-    el.textContent = msg;
-    if (type === 'success') {
-        el.className = 'mb-4 p-3 rounded-lg text-sm bg-green-900/40 text-green-300 border border-green-700';
-    } else {
-        el.className = 'mb-4 p-3 rounded-lg text-sm bg-red-900/40 text-red-300 border border-red-700';
     }
 }
 
@@ -4740,6 +4531,155 @@ function togglePwnagotchiVisibility() {
     applyPwnVisibilityPreference(isEnabled);
 }
 
+// ── Live Activity Feed ────────────────────────────────────────────────────────
+
+const ACTIVITY_ICONS = {
+    wpasec:  { svg: `<svg class="w-4 h-4 text-cyan-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"></path></svg>` },
+    ipcam:   { svg: `<svg class="w-4 h-4 text-purple-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.069A1 1 0 0121 8.878v6.244a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"></path></svg>` },
+    creds:   { svg: `<svg class="w-4 h-4 text-yellow-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path></svg>` },
+    vuln:    { svg: `<svg class="w-4 h-4 text-red-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"></path></svg>` },
+    web:     { svg: `<svg class="w-4 h-4 text-green-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"></path></svg>` },
+    default: { svg: `<svg class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>` },
+};
+
+async function loadActivityFeed() {
+    const listEl = document.getElementById('activity-feed-list');
+    const countEl = document.getElementById('activity-feed-count');
+    if (!listEl) return;
+    try {
+        const data = await fetchAPI('/api/activity/feed?limit=20');
+        const events = (data && data.events) ? data.events : [];
+        if (countEl) countEl.textContent = events.length ? `${events.length} recent events` : '';
+        if (events.length === 0) {
+            listEl.innerHTML = '<p class="text-gray-500 text-sm text-center py-6">No activity yet — events will appear here as Ragnar works.</p>';
+            return;
+        }
+        const rows = events.map(e => {
+            const iconDef = ACTIVITY_ICONS[e.type] || ACTIVITY_ICONS.default;
+            const time = e.ts ? new Date(e.ts).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
+            const detail = e.detail ? `<p class="text-xs text-gray-500 mt-0.5">${escapeHtml(e.detail)}</p>` : '';
+            return `<div class="flex items-start gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-800/50 transition-colors">
+                ${iconDef.svg}
+                <div class="min-w-0 flex-1">
+                    <p class="text-sm text-white">${escapeHtml(e.message)}</p>
+                    ${detail}
+                </div>
+                <span class="text-xs text-gray-600 flex-shrink-0 ml-2">${time}</span>
+            </div>`;
+        }).join('');
+        listEl.innerHTML = rows;
+    } catch (err) {
+        // Silent fail — don't disrupt dashboard if feed errors
+    }
+}
+
+// ── IP Camera Scanner ─────────────────────────────────────────────────────────
+
+function toggleIpCamEnabled() {
+    const checkbox = document.getElementById('ipcam-enabled');
+    if (!checkbox) return;
+    postAPI('/api/config', { ipcam_enabled: checkbox.checked }).then(() => {
+        showNotification(
+            checkbox.checked ? 'IP Camera Scanner enabled' : 'IP Camera Scanner disabled',
+            checkbox.checked ? 'success' : 'info'
+        );
+    }).catch(() => showNotification('Failed to update IP Camera Scanner setting', 'error'));
+}
+
+function initializeIpCamToggle() {
+    fetchAPI('/api/config').then(data => {
+        if (!data) return;
+        const checkbox = document.getElementById('ipcam-enabled');
+        if (checkbox) checkbox.checked = data.ipcam_enabled !== false;
+    }).catch(() => {});
+}
+
+// ── Router Scanner ────────────────────────────────────────────────────────────
+
+function toggleRouterScannerEnabled() {
+    const checkbox = document.getElementById('router-scanner-enabled');
+    if (!checkbox) return;
+    postAPI('/api/config', { router_scanner_enabled: checkbox.checked }).then(() => {
+        showNotification(
+            checkbox.checked ? 'Router Admin Scanner enabled' : 'Router Admin Scanner disabled',
+            checkbox.checked ? 'success' : 'info'
+        );
+    }).catch(() => showNotification('Failed to update Router Admin Scanner setting', 'error'));
+}
+
+function initializeRouterScannerToggle() {
+    fetchAPI('/api/config').then(data => {
+        if (!data) return;
+        const checkbox = document.getElementById('router-scanner-enabled');
+        if (checkbox) checkbox.checked = data.router_scanner_enabled !== false;
+    }).catch(() => {});
+}
+
+// ── MQTT Scanner ──────────────────────────────────────────────────────────────
+
+function toggleMQTTScannerEnabled() {
+    const checkbox = document.getElementById('mqtt-scanner-enabled');
+    if (!checkbox) return;
+    postAPI('/api/config', { mqtt_scanner_enabled: checkbox.checked }).then(() => {
+        showNotification(
+            checkbox.checked ? 'MQTT Subscriber enabled' : 'MQTT Subscriber disabled',
+            checkbox.checked ? 'success' : 'info'
+        );
+    }).catch(() => showNotification('Failed to update MQTT Subscriber setting', 'error'));
+}
+
+function initializeMQTTScannerToggle() {
+    fetchAPI('/api/config').then(data => {
+        if (!data) return;
+        const checkbox = document.getElementById('mqtt-scanner-enabled');
+        if (checkbox) checkbox.checked = data.mqtt_scanner_enabled !== false;
+    }).catch(() => {});
+}
+
+// ── SNMP Scanner ──────────────────────────────────────────────────────────────
+
+function toggleSNMPScannerEnabled() {
+    const checkbox = document.getElementById('snmp-scanner-enabled');
+    if (!checkbox) return;
+    postAPI('/api/config', { snmp_scanner_enabled: checkbox.checked }).then(() => {
+        showNotification(
+            checkbox.checked ? 'SNMP Scanner enabled' : 'SNMP Scanner disabled',
+            checkbox.checked ? 'success' : 'info'
+        );
+    }).catch(() => showNotification('Failed to update SNMP Scanner setting', 'error'));
+}
+
+function initializeSNMPScannerToggle() {
+    fetchAPI('/api/config').then(data => {
+        if (!data) return;
+        const checkbox = document.getElementById('snmp-scanner-enabled');
+        if (checkbox) checkbox.checked = data.snmp_scanner_enabled !== false;
+    }).catch(() => {});
+}
+
+// ── Aggressive Mode ───────────────────────────────────────────────────────────
+
+function toggleAggressiveMode() {
+    const checkbox = document.getElementById('aggressive-mode-enabled');
+    if (!checkbox) return;
+    const enabled = checkbox.checked;
+    postAPI('/api/config', { aggressive_mode_enabled: enabled }).then(() => {
+        if (enabled) {
+            showNotification('Aggressive Mode ON — fast scan preset applied', 'warning');
+        } else {
+            showNotification('Aggressive Mode OFF — conservative defaults restored', 'info');
+        }
+    }).catch(() => showNotification('Failed to update Aggressive Mode setting', 'error'));
+}
+
+function initializeAggressiveMode() {
+    fetchAPI('/api/config').then(data => {
+        if (!data) return;
+        const checkbox = document.getElementById('aggressive-mode-enabled');
+        if (checkbox) checkbox.checked = Boolean(data.aggressive_mode_enabled);
+    }).catch(() => {});
+}
+
 // ── wpa-sec integration ───────────────────────────────────────────────────────
 
 function toggleWpaSecVisibility() {
@@ -4858,15 +4798,18 @@ async function loadWpaSecImported() {
         const rows = entries.map(e => {
             const date = e.imported_at ? new Date(e.imported_at).toLocaleDateString() : '—';
             const ssid = escapeHtml(e.ssid || 'Unknown');
-            const bssid = escapeHtml(e.bssid || '—');
+            const apCount = e.ap_count || 1;
+            const apBadge = apCount > 1
+                ? `<span class="text-xs text-slate-400 flex-shrink-0 ml-1">${apCount} APs</span>`
+                : '';
             return `<div class="flex items-center justify-between px-4 py-2.5 border-b border-slate-800/60 hover:bg-slate-800/40 transition-colors">
                 <div class="flex items-center gap-3 min-w-0">
                     <svg class="w-4 h-4 text-cyan-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"></path>
                     </svg>
-                    <div class="min-w-0">
+                    <div class="min-w-0 flex items-center gap-2">
                         <p class="text-sm font-medium text-white truncate">${ssid}</p>
-                        <p class="text-xs text-gray-500 font-mono">${bssid}</p>
+                        ${apBadge}
                     </div>
                 </div>
                 <span class="text-xs text-gray-500 flex-shrink-0 ml-2">${date}</span>
@@ -4888,6 +4831,50 @@ function initializePwnagotchiVisibility() {
     const isEnabled = arePwnFeaturesEnabled();
     checkbox.checked = isEnabled;
     applyPwnVisibilityPreference(isEnabled);
+}
+
+// ── IP Camera Scanner ─────────────────────────────────────────────────────────
+
+function toggleIpCamEnabled() {
+    const checkbox = document.getElementById('ipcam-enabled');
+    if (!checkbox) return;
+    postAPI('/api/config', { ipcam_enabled: checkbox.checked }).then(() => {
+        showNotification(
+            checkbox.checked ? 'IP Camera Scanner enabled' : 'IP Camera Scanner disabled',
+            checkbox.checked ? 'success' : 'info'
+        );
+    }).catch(() => showNotification('Failed to update IP Camera Scanner setting', 'error'));
+}
+
+function initializeIpCamToggle() {
+    fetchAPI('/api/config').then(data => {
+        if (!data) return;
+        const checkbox = document.getElementById('ipcam-enabled');
+        if (checkbox) checkbox.checked = data.ipcam_enabled !== false;
+    }).catch(() => {});
+}
+
+// ── Aggressive Mode ───────────────────────────────────────────────────────────
+
+function toggleAggressiveMode() {
+    const checkbox = document.getElementById('aggressive-mode-enabled');
+    if (!checkbox) return;
+    const enabled = checkbox.checked;
+    postAPI('/api/config', { aggressive_mode_enabled: enabled }).then(() => {
+        if (enabled) {
+            showNotification('Aggressive Mode ON — fast scan preset applied', 'warning');
+        } else {
+            showNotification('Aggressive Mode OFF — conservative defaults restored', 'info');
+        }
+    }).catch(() => showNotification('Failed to update Aggressive Mode setting', 'error'));
+}
+
+function initializeAggressiveMode() {
+    fetchAPI('/api/config').then(data => {
+        if (!data) return;
+        const checkbox = document.getElementById('aggressive-mode-enabled');
+        if (checkbox) checkbox.checked = Boolean(data.aggressive_mode_enabled);
+    }).catch(() => {});
 }
 
 function updatePwnToggleAvailability(isHeadless) {
