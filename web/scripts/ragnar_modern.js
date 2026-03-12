@@ -456,6 +456,18 @@ const configMetadata = {
     openai_api_token: {
         label: "OpenAI API Token",
         description: "Your OpenAI API key for AI-powered features. Keep this confidential."
+    },
+    wigle_api_name: {
+        label: "WiGLE API Name",
+        description: "WiGLE API name (starts with AID...) for SSID geo-location lookup"
+    },
+    wigle_api_token: {
+        label: "WiGLE API Token",
+        description: "WiGLE API token for SSID geo-location lookup"
+    },
+    wigle_lookup_enabled: {
+        label: "WiGLE Lookup Enabled",
+        description: "Automatically look up SSID locations via WiGLE API"
     }
 };
 
