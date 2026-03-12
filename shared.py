@@ -618,6 +618,11 @@ class SharedData:
             "network_intelligence_enabled": True,
             "network_auto_resolution": True,
 
+            "__title_wigle__": "WiGLE SSID Geo-Location",
+            "wigle_api_name": "",
+            "wigle_api_token": "",
+            "wigle_lookup_enabled": False,
+
             "__title_ai__": "AI Integration (GPT-5 Nano)",
             "ai_enabled": False,
             "openai_api_token": "",
