@@ -8243,13 +8243,21 @@ def set_wifi_location():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+_wigle_job = {'status': 'idle', 'located': 0, 'skipped': 0, 'errors': 0, 'total': 0}
+
+
 @app.route('/api/wifi/locations/wigle', methods=['POST'])
 def wigle_lookup_all():
     """
-    Bulk WiGLE lookup: for every BSSID in the wpa-sec imported cache that
-    does not yet have a location in wifi_scan_cache, query WiGLE and store.
-    Returns {located: int, skipped: int, errors: int}.
+    Bulk WiGLE lookup: starts a background thread that queries WiGLE for every
+    BSSID in the wpa-sec imported cache without a stored location.
+    Returns immediately with {status: 'started'|'running'|...} so the UI
+    doesn't time out. Poll GET /api/wifi/locations/wigle for progress.
     """
+    global _wigle_job
+    if _wigle_job['status'] == 'running':
+        return jsonify({'status': 'running', **_wigle_job})
+
     try:
         wpa_sec = getattr(getattr(shared_data, 'ragnar_instance', None), 'wpa_sec', None)
         if not wpa_sec:
@@ -8257,45 +8265,60 @@ def wigle_lookup_all():
 
         cache_path = os.path.join(shared_data.datadir, 'wpa_sec_imported.json')
         if not os.path.exists(cache_path):
-            return jsonify({'located': 0, 'skipped': 0, 'errors': 0, 'message': 'No wpa-sec cache found'})
+            return jsonify({'status': 'done', 'located': 0, 'skipped': 0, 'errors': 0, 'message': 'No wpa-sec cache found'})
 
         with open(cache_path, 'r', encoding='utf-8') as fh:
             cache = json.load(fh)
 
         imported = cache.get('imported', [])
         if not imported:
-            return jsonify({'located': 0, 'skipped': 0, 'errors': 0, 'message': 'No imported networks'})
+            return jsonify({'status': 'done', 'located': 0, 'skipped': 0, 'errors': 0, 'message': 'No imported networks'})
 
-        db = get_db(currentdir=shared_data.currentdir)
-        existing = {loc['ssid'] for loc in db.get_wifi_locations()}
+        _wigle_job = {'status': 'running', 'located': 0, 'skipped': 0, 'errors': 0, 'total': len(imported)}
 
-        located = skipped = errors = 0
-        for entry in imported:
-            ssid = entry.get('ssid', '').strip()
-            bssid = entry.get('bssid', '').strip()
-            if not ssid or not bssid:
-                continue
-            if ssid in existing:
-                skipped += 1
-                continue
-            try:
-                loc = wpa_sec._lookup_wigle_location(bssid)
-                if loc:
-                    db.set_wifi_location(ssid, loc['lat'], loc['lon'], loc['location_name'])
-                    existing.add(ssid)
-                    located += 1
-                else:
+        def _run():
+            global _wigle_job
+            import time as _t
+            db = get_db(currentdir=shared_data.currentdir)
+            existing = {loc['ssid'] for loc in db.get_wifi_locations()}
+            located = skipped = errors = 0
+            for entry in imported:
+                ssid = entry.get('ssid', '').strip()
+                bssid = entry.get('bssid', '').strip()
+                if not ssid or not bssid:
+                    continue
+                if ssid in existing:
                     skipped += 1
-                import time as _t
-                _t.sleep(1)
-            except Exception as exc:
-                logger.debug(f"WiGLE bulk lookup error for {bssid}: {exc}")
-                errors += 1
+                    _wigle_job['skipped'] = skipped
+                    continue
+                try:
+                    loc = wpa_sec._lookup_wigle_location(bssid)
+                    if loc:
+                        db.set_wifi_location(ssid, loc['lat'], loc['lon'], loc['location_name'])
+                        existing.add(ssid)
+                        located += 1
+                    else:
+                        skipped += 1
+                    _wigle_job['located'] = located
+                    _wigle_job['skipped'] = skipped
+                    _t.sleep(1)
+                except Exception as exc:
+                    errors += 1
+                    _wigle_job['errors'] = errors
+            _wigle_job['status'] = 'done'
 
-        return jsonify({'located': located, 'skipped': skipped, 'errors': errors})
+        import threading as _th
+        _th.Thread(target=_run, daemon=True, name='WiGLEBulkLookup').start()
+        return jsonify({'status': 'started', **_wigle_job})
     except Exception as e:
         logger.error(f"WiGLE bulk lookup error: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/wifi/locations/wigle', methods=['GET'])
+def wigle_lookup_status():
+    """Poll the status of the running WiGLE bulk lookup job."""
+    return jsonify(_wigle_job)
 
 
 @app.route('/api/wifi/networks')
