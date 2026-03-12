@@ -20,6 +20,24 @@ Ragnar is a fork of the awesome [Bjorn](https://github.com/infinition/Bjorn) pro
 
 ---
 
+## ✨ Features in this fork
+
+This fork ([dbzx6r/Ragnar](https://github.com/dbzx6r/Ragnar)) adds the following on top of upstream:
+
+| Feature | Description |
+|---|---|
+| **wpa-sec Integration** | Automatically imports cracked WPA passwords from [wpa-sec.stanev.org](https://wpa-sec.stanev.org) into Ragnar's known networks — Ragnar connects automatically when those SSIDs are in range. Configure your API key in Settings. |
+| **SSID Location Map** | Geographic map (Leaflet.js + OpenStreetMap) on the Map tab showing where each known SSID was found. Supports manual GPS tagging from the browser. |
+| **WiGLE Geo-location** | Bulk BSSID → GPS lookup via the [WiGLE](https://wigle.net) API. Runs in the background without blocking the UI. Configure your WiGLE API key in Settings. |
+| **IP Camera Scanner** | Discovers IP cameras on port 554 (RTSP), fingerprints brand/model (Hikvision, Dahua, Axis, Foscam, Reolink, etc.), tests default credentials, and saves snapshots to Data Stolen. |
+| **Router Admin Scanner** | Tests the default gateway with brand-specific default credentials (Netgear, TP-Link, Asus, Cisco, etc.) and saves an admin page dump. |
+| **MQTT Subscriber** | Connects to open MQTT brokers (port 1883) and passively collects IoT messages — smart home states, sensor readings, device commands. |
+| **SNMP Scanner** | Tries public/private community strings on port 161; extracts device names, interfaces, and ARP tables revealing other devices on the LAN. |
+| **Aggressive Mode** | Performance preset: 60s scan interval, shorter retry delays, immediate network entry on discovery. Toggle in Settings. |
+| **SSD1306 OLED Display** | Support for 0.96" 128×64 I²C OLED displays in addition to the upstream 2.13" e-Paper HAT. |
+
+---
+
 ## Quick Install
 
 ```bash
@@ -78,14 +96,6 @@ The portal supports network scanning with signal strength, manual entry for hidd
 </p>
 
 <img width="1092" height="902" alt="image" src="https://github.com/user-attachments/assets/cafed68d-de62-4041-aa36-c1fcccacc9ea" />
-
----
-
-## ✨ Features in this fork
-
-This fork ([dbzx6r/Ragnar](https://github.com/dbzx6r/Ragnar)) adds the following on top of upstream:
-
-- **IP Camera Scanner** — Scans the local network for IP cameras on port 554 (RTSP), fingerprints brand/model, tests default credentials, and captures snapshots. Includes aggressive mode and detection for routers, MQTT brokers, and SNMP devices.
 
 ---
 
