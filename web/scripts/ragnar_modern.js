@@ -317,6 +317,14 @@ const configMetadata = {
         label: "Display Brightness",
         description: "Brightness level for non-e-ink displays (SSD1306, GC9A01, MAX7219). Range 0–15. Default: 8."
     },
+    max7219_spi_port: {
+        label: "MAX7219 SPI Port",
+        description: "SPI bus port for MAX7219 LED matrix (default: 0)"
+    },
+    max7219_spi_device: {
+        label: "MAX7219 SPI Device",
+        description: "SPI chip-enable pin for MAX7219 (0 = CE0, 1 = CE1, default: 0)"
+    },
     portlist: {
         label: "Additional Ports",
         description: "Comma separated list of extra ports to check on every host in addition to the sequential range."
