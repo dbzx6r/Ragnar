@@ -33,7 +33,7 @@ except ImportError:
 class EPD:
     """MAX7219 cascaded LED matrix — EPD-compatible interface."""
 
-    def __init__(self, cascaded=8, spi_port=0, spi_device=0, brightness=8, block_orientation=0):
+    def __init__(self, cascaded=8, spi_port=0, spi_device=0, brightness=8, block_orientation=-90):
         self.cascaded = cascaded
         self.spi_port = spi_port
         self.spi_device = spi_device
