@@ -1712,7 +1712,7 @@ class Display:
         epd.init()
 
         # ── Font ──────────────────────────────────────────────────────────
-        _font_path = os.path.join(os.path.dirname(__file__), "resources", "fonts", "Arial.ttf")
+        _font_path = os.path.join(os.path.dirname(__file__), "resources", "fonts", "DejaVuSansMono.ttf")
 
         def _load_font(size):
             try:
@@ -1720,7 +1720,8 @@ class Display:
             except Exception:
                 return _ImageFont.load_default()
 
-        font = _load_font(8)
+        font  = _load_font(9)
+        _y_off = -font.getbbox("A")[1]  # shift glyphs up so row 0 is used
 
         # ── Helpers ───────────────────────────────────────────────────────
         def _text_width(text):
@@ -1835,7 +1836,7 @@ class Display:
             # Build frame
             img  = _Image.new("1", (W, H), 0)
             draw = _ImageDraw.Draw(img)
-            draw.text((_scroll_x, 0), _current_msg, font=font, fill=1)
+            draw.text((_scroll_x, _y_off), _current_msg, font=font, fill=1)
 
             epd.display(epd.getbuffer(img))
 
