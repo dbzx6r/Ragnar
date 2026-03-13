@@ -58,7 +58,10 @@ class Display:
 
         try:
             self.epd_helper = self.shared_data.epd_helper
-            self.epd_helper.init_partial_update()
+            # MAX7219 and other non-EPD displays set epd_helper to None;
+            # skip EPD-specific init — their _run_* method handles setup.
+            if self.epd_helper is not None:
+                self.epd_helper.init_partial_update()
             logger.info("Display initialization complete.")
         except Exception as e:
             logger.error(f"Error during display initialization: {e}")
