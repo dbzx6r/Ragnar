@@ -1681,6 +1681,142 @@ class Display:
         except Exception as exc:
             logger.error("SSD1306 shutdown error: %s", exc)
 
+    def _run_max7219(self):
+        """Scrolling status display for MAX7219 cascaded LED matrix panels."""
+        from PIL import Image as _Image, ImageDraw as _ImageDraw, ImageFont as _ImageFont
+        from resources.waveshare_epd import max7219 as _max7219_mod
+        import os
+
+        epd_type   = self.config.get("epd_type", "max7219_8panel")
+        cascaded   = 4 if epd_type == "max7219_4panel" else 8
+        brightness = int(self.config.get("display_brightness", 8))
+        spi_port   = int(self.config.get("max7219_spi_port", 0))
+        spi_device = int(self.config.get("max7219_spi_device", 0))
+
+        W = cascaded * 8  # 32 or 64
+        H = 8
+        TICK_SLEEP = 0.1   # seconds per scroll tick
+        PNG_EVERY  = 50    # save screen.png every N ticks (~5s)
+
+        epd = _max7219_mod.EPD(
+            cascaded=cascaded,
+            spi_port=spi_port,
+            spi_device=spi_device,
+            brightness=brightness,
+        )
+        epd.init()
+
+        # ── Font ──────────────────────────────────────────────────────────
+        _font_path = os.path.join(os.path.dirname(__file__), "resources", "fonts", "Arial.ttf")
+
+        def _load_font(size):
+            try:
+                return _ImageFont.truetype(_font_path, size)
+            except Exception:
+                return _ImageFont.load_default()
+
+        font = _load_font(8)
+
+        # ── Helpers ───────────────────────────────────────────────────────
+        def _text_width(text):
+            try:
+                return font.getbbox(text)[2]
+            except Exception:
+                return len(text) * 6
+
+        def _get_wifi():
+            try:
+                import subprocess
+                ssid = subprocess.check_output(
+                    ["iwgetid", "-r"], stderr=subprocess.DEVNULL
+                ).decode().strip()
+                return ssid or "NO WIFI"
+            except Exception:
+                return "NO WIFI"
+
+        def _get_ip():
+            try:
+                import socket
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.connect(("8.8.8.8", 80))
+                ip = s.getsockname()[0]
+                s.close()
+                return ip
+            except Exception:
+                return "NO IP"
+
+        def _get_counters():
+            try:
+                targets = getattr(self.shared_data, 'nb_targets', 0) or 0
+                creds   = getattr(self.shared_data, 'nb_credentials', 0) or 0
+                return f"T:{targets} C:{creds}"
+            except Exception:
+                return "T:0 C:0"
+
+        def _get_status():
+            try:
+                status = getattr(self.shared_data, 'current_action', '') or ''
+                return status[:20] if status else "IDLE"
+            except Exception:
+                return "IDLE"
+
+        # ── Scroll loop ───────────────────────────────────────────────────
+        _tick       = 0
+        _scroll_x   = W          # start off-screen right
+        _msg_idx    = 0
+        _messages   = []
+        _msg_refresh_every = 200  # refresh message list every 200 ticks (~20s)
+
+        def _build_messages():
+            return [
+                "* RAGNAR *",
+                _get_wifi(),
+                _get_ip(),
+                _get_counters(),
+                _get_status(),
+            ]
+
+        _messages = _build_messages()
+        _current_msg = _messages[0]
+        _msg_w = _text_width(_current_msg)
+
+        while not self.shared_data.display_should_exit:
+            # Refresh messages periodically
+            if _tick % _msg_refresh_every == 0:
+                _messages = _build_messages()
+
+            # Build frame
+            img  = _Image.new("1", (W, H), 0)
+            draw = _ImageDraw.Draw(img)
+            draw.text((_scroll_x, 0), _current_msg, font=font, fill=1)
+
+            epd.display(epd.getbuffer(img))
+
+            # Save web thumbnail
+            if _tick % PNG_EVERY == 0:
+                try:
+                    png_path = os.path.join(os.path.dirname(__file__), "web", "screen.png")
+                    # Scale up 4× so it's visible in browser
+                    img.resize((W * 4, H * 4), _Image.NEAREST).convert("RGB").save(png_path)
+                except Exception:
+                    pass
+
+            # Advance scroll
+            _scroll_x -= 1
+            if _scroll_x < -_msg_w:
+                # Message fully scrolled off — advance to next
+                _msg_idx = (_msg_idx + 1) % len(_messages)
+                _current_msg = _messages[_msg_idx]
+                _msg_w = _text_width(_current_msg)
+                _scroll_x = W  # reset to right edge
+
+            _tick += 1
+            import time as _time
+            _time.sleep(TICK_SLEEP)
+
+        epd.Clear()
+        epd.sleep()
+
     def run(self):
         """Main loop for updating the EPD display with shared data."""
         if self.config.get("epd_type") == "gc9a01":
@@ -1689,6 +1825,10 @@ class Display:
 
         if self.config.get("epd_type") == "ssd1306":
             self._run_ssd1306()
+            return
+
+        if self.config.get("epd_type") in ("max7219_4panel", "max7219_8panel"):
+            self._run_max7219()
             return
 
         # Wait for deferred initialization (fonts, images) to finish

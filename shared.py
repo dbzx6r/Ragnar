@@ -99,6 +99,8 @@ DISPLAY_PROFILES = {
     "gc9a01":      {"ref_width": DESIGN_REF_WIDTH, "ref_height": DESIGN_REF_WIDTH, "default_flip": False},
     # SSD1306 0.96" 128x64 monochrome OLED
     "ssd1306":     {"ref_width": 128, "ref_height": 64, "default_flip": False},
+    "max7219_4panel": {"ref_width": 32,  "ref_height": 8, "default_flip": False},
+    "max7219_8panel": {"ref_width": 64,  "ref_height": 8, "default_flip": False},
 }
 
 
@@ -551,6 +553,8 @@ class SharedData:
             "gc9a01_mascot_color": "#96C8FF",
             "ssd1306_i2c_address": "0x3C",
             "display_brightness": 8,
+            "max7219_spi_port":   0,
+            "max7219_spi_device": 0,
             
             
             "__title_lists__": "List Settings",
