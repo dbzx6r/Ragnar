@@ -33,7 +33,7 @@ except ImportError:
 class EPD:
     """MAX7219 cascaded LED matrix — EPD-compatible interface."""
 
-    def __init__(self, cascaded=8, spi_port=0, spi_device=0, brightness=8, block_orientation=-90):
+    def __init__(self, cascaded=8, spi_port=0, spi_device=0, brightness=8, block_orientation=0):
         self.cascaded = cascaded
         self.spi_port = spi_port
         self.spi_device = spi_device
@@ -60,6 +60,8 @@ class EPD:
         )
         # luma contrast is 0–255; map from 0–15
         self._device.contrast(self._brightness * 17)
+        # Force-clear the display — MAX7219 powers on with all pixels lit
+        self._device.clear()
         logger.info(f"MAX7219 initialised ({self.width}×{self.height}) cascaded={self.cascaded} brightness={self._brightness}")
 
     def Clear(self):

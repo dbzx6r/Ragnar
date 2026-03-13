@@ -553,8 +553,9 @@ class SharedData:
             "gc9a01_mascot_color": "#96C8FF",
             "ssd1306_i2c_address": "0x3C",
             "display_brightness": 8,
-            "max7219_spi_port":   0,
-            "max7219_spi_device": 0,
+            "max7219_spi_port":         0,
+            "max7219_spi_device":        0,
+            "max7219_block_orientation": 0,
             
             
             "__title_lists__": "List Settings",
