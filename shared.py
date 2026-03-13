@@ -550,6 +550,7 @@ class SharedData:
             "screen_reversed": default_profile.get("default_flip", False),
             "gc9a01_mascot_color": "#96C8FF",
             "ssd1306_i2c_address": "0x3C",
+            "display_brightness": 8,
             
             
             "__title_lists__": "List Settings",

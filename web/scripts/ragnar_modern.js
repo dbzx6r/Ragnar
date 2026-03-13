@@ -313,6 +313,10 @@ const configMetadata = {
         label: "GC9A01 Mascot Tint Color",
         description: "Tint color applied to the animated mascot on the GC9A01 1.28\" round TFT display. Only visible when GC9A01 is selected."
     },
+    display_brightness: {
+        label: "Display Brightness",
+        description: "Brightness level for non-e-ink displays (SSD1306, GC9A01, MAX7219). Range 0–15. Default: 8."
+    },
     portlist: {
         label: "Additional Ports",
         description: "Comma separated list of extra ports to check on every host in addition to the sequential range."

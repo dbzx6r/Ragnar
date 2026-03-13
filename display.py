@@ -1545,6 +1545,8 @@ class Display:
         i2c_addr = int(_i2c_raw, 16) if isinstance(_i2c_raw, str) else int(_i2c_raw)
         epd = _ssd1306_mod.EPD(i2c_address=i2c_addr)
         epd.init()
+        brightness = int(self.config.get("display_brightness", 8))
+        epd.contrast(min(255, brightness * 17))  # map 0-15 → 0-255
 
         # ── Load fonts once ─────────────────────────────────────────────
         _font_path = os.path.join(
