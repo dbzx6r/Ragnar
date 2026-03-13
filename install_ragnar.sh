@@ -817,7 +817,7 @@ print('SUCCESS: Set shared_config.json epd_type to $EPD_VERSION')
     fi
 
     if [[ "$EPD_VERSION" == max7219* ]]; then
-        pip3 install luma.led_matrix luma.core 2>/dev/null || true
+        sudo pip3 install --break-system-packages luma.led_matrix luma.core 2>/dev/null || pip3 install --break-system-packages luma.led_matrix luma.core 2>/dev/null || true
     fi
 
     check_success "Installed Python requirements"
