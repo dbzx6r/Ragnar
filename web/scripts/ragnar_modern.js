@@ -325,6 +325,10 @@ const configMetadata = {
         label: "MAX7219 SPI Device",
         description: "SPI chip-enable pin for MAX7219 (0 = CE0, 1 = CE1, default: 0)"
     },
+    max7219_block_orientation: {
+        label: "MAX7219 Block Orientation",
+        description: "Rotation of each 8×8 block (degrees). Try 0, 90, -90, or 180 if display looks wrong. Default: 0"
+    },
     portlist: {
         label: "Additional Ports",
         description: "Comma separated list of extra ports to check on every host in addition to the sequential range."

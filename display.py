@@ -1690,11 +1690,12 @@ class Display:
         from resources.waveshare_epd import max7219 as _max7219_mod
         import os
 
-        epd_type   = self.config.get("epd_type", "max7219_8panel")
-        cascaded   = 4 if epd_type == "max7219_4panel" else 8
-        brightness = int(self.config.get("display_brightness", 8))
-        spi_port   = int(self.config.get("max7219_spi_port", 0))
-        spi_device = int(self.config.get("max7219_spi_device", 0))
+        epd_type        = self.config.get("epd_type", "max7219_8panel")
+        cascaded        = 4 if epd_type == "max7219_4panel" else 8
+        brightness      = int(self.config.get("display_brightness", 8))
+        spi_port        = int(self.config.get("max7219_spi_port", 0))
+        spi_device      = int(self.config.get("max7219_spi_device", 0))
+        block_orient    = int(self.config.get("max7219_block_orientation", 0))
 
         W = cascaded * 8  # 32 or 64
         H = 8
@@ -1706,6 +1707,7 @@ class Display:
             spi_port=spi_port,
             spi_device=spi_device,
             brightness=brightness,
+            block_orientation=block_orient,
         )
         epd.init()
 
