@@ -34,7 +34,6 @@ This fork ([dbzx6r/Ragnar](https://github.com/dbzx6r/Ragnar)) adds the following
 | **MQTT Subscriber** | Connects to open MQTT brokers (port 1883) and passively collects IoT messages — smart home states, sensor readings, device commands. |
 | **SNMP Scanner** | Tries public/private community strings on port 161; extracts device names, interfaces, and ARP tables revealing other devices on the LAN. |
 | **Aggressive Mode** | Performance preset: 60s scan interval, shorter retry delays, immediate network entry on discovery. Toggle in Settings. |
-| **SSD1306 OLED Display** | Support for 0.96" 128×64 I²C OLED displays in addition to the upstream 2.13" e-Paper HAT. |
 
 ---
 
