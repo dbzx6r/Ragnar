@@ -1527,40 +1527,40 @@ class Display:
     # ------------------------------------------------------------------
 
     def _run_lcd1602(self):
-        """LCD1602 16×2 display loop — rotates between two info pages.
+        """LCD1602 16×2 display loop with two independent rotation timers.
 
-        Page 0 — Status + Network (PAGE_INTERVAL seconds):
-          Line 0: orchestrator status        e.g. "SCANNING        "
-          Line 1: WiFi SSID (iwgetid)        e.g. ">Tango Down     "
+        Top row (15 s each):
+          Slot 0 — WiFi SSID          e.g. "Tango Down 5G  "
+          Slot 1 — IP address         e.g. "192.168.1.100  "
 
-        Page 1 — Counts + IP (PAGE_INTERVAL seconds):
-          Line 0: targets / vulns / creds    e.g. "T:42 V:5 C:3    "
-          Line 1: IP address                 e.g. "192.168.1.100   "
+        Bottom row (5 s each, 3 slots):
+          Slot 0 — "Targets: 42     "
+          Slot 1 — "Vulnerabilities:4"  (truncated to 16 chars)
+          Slot 2 — "Credentials: 0  "
 
-        Pages switch every PAGE_INTERVAL seconds; display polls every TICK_SLEEP.
         Handles I2C errors gracefully — forces full re-init on next tick.
         """
         import subprocess
         from resources.waveshare_epd import lcd1602 as _lcd1602_mod
 
-        PAGE_INTERVAL = 4.0   # seconds per page
-        TICK_SLEEP    = 0.5   # polling interval (seconds)
+        TOP_INTERVAL    = 15.0  # seconds per top-row slot
+        BOTTOM_INTERVAL = 5.0   # seconds per bottom-row slot
+        BOTTOM_SLOTS    = 3
+        TICK_SLEEP      = 0.5   # polling interval (seconds)
 
-        def _get_wifi():
-            """Return (ssid, ip) using iwgetid for the live WiFi SSID."""
+        def _get_ssid():
             try:
                 res = subprocess.run(
                     ["iwgetid", "-r"], capture_output=True, text=True, timeout=2
                 )
                 ssid = res.stdout.strip()
                 if ssid:
-                    ip = getattr(self.shared_data, "ipaddress", "") or ""
-                    return ssid, ip
+                    return ssid
             except Exception:
                 pass
             if getattr(self.shared_data, "ap_enabled", False):
-                return "AP MODE", getattr(self.shared_data, "ipaddress", "") or ""
-            return "", getattr(self.shared_data, "ipaddress", "") or ""
+                return "AP MODE"
+            return "No Network"
 
         # ── Initialise display ──────────────────────────────────────────
         _i2c_raw = self.config.get("lcd1602_i2c_address", "0x27")
@@ -1572,13 +1572,13 @@ class Display:
             epd.init()
         except Exception as exc:
             logger.error(f"LCD1602 init failed: {exc}")
-            # Loop will retry on each tick once hardware is available
 
-        _last_line0  = None
-        _last_line1  = None
-        _last_page   = -1          # force write on first tick
-        _page_start  = time.monotonic()
-        _current_page = 0
+        _last_line0    = None
+        _last_line1    = None
+        _top_slot      = 0
+        _bottom_slot   = 0
+        _top_start     = time.monotonic() - TOP_INTERVAL     # trigger write on first tick
+        _bottom_start  = time.monotonic() - BOTTOM_INTERVAL  # trigger write on first tick
 
         # ── Main loop ───────────────────────────────────────────────────
         while not self.shared_data.display_should_exit:
@@ -1586,46 +1586,52 @@ class Display:
                 sd  = self.shared_data
                 now = time.monotonic()
 
-                # — page timing —
-                if now - _page_start >= PAGE_INTERVAL:
-                    _current_page = 1 - _current_page
-                    _page_start   = now
+                # — advance top slot —
+                if now - _top_start >= TOP_INTERVAL:
+                    _top_slot  = (_top_slot + 1) % 2
+                    _top_start = now
+
+                # — advance bottom slot —
+                if now - _bottom_start >= BOTTOM_INTERVAL:
+                    _bottom_slot  = (_bottom_slot + 1) % BOTTOM_SLOTS
+                    _bottom_start = now
 
                 # — gather data —
-                status  = (getattr(sd, "ragnarorch_status", "IDLE") or "IDLE").upper()
                 targets = getattr(sd, "total_targetnbr", 0) or 0
                 vulns   = getattr(sd, "vulnnbr",          0) or 0
                 creds   = getattr(sd, "crednbr",          0) or 0
-                ssid, ip = _get_wifi()
 
-                # — build 16-char lines for the current page —
-                if _current_page == 0:
-                    line0 = status.ljust(16)[:16]
-                    net   = (">" + ssid) if ssid else "No Network"
-                    line1 = net.ljust(16)[:16]
+                # — build top line —
+                if _top_slot == 0:
+                    line0 = _get_ssid()
                 else:
-                    counts = "T:{} V:{} C:{}".format(targets, vulns, creds)
-                    line0  = counts.ljust(16)[:16]
-                    line1  = (ip or "No IP").ljust(16)[:16]
+                    line0 = getattr(sd, "ipaddress", "") or "No IP"
+                line0 = line0.ljust(16)[:16]
+
+                # — build bottom line —
+                if _bottom_slot == 0:
+                    line1 = f"Targets: {targets}"
+                elif _bottom_slot == 1:
+                    line1 = f"Vulnerabilities:{vulns}"
+                else:
+                    line1 = f"Credentials: {creds}"
+                line1 = line1.ljust(16)[:16]
 
                 # — reinit hardware if previously failed or errored —
                 if not epd._initialized:
                     epd.init()
 
-                # — write only changed lines; on page switch always refresh both —
-                page_switched = (_current_page != _last_page)
-                if page_switched or line0 != _last_line0:
+                # — write only changed lines —
+                if line0 != _last_line0:
                     epd.write_line(0, line0)
                     _last_line0 = line0
-                if page_switched or line1 != _last_line1:
+                if line1 != _last_line1:
                     epd.write_line(1, line1)
                     _last_line1 = line1
-                if page_switched:
-                    _last_page = _current_page
 
             except Exception as exc:
                 logger.error(f"LCD1602 render error: {exc}")
-                epd._initialized = False   # force full re-init on next tick
+                epd._initialized = False
                 _last_line0 = None
                 _last_line1 = None
 
