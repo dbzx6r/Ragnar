@@ -1532,10 +1532,11 @@ class Display:
         Top row (15 s each):
           Slot 0 — WiFi SSID          e.g. "Tango Down 5G  "
           Slot 1 — IP address         e.g. "192.168.1.100  "
+          Slot 2 — Ragnar status      e.g. "NetworkScanner "
 
         Bottom row (5 s each, 3 slots):
           Slot 0 — "Targets: 42     "
-          Slot 1 — "Vulnerabilities:4"  (truncated to 16 chars)
+          Slot 1 — "Vuln: 4         "
           Slot 2 — "Credentials: 0  "
 
         Handles I2C errors gracefully — forces full re-init on next tick.
@@ -1544,6 +1545,7 @@ class Display:
         from resources.waveshare_epd import lcd1602 as _lcd1602_mod
 
         TOP_INTERVAL    = 15.0  # seconds per top-row slot
+        TOP_SLOTS       = 3
         BOTTOM_INTERVAL = 5.0   # seconds per bottom-row slot
         BOTTOM_SLOTS    = 3
         TICK_SLEEP      = 0.5   # polling interval (seconds)
@@ -1574,6 +1576,10 @@ class Display:
                 pass
             return "No IP"
 
+        def _get_status():
+            status = getattr(self.shared_data, "ragnarstatustext", None) or "IDLE"
+            return str(status)
+
         # ── Initialise display ──────────────────────────────────────────
         _i2c_raw = self.config.get("lcd1602_i2c_address", "0x27")
         i2c_addr = int(_i2c_raw, 16) if isinstance(_i2c_raw, str) else int(_i2c_raw)
@@ -1600,7 +1606,7 @@ class Display:
 
                 # — advance top slot —
                 if now - _top_start >= TOP_INTERVAL:
-                    _top_slot  = (_top_slot + 1) % 2
+                    _top_slot  = (_top_slot + 1) % TOP_SLOTS
                     _top_start = now
 
                 # — advance bottom slot —
@@ -1616,8 +1622,10 @@ class Display:
                 # — build top line —
                 if _top_slot == 0:
                     line0 = _get_ssid()
-                else:
+                elif _top_slot == 1:
                     line0 = _get_ip()
+                else:
+                    line0 = _get_status()
                 line0 = line0.ljust(16)[:16]
 
                 # — build bottom line —
