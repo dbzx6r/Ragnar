@@ -405,6 +405,10 @@ const configMetadata = {
         label: "Wi-Fi Monitor",
         description: "Keep the Wi-Fi manager running so connectivity issues are detected quickly."
     },
+    wifi_open_network_connect: {
+        label: "Connect to Open Networks",
+        description: "When away from known networks, automatically connect to available unprotected Wi-Fi networks and attempt to bypass captive portals. Disable if you only want to use known/saved networks."
+    },
     wifi_auto_ap_fallback: {
         label: "Auto AP Fallback",
         description: "Automatically enable Ragnar's access point if normal Wi-Fi connectivity cannot be restored."
