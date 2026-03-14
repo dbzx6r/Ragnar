@@ -842,6 +842,25 @@ class SharedData:
             self.screen_reversed = bool(self.config.get('screen_reversed', False))
             self.web_screen_reversed = self.screen_reversed
             return
+
+        # Character-based displays (e.g. LCD1602) have no PIL buffer interface.
+        # Skip EPDHelper / buffer-validation entirely to prevent the auto-detect
+        # fallback from overwriting the user's chosen display type.
+        _CHAR_DISPLAYS = {"lcd1602"}
+        epd_type_cfg = self.config.get("epd_type", DEFAULT_EPD_TYPE)
+        if epd_type_cfg in _CHAR_DISPLAYS:
+            profile = DISPLAY_PROFILES.get(epd_type_cfg, {})
+            self.width  = profile.get("ref_width",  16)
+            self.height = profile.get("ref_height",  2)
+            self.epd_helper = None
+            self.screen_reversed     = bool(self.config.get("screen_reversed", False))
+            self.web_screen_reversed = self.screen_reversed
+            logger.info(
+                "Character display '%s' configured: %dx%d — skipping EPD buffer init",
+                epd_type_cfg, self.width, self.height,
+            )
+            return
+
         try:
             logger.info("Initializing EPD display...")
             epd_type = self.config.get("epd_type", DEFAULT_EPD_TYPE)
