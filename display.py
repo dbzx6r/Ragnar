@@ -1562,6 +1562,18 @@ class Display:
                 return "AP MODE"
             return "No Network"
 
+        def _get_ip():
+            try:
+                res = subprocess.run(
+                    ["hostname", "-I"], capture_output=True, text=True, timeout=2
+                )
+                ip = res.stdout.strip().split()[0]
+                if ip:
+                    return ip
+            except Exception:
+                pass
+            return "No IP"
+
         # ── Initialise display ──────────────────────────────────────────
         _i2c_raw = self.config.get("lcd1602_i2c_address", "0x27")
         i2c_addr = int(_i2c_raw, 16) if isinstance(_i2c_raw, str) else int(_i2c_raw)
@@ -1605,14 +1617,14 @@ class Display:
                 if _top_slot == 0:
                     line0 = _get_ssid()
                 else:
-                    line0 = getattr(sd, "ipaddress", "") or "No IP"
+                    line0 = _get_ip()
                 line0 = line0.ljust(16)[:16]
 
                 # — build bottom line —
                 if _bottom_slot == 0:
                     line1 = f"Targets: {targets}"
                 elif _bottom_slot == 1:
-                    line1 = f"Vulnerabilities:{vulns}"
+                    line1 = f"Vuln: {vulns}"
                 else:
                     line1 = f"Credentials: {creds}"
                 line1 = line1.ljust(16)[:16]
