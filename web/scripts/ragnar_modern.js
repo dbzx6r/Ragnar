@@ -9559,10 +9559,11 @@ function displayConfigForm(config) {
         'General': ['manual_mode', 'debug_mode', 'scan_vuln_running', 'scan_vuln_no_ports', 'enable_attacks', 'blacklistcheck'],
         'Network': ['network_max_failed_pings'],
         'Timing': ['startup_delay', 'web_delay', 'screen_delay', 'scan_interval'],
-        'Display': ['epd_type', 'screen_reversed', 'gc9a01_mascot_color', 'ssd1306_i2c_address', 'lcd1602_i2c_address']
+        'Display': ['epd_type', 'screen_reversed', 'gc9a01_mascot_color', 'ssd1306_i2c_address', 'lcd1602_i2c_address'],
+        'Wi-Fi': ['wifi_monitor_enabled', 'wifi_open_network_connect', 'wifi_auto_ap_fallback', 'wifi_ap_cycle_enabled']
     };
     
-    const knownBooleans = ['manual_mode', 'debug_mode', 'scan_vuln_running', 'scan_vuln_no_ports', 'enable_attacks', 'blacklistcheck', 'screen_reversed'];
+    const knownBooleans = ['manual_mode', 'debug_mode', 'scan_vuln_running', 'scan_vuln_no_ports', 'enable_attacks', 'blacklistcheck', 'screen_reversed', 'wifi_monitor_enabled', 'wifi_open_network_connect', 'wifi_auto_ap_fallback', 'wifi_ap_cycle_enabled'];
     const alwaysShowKeys = new Set(['network_max_failed_pings', 'gc9a01_mascot_color', 'ssd1306_i2c_address', 'lcd1602_i2c_address']);
     const fallbackValues = {
         network_max_failed_pings: 15,
