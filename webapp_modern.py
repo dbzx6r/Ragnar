@@ -4651,8 +4651,7 @@ def download_vuln_intel_pdf():
             # Stream PDF bytes
             import io as _io
             buf = _io.BytesIO()
-            pdf_bytes = pdf.output()
-            buf.write(pdf_bytes if isinstance(pdf_bytes, bytes) else pdf_bytes.encode('latin-1'))
+            buf.write(bytes(pdf.output()))
             buf.seek(0)
 
             safe_net = re.sub(r'[^\w\-]', '_', net_slug)[:40]
