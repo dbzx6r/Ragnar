@@ -257,7 +257,7 @@
                         Network
                     </button>
                     <button onclick="showTab('networks')" class="nav-btn px-4 py-2 rounded-lg hover:bg-slate-700 transition-colors" data-tab="networks">
-                        Networks
+                        AP Archive
                     </button>
                     <button onclick="showTab('network-map')" class="nav-btn px-4 py-2 rounded-lg hover:bg-slate-700 transition-colors" data-tab="network-map">
                         Map
@@ -331,7 +331,7 @@
             <div class="px-2 pt-2 pb-3 space-y-1">
                 <button onclick="showTab('dashboard')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Dashboard</button>
                 <button onclick="showTab('network')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Network</button>
-                <button onclick="showTab('networks')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Networks</button>
+                <button onclick="showTab('networks')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">AP Archive</button>
                 <button onclick="showTab('network-map')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Network Map</button>
                 <button onclick="showTab('discovered')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Discovered</button>
                 <button onclick="showTab('credentials')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Credentials</button>
@@ -869,8 +869,8 @@
             <div class="glass rounded-xl p-6">
                 <div class="flex items-center justify-between mb-6">
                     <div>
-                        <h2 class="text-2xl font-bold">All Scanned Networks</h2>
-                        <p class="text-sm text-gray-400 mt-1">Every SSID Ragnar has collected data on — click one to browse its files</p>
+                        <h2 class="text-2xl font-bold">AP Archive</h2>
+                        <p class="text-sm text-gray-400 mt-1">Every access point Ragnar has collected data on — click one to browse its files</p>
                     </div>
                     <button onclick="loadAllNetworksData()" class="refresh-btn bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-4 py-2 rounded-lg transition-colors flex items-center gap-2">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -886,7 +886,7 @@
                         <svg class="w-12 h-12 mx-auto mb-3 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.14 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"></path>
                         </svg>
-                        <p>Loading networks…</p>
+                        <p>Loading AP Archive…</p>
                     </div>
                 </div>
 
@@ -897,7 +897,7 @@
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
                             </svg>
-                            All Networks
+                            All APs
                         </button>
                         <span class="text-gray-600">/</span>
                         <h3 id="networks-file-panel-title" class="text-lg font-semibold text-Ragnar-400"></h3>
