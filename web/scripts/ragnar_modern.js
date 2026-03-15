@@ -1339,7 +1339,7 @@ async function loadAllNetworksData() {
             <svg class="w-8 h-8 inline animate-spin mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
             </svg>
-            <p>Loading networks…</p>
+            <p>Loading AP Archive…</p>
         </div>`;
 
     try {
@@ -1350,7 +1350,7 @@ async function loadAllNetworksData() {
         console.error('Error loading all networks:', error);
         container.innerHTML = `
             <div class="text-center text-red-400 py-12">
-                <p class="text-sm">Failed to load networks: ${escapeHtml(error.message)}</p>
+                <p class="text-sm">Failed to load AP Archive: ${escapeHtml(error.message)}</p>
             </div>`;
     }
 }
@@ -1367,7 +1367,7 @@ function displayAllNetworks(data) {
                 <svg class="w-16 h-16 mx-auto mb-4 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.14 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"></path>
                 </svg>
-                <p class="text-lg font-medium">No networks recorded yet</p>
+                <p class="text-lg font-medium">No access points recorded yet</p>
                 <p class="text-sm text-gray-500 mt-2">Networks will appear here after Ragnar connects and scans them.</p>
             </div>`;
         return;
