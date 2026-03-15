@@ -610,6 +610,11 @@ class WiFiManager:
             self._trigger_initial_ping_sweep(self.current_ssid)
             return True
 
+        # No WiFi connected after 1 minute — try open networks before AP fallback
+        if self._try_open_network_connect():
+            self.logger.info("Endless Loop: Connected via open network — skipping AP mode")
+            return True
+
         # No WiFi connected after 1 minute, switch to AP mode
         self.logger.info(f"Endless Loop: No auto-connection established after {timeout}s, switching to AP mode")
         self._endless_loop_start_ap_mode()
@@ -1612,7 +1617,182 @@ class WiFiManager:
                 self.logger.error(f"Error connecting to {network.get('ssid', 'unknown')}: {e}")
         
         return False
-    
+
+    # ------------------------------------------------------------------
+    # Open network connect + captive portal bypass
+    # ------------------------------------------------------------------
+
+    def _try_open_network_connect(self):
+        """If wifi_open_network_connect is enabled, scan for open networks and
+        connect to the strongest one that isn't a known/saved network.
+        Returns True if successfully connected."""
+        if not self.shared_data.config.get('wifi_open_network_connect', False):
+            return False
+
+        self.logger.info("Open-network connect: scanning for unprotected networks...")
+        try:
+            networks = self.scan_networks()
+        except Exception as e:
+            self.logger.error(f"Open-network connect: scan failed: {e}")
+            return False
+
+        if not networks:
+            self.logger.info("Open-network connect: no networks found in scan")
+            return False
+
+        known_ssids = {n['ssid'] for n in self.known_networks}
+
+        # Filter to open networks that are not already known/saved
+        open_nets = [
+            n for n in networks
+            if n.get('security', '').lower() in ('open', '', 'none')
+            and n.get('ssid')
+            and n['ssid'] not in known_ssids
+        ]
+
+        if not open_nets:
+            self.logger.info("Open-network connect: no unknown open networks found")
+            return False
+
+        # Sort by signal strength (highest first)
+        open_nets.sort(key=lambda n: n.get('signal', 0), reverse=True)
+        best = open_nets[0]
+        ssid = best['ssid']
+        self.logger.info(f"Open-network connect: attempting '{ssid}' (signal={best.get('signal', '?')})")
+
+        if not self.connect_to_network(ssid, password=None):
+            self.logger.warning(f"Open-network connect: failed to connect to '{ssid}'")
+            return False
+
+        self.logger.info(f"Open-network connect: connected to '{ssid}'")
+        self.wifi_connected = True
+        self.shared_data.wifi_connected = True
+        self._set_current_ssid(ssid)
+        self._save_connection_state(ssid, True)
+        self.last_wifi_validation = time.time()
+        self.no_connection_cycles = 0
+
+        # Attempt captive portal bypass
+        self._bypass_captive_portal(ssid)
+        self._trigger_initial_ping_sweep(ssid)
+        return True
+
+    def _bypass_captive_portal(self, ssid=""):
+        """Detect and bypass a captive portal on the currently connected network.
+        Strategy:
+          1. Check if internet is reachable (HTTP 204 probe).
+          2. If a portal is detected (redirect / non-204), grab the portal URL.
+          3. GET the portal URL — many click-through portals grant access on first visit.
+          4. If the portal returns an HTML form, attempt to auto-submit it.
+          5. Re-check connectivity and report result.
+        """
+        probe_urls = [
+            "http://connectivitycheck.gstatic.com/generate_204",
+            "http://www.msftconnecttest.com/connecttest.txt",
+            "http://captive.apple.com/hotspot-detect.html",
+        ]
+
+        import urllib.request
+        import urllib.error
+        import urllib.parse
+        import re as _re
+
+        def _http_get(url, timeout=8, follow_redirects=True):
+            """Return (status_code, final_url, body_text)."""
+            try:
+                req = urllib.request.Request(
+                    url,
+                    headers={"User-Agent": "Mozilla/5.0 (Linux; Android 10) CaptiveNetworkSupport"},
+                )
+                opener = urllib.request.build_opener(
+                    urllib.request.HTTPRedirectHandler() if follow_redirects
+                    else urllib.request.BaseHandler()
+                )
+                with opener.open(req, timeout=timeout) as resp:
+                    body = resp.read(32768).decode("utf-8", errors="replace")
+                    return resp.status, resp.url, body
+            except urllib.error.HTTPError as e:
+                return e.code, url, ""
+            except Exception:
+                return None, url, ""
+
+        # Step 1: probe for open internet
+        portal_url = None
+        for probe in probe_urls:
+            code, final_url, body = _http_get(probe)
+            if code == 204 or (code == 200 and "msft" in probe and "Microsoft" in body):
+                self.logger.info(f"Open-network '{ssid}': internet reachable, no captive portal detected")
+                return True
+            if code is not None and final_url != probe:
+                # Redirected — that's the portal landing page
+                portal_url = final_url
+                self.logger.info(f"Open-network '{ssid}': captive portal detected → {portal_url}")
+                break
+            if code is not None and code not in (204, 200):
+                portal_url = final_url
+                self.logger.info(f"Open-network '{ssid}': captive portal probe returned {code}, portal at {portal_url}")
+                break
+
+        if not portal_url:
+            self.logger.info(f"Open-network '{ssid}': could not determine portal URL; skipping bypass")
+            return False
+
+        # Step 2: GET the portal page (many portals grant access on first visit)
+        self.logger.info(f"Open-network '{ssid}': fetching portal page {portal_url}")
+        code, final_url, html = _http_get(portal_url)
+
+        # Step 3: re-check connectivity after the GET
+        for probe in probe_urls[:1]:
+            code2, _, _ = _http_get(probe)
+            if code2 == 204:
+                self.logger.info(f"Open-network '{ssid}': captive portal bypassed after GET request")
+                return True
+
+        # Step 4: look for a simple HTML form and auto-submit it
+        if html:
+            action_match = _re.search(r'<form[^>]+action=["\']([^"\']+)["\']', html, _re.IGNORECASE)
+            form_action = action_match.group(1) if action_match else portal_url
+
+            # Collect all hidden / submit inputs
+            inputs = _re.findall(
+                r'<input[^>]+name=["\']([^"\']+)["\'][^>]*(?:value=["\']([^"\']*)["\'])?',
+                html, _re.IGNORECASE
+            )
+            params = {name: value for name, value in inputs}
+
+            # Resolve relative URL
+            if not form_action.startswith("http"):
+                parsed = urllib.parse.urlparse(portal_url)
+                form_action = f"{parsed.scheme}://{parsed.netloc}{form_action}"
+
+            try:
+                post_data = urllib.parse.urlencode(params).encode()
+                req = urllib.request.Request(
+                    form_action,
+                    data=post_data,
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (Linux; Android 10)",
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "Referer": portal_url,
+                    },
+                )
+                with urllib.request.urlopen(req, timeout=8):
+                    pass
+                self.logger.info(f"Open-network '{ssid}': submitted portal form to {form_action}")
+            except Exception as e:
+                self.logger.warning(f"Open-network '{ssid}': portal form submission failed: {e}")
+
+        # Final connectivity check
+        for probe in probe_urls[:1]:
+            code3, _, _ = _http_get(probe)
+            if code3 == 204:
+                self.logger.info(f"Open-network '{ssid}': captive portal bypassed after form submission")
+                return True
+
+        self.logger.warning(f"Open-network '{ssid}': captive portal bypass unsuccessful — "
+                            "portal may require manual interaction")
+        return False
+
     def connect_to_network(self, ssid, password=None):
         """Connect to a specific Wi-Fi network - NEVER deletes existing system profiles"""
         try:

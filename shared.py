@@ -599,6 +599,7 @@ class SharedData:
             "wifi_scan_interval": 300,
             "wifi_monitor_enabled": True,
             "wifi_auto_ap_fallback": True,
+            "wifi_open_network_connect": False,
             "wifi_ap_timeout": 180,
             "wifi_multi_network_scans_enabled": True,
             "wifi_multi_scan_mode": "multi",
