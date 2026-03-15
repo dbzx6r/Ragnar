@@ -4074,23 +4074,33 @@ def export_report():
 
 @app.route('/api/vulnerability-report/<path:filename>')
 def download_vulnerability_report(filename):
-    """Stream a vulnerability report file while preventing directory traversal."""
-    try:
-        vuln_dir = os.path.abspath(os.path.join('data', 'output', 'vulnerabilities'))
-        requested_path = os.path.normpath(os.path.join(vuln_dir, filename))
+    """Stream a vulnerability report file while preventing directory traversal.
 
-        if not requested_path.startswith(vuln_dir):
-            logger.warning(f"Blocked traversal attempt for report: {filename}")
-            return jsonify({'error': 'File not found'}), 404
+    Supports per-network directories via ?network= query param so that the
+    download URL returned by /api/vulnerability-intel can be followed directly.
+    Falls back to the global vulnerabilities directory when no network context
+    is active.
+    """
+    with _network_context_from_request():
+        try:
+            vuln_dir = os.path.abspath(
+                getattr(shared_data, 'vulnerabilities_dir',
+                        os.path.join('data', 'output', 'vulnerabilities'))
+            )
+            requested_path = os.path.normpath(os.path.join(vuln_dir, filename))
 
-        if not os.path.isfile(requested_path):
-            return jsonify({'error': 'File not found'}), 404
+            if not requested_path.startswith(vuln_dir + os.sep) and requested_path != vuln_dir:
+                logger.warning(f"Blocked traversal attempt for report: {filename}")
+                return jsonify({'error': 'File not found'}), 404
 
-        rel_path = os.path.relpath(requested_path, vuln_dir)
-        return send_from_directory(vuln_dir, rel_path, as_attachment=True)
-    except Exception as exc:
-        logger.error(f"Error serving vulnerability report {filename}: {exc}")
-        return jsonify({'error': 'Unable to download report'}), 500
+            if not os.path.isfile(requested_path):
+                return jsonify({'error': 'File not found'}), 404
+
+            rel_path = os.path.relpath(requested_path, vuln_dir)
+            return send_from_directory(vuln_dir, rel_path, as_attachment=True)
+        except Exception as exc:
+            logger.error(f"Error serving vulnerability report {filename}: {exc}")
+            return jsonify({'error': 'Unable to download report'}), 500
 
 
 @app.route('/api/vulnerability-intel')
@@ -4098,7 +4108,11 @@ def get_vulnerability_intel():
     """Get interesting intelligence from scan files (not vulnerabilities - those are in threat intel)"""
     with _network_context_from_request():
         try:
-            vuln_dir = getattr(shared_data, 'vulnerabilities_dir', os.path.join('data', 'output', 'vulnerabilities'))
+            vuln_dir = getattr(shared_data, 'vulnerabilities_dir',
+                               os.path.join('data', 'output', 'vulnerabilities'))
+            # Build query suffix so download links carry the network context
+            _net_slug = request.args.get('network') or request.args.get('ssid') or request.args.get('slug')
+            _net_qs = f"?network={_net_slug}" if _net_slug else ""
 
             if not os.path.exists(vuln_dir):
                 return jsonify({
@@ -4287,8 +4301,8 @@ def get_vulnerability_intel():
                                 'hostname': hostname,
                                 'scan_date': scan_date,
                                 'filename': filename,
-                                'download_url': f"/api/vulnerability-report/{filename}",
-                                'log_url': f"/api/vulnerability-report/{filename}",
+                                'download_url': f"/api/vulnerability-report/{filename}{_net_qs}",
+                                'log_url': f"/api/vulnerability-report/{filename}{_net_qs}",
                                 'services': services,
                                 'total_services': len(services)
                             })
@@ -4387,8 +4401,8 @@ def get_vulnerability_intel():
                         'hostname': hostname,
                         'scan_date': scan_date,
                         'filename': filename,
-                        'download_url': f"/api/vulnerability-report/{download_target}",
-                        'log_url': f"/api/vulnerability-report/{filename}",
+                        'download_url': f"/api/vulnerability-report/{download_target}{_net_qs}",
+                        'log_url': f"/api/vulnerability-report/{filename}{_net_qs}",
                         'services': [service_entry],
                         'total_services': 1,
                         'scan_type': 'lynis'
@@ -4459,6 +4473,201 @@ def get_vulnerability_intel():
         except Exception as e:
             logger.error(f"Error getting vulnerability intelligence: {e}")
             return jsonify({'error': str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# Service Intelligence — full PDF report
+# ---------------------------------------------------------------------------
+
+@app.route('/api/vulnerability-intel/report.pdf')
+def download_vuln_intel_pdf():
+    """Generate and stream a PDF report of all Service Intelligence findings."""
+    with _network_context_from_request():
+        try:
+            from fpdf import FPDF
+        except ImportError:
+            return jsonify({'error': 'PDF generation library (fpdf2) is not installed. Run: pip install fpdf2'}), 503
+
+        try:
+            vuln_dir = getattr(shared_data, 'vulnerabilities_dir',
+                               os.path.join('data', 'output', 'vulnerabilities'))
+            net_slug = request.args.get('network') or request.args.get('ssid') or request.args.get('slug') or 'default'
+            net_display = net_slug.replace('_', ' ').title()
+
+            # ----------------------------------------------------------------
+            # Collect scan data (reuse same logic as get_vulnerability_intel)
+            # ----------------------------------------------------------------
+            scans = []
+            if os.path.isdir(vuln_dir):
+                for filename in sorted(os.listdir(vuln_dir)):
+                    if not filename.endswith('_vuln_scan.txt'):
+                        continue
+                    file_path = os.path.join(vuln_dir, filename)
+                    try:
+                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            content = f.read()
+                        parts = filename.split('_')
+                        ip = parts[1] if len(parts) > 1 else 'unknown'
+                        hostname = 'unknown'
+                        for line in content.splitlines():
+                            if 'Nmap scan report for' in line:
+                                tokens = line.split()
+                                if tokens[-1] != ip:
+                                    hostname = tokens[-1].strip('()')
+                                break
+                        # Parse services
+                        services = []
+                        current_service = None
+                        script_lines = []
+                        for line in content.splitlines():
+                            port_match = re.match(r'^(\d+/\w+)\s+\w+\s+(\S+)(.*)?$', line)
+                            if port_match:
+                                if current_service and (current_service['version'] or current_service['scripts']):
+                                    if script_lines:
+                                        current_service['scripts'].append({'name': 'output', 'output': '\n'.join(script_lines)})
+                                    services.append(current_service)
+                                script_lines = []
+                                port_proto = port_match.group(1)
+                                svc_name = port_match.group(2)
+                                version_info = port_match.group(3).strip() if port_match.group(3) else ''
+                                current_service = {'port': port_proto, 'service': svc_name, 'version': version_info, 'scripts': []}
+                            elif current_service and line.startswith('|'):
+                                script_lines.append(line.lstrip('|').strip())
+                            elif current_service and script_lines:
+                                current_service['scripts'].append({'name': 'script', 'output': '\n'.join(script_lines)})
+                                script_lines = []
+                        if current_service and (current_service['version'] or current_service['scripts']):
+                            if script_lines:
+                                current_service['scripts'].append({'name': 'output', 'output': '\n'.join(script_lines)})
+                            services.append(current_service)
+                        if services:
+                            mod_time = os.path.getmtime(file_path)
+                            scans.append({
+                                'ip': ip,
+                                'hostname': hostname,
+                                'scan_date': datetime.fromtimestamp(mod_time).strftime('%Y-%m-%d %H:%M'),
+                                'services': services,
+                            })
+                    except Exception:
+                        continue
+
+            # ----------------------------------------------------------------
+            # Build PDF
+            # ----------------------------------------------------------------
+            class _PDF(FPDF):
+                def header(self):
+                    self.set_font('Helvetica', 'B', 10)
+                    self.set_text_color(150, 200, 255)
+                    self.cell(0, 8, 'RAGNAR — Service Intelligence Report', align='L')
+                    self.set_text_color(120, 120, 120)
+                    self.cell(0, 8, datetime.now().strftime('%Y-%m-%d %H:%M'), align='R', new_x='LMARGIN', new_y='NEXT')
+                    self.set_draw_color(60, 80, 120)
+                    self.line(self.l_margin, self.get_y(), self.w - self.r_margin, self.get_y())
+                    self.ln(3)
+
+                def footer(self):
+                    self.set_y(-12)
+                    self.set_font('Helvetica', 'I', 8)
+                    self.set_text_color(120, 120, 120)
+                    self.cell(0, 8, f'Page {self.page_no()}', align='C')
+
+            pdf = _PDF(orientation='P', unit='mm', format='A4')
+            pdf.set_auto_page_break(auto=True, margin=15)
+            pdf.add_page()
+            pdf.set_margins(15, 15, 15)
+
+            # Title block
+            pdf.set_font('Helvetica', 'B', 18)
+            pdf.set_text_color(200, 230, 255)
+            pdf.cell(0, 10, 'Service Intelligence Report', new_x='LMARGIN', new_y='NEXT')
+            pdf.set_font('Helvetica', '', 11)
+            pdf.set_text_color(160, 160, 160)
+            pdf.cell(0, 6, f'Network: {net_display}', new_x='LMARGIN', new_y='NEXT')
+            pdf.ln(4)
+
+            # Summary stats
+            total_services = sum(len(s['services']) for s in scans)
+            total_scripts = sum(len(sc['scripts']) for s in scans for sc in s['services'])
+            pdf.set_font('Helvetica', 'B', 11)
+            pdf.set_text_color(220, 220, 220)
+            pdf.cell(0, 7, 'Summary', new_x='LMARGIN', new_y='NEXT')
+            pdf.set_font('Helvetica', '', 10)
+            pdf.set_text_color(180, 180, 180)
+            pdf.cell(0, 6, f'  Hosts with Intel:   {len(scans)}', new_x='LMARGIN', new_y='NEXT')
+            pdf.cell(0, 6, f'  Services with Intel: {total_services}', new_x='LMARGIN', new_y='NEXT')
+            pdf.cell(0, 6, f'  Script Outputs:      {total_scripts}', new_x='LMARGIN', new_y='NEXT')
+            pdf.ln(5)
+
+            def _safe_txt(text, limit=1800):
+                """Strip non-latin1 chars and hard-wrap long lines for PDF."""
+                text = text.encode('latin-1', errors='replace').decode('latin-1')
+                lines = []
+                for raw_line in text.splitlines():
+                    while len(raw_line) > 95:
+                        lines.append(raw_line[:95])
+                        raw_line = '  ' + raw_line[95:]
+                    lines.append(raw_line)
+                joined = '\n'.join(lines)
+                if len(joined) > limit:
+                    joined = joined[:limit] + '\n  ... [truncated]'
+                return joined
+
+            # Per-host sections
+            for scan in scans:
+                pdf.set_fill_color(25, 35, 55)
+                pdf.set_font('Helvetica', 'B', 11)
+                pdf.set_text_color(100, 200, 255)
+                label = f"{scan['hostname']}  ({scan['ip']})" if scan['hostname'] != 'unknown' else scan['ip']
+                pdf.cell(0, 8, label, fill=True, new_x='LMARGIN', new_y='NEXT')
+                pdf.set_font('Helvetica', 'I', 8)
+                pdf.set_text_color(120, 120, 120)
+                pdf.cell(0, 5, f"  Scanned: {scan['scan_date']}", new_x='LMARGIN', new_y='NEXT')
+                pdf.ln(1)
+
+                for svc in scan['services']:
+                    pdf.set_font('Helvetica', 'B', 10)
+                    pdf.set_text_color(180, 255, 180)
+                    svc_label = f"  {svc['port']}  {svc['service']}"
+                    if svc['version']:
+                        svc_label += f"  —  {svc['version'][:80]}"
+                    pdf.cell(0, 6, _safe_txt(svc_label, 200), new_x='LMARGIN', new_y='NEXT')
+
+                    for script in svc['scripts']:
+                        if not script.get('output', '').strip():
+                            continue
+                        pdf.set_font('Courier', '', 7)
+                        pdf.set_text_color(200, 200, 200)
+                        for txt_line in _safe_txt(script['output']).splitlines():
+                            pdf.cell(0, 4, f'    {txt_line}', new_x='LMARGIN', new_y='NEXT')
+                    pdf.ln(2)
+
+                pdf.ln(3)
+
+            if not scans:
+                pdf.set_font('Helvetica', 'I', 11)
+                pdf.set_text_color(160, 160, 160)
+                pdf.cell(0, 10, 'No service intelligence data found for this network.', align='C', new_x='LMARGIN', new_y='NEXT')
+
+            # Stream PDF bytes
+            import io as _io
+            buf = _io.BytesIO()
+            pdf_bytes = pdf.output()
+            buf.write(pdf_bytes if isinstance(pdf_bytes, bytes) else pdf_bytes.encode('latin-1'))
+            buf.seek(0)
+
+            safe_net = re.sub(r'[^\w\-]', '_', net_slug)[:40]
+            fname = f"ragnar_service_intel_{safe_net}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+
+            from flask import Response as _Response
+            return _Response(
+                buf.read(),
+                mimetype='application/pdf',
+                headers={'Content-Disposition': f'attachment; filename="{fname}"'}
+            )
+
+        except Exception as exc:
+            logger.error(f"Error generating intel PDF: {exc}")
+            return jsonify({'error': str(exc)}), 500
 
 
 @app.route('/api/logs')

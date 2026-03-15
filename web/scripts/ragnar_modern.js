@@ -3476,6 +3476,11 @@ async function refreshVulnerabilityIntel() {
     await loadVulnerabilityIntel();
 }
 
+function downloadIntelPDF() {
+    const endpoint = resolveNetworkAwareEndpoint('/api/vulnerability-intel/report.pdf');
+    window.location.href = endpoint;
+}
+
 // ============================================================================
 // CREDENTIALS AND LOOT FUNCTIONS  
 // ============================================================================
@@ -16687,3 +16692,5 @@ window.onMapAiToggleClick = onMapAiToggleClick;
 window.toggleSubnetPanel = toggleSubnetPanel;
 window.addScanSubnet = addScanSubnet;
 window.removeScanSubnet = removeScanSubnet;
+window.downloadIntelPDF = downloadIntelPDF;
+window.refreshVulnerabilityIntel = refreshVulnerabilityIntel;
