@@ -223,7 +223,7 @@ const configMetadata = {
     },
     displaying_csv: {
         label: "Display Scan CSV",
-        description: "Push the most recent scan CSV results to the e-paper display after each network sweep."
+        description: "Push the most recent scan CSV results to the display after each network sweep."
     },
     log_debug: {
         label: "Log Debug Messages",
@@ -255,7 +255,7 @@ const configMetadata = {
     },
     screen_delay: {
         label: "Screen Update Delay (s)",
-        description: "Seconds between e-paper display refreshes."
+        description: "Seconds between display refreshes."
     },
     comment_delaymin: {
         label: "Comment Delay Min (s)",
@@ -271,11 +271,11 @@ const configMetadata = {
     },
     image_display_delaymin: {
         label: "Image Display Min (s)",
-        description: "Minimum time an image remains on the e-paper display."
+        description: "Minimum time an image remains on the display."
     },
     image_display_delaymax: {
         label: "Image Display Max (s)",
-        description: "Maximum time an image remains on the e-paper display."
+        description: "Maximum time an image remains on the display."
     },
     scan_interval: {
         label: "Scan Interval (s)",
@@ -295,19 +295,19 @@ const configMetadata = {
     },
     ref_width: {
         label: "Reference Width",
-        description: "Reference pixel width used to scale drawings for the e-paper display."
+        description: "Reference pixel width used to scale drawings for the display."
     },
     ref_height: {
         label: "Reference Height",
-        description: "Reference pixel height used to scale drawings for the e-paper display."
+        description: "Reference pixel height used to scale drawings for the display."
     },
     screen_reversed: {
-        label: "Flip E-Paper Output",
-        description: "Rotate the Waveshare e-paper output 180° so the content appears upright when the panel is mounted upside down."
+        label: "Flip Display Output",
+        description: "Rotate the display output 180° so the content appears upright when the panel is mounted upside down."
     },
     epd_type: {
         label: "EPD Type",
-        description: "Model identifier for the connected Waveshare e-paper display."
+        description: "Model identifier for the connected display."
     },
     gc9a01_mascot_color: {
         label: "GC9A01 Mascot Tint Color",
@@ -319,7 +319,7 @@ const configMetadata = {
     },
     display_brightness: {
         label: "Display Brightness",
-        description: "Brightness level for non-e-ink displays (SSD1306, GC9A01, MAX7219). Range 0–15. Default: 8."
+        description: "Brightness level for secondary displays (SSD1306, GC9A01, MAX7219). Range 0–15. Default: 8."
     },
     portlist: {
         label: "Additional Ports",
@@ -1049,6 +1049,11 @@ async function loadTabData(tabName) {
             // Always refresh network data when switching to this tab
             await loadNetworkData();
             break;
+        case 'networks':
+            if (!alreadyPreloaded) {
+                await loadAllNetworksData();
+            }
+            break;
         case 'connect':
             if (!alreadyPreloaded) {
                 await loadConnectData();
@@ -1323,6 +1328,220 @@ async function loadNetworkData() {
         addConsoleMessage('Failed to load network data', 'error');
     }
 }
+
+async function loadNetworkData() {
+    try {
+        // Use the new stable network data endpoint
+        await loadStableNetworkData();
+        
+        // Update the status detection info banner with current config
+        updateNetworkStatusBanner();
+    } catch (error) {
+        console.error('Error loading network data:', error);
+        addConsoleMessage('Failed to load network data', 'error');
+    }
+}
+
+// ============================================================================
+// ALL SCANNED NETWORKS TAB (PR 3)
+// ============================================================================
+
+async function loadAllNetworksData() {
+    const container = document.getElementById('networks-list-container');
+    if (!container) return;
+
+    container.innerHTML = `
+        <div class="text-center text-gray-400 py-12">
+            <svg class="w-8 h-8 inline animate-spin mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+            </svg>
+            <p>Loading AP Archive…</p>
+        </div>`;
+
+    try {
+        const data = await fetchAPI('/api/networks/all');
+        displayAllNetworks(data);
+        preloadedTabs.add('networks');
+    } catch (error) {
+        console.error('Error loading all networks:', error);
+        container.innerHTML = `
+            <div class="text-center text-red-400 py-12">
+                <p class="text-sm">Failed to load AP Archive: ${escapeHtml(error.message)}</p>
+            </div>`;
+    }
+}
+
+function displayAllNetworks(data) {
+    const container = document.getElementById('networks-list-container');
+    if (!container) return;
+
+    const networks = data.networks || [];
+
+    if (networks.length === 0) {
+        container.innerHTML = `
+            <div class="text-center text-gray-400 py-16">
+                <svg class="w-16 h-16 mx-auto mb-4 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.14 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"></path>
+                </svg>
+                <p class="text-lg font-medium">No access points recorded yet</p>
+                <p class="text-sm text-gray-500 mt-2">Networks will appear here after Ragnar connects and scans them.</p>
+            </div>`;
+        return;
+    }
+
+    let html = `<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">`;
+
+    networks.forEach(net => {
+        const ssid = escapeHtml(net.ssid || net.slug);
+        const lastSeen = escapeHtml(net.last_seen || 'Unknown');
+        const fileCount = net.file_count || 0;
+
+        const badges = [];
+        if (net.has_loot)  badges.push('<span class="px-2 py-0.5 rounded text-xs bg-yellow-500 bg-opacity-20 text-yellow-300">Loot</span>');
+        if (net.has_creds) badges.push('<span class="px-2 py-0.5 rounded text-xs bg-green-500 bg-opacity-20 text-green-300">Creds</span>');
+        if (net.has_vulns) badges.push('<span class="px-2 py-0.5 rounded text-xs bg-red-500 bg-opacity-20 text-red-300">Vulns</span>');
+        if (net.has_scans) badges.push('<span class="px-2 py-0.5 rounded text-xs bg-blue-500 bg-opacity-20 text-blue-300">Scans</span>');
+
+        html += `
+            <button type="button"
+                    onclick="openNetworkFilePanel(${JSON.stringify(net.slug).replace(/"/g, '&quot;')}, ${JSON.stringify(net.ssid || net.slug).replace(/"/g, '&quot;')})"
+                    class="text-left bg-gray-800 hover:bg-gray-700 rounded-xl p-5 transition-colors border border-gray-700 hover:border-Ragnar-500 focus:outline-none focus:ring-2 focus:ring-Ragnar-500">
+                <div class="flex items-start justify-between mb-3">
+                    <div class="flex items-center gap-2 min-w-0">
+                        <svg class="w-5 h-5 text-cyan-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.14 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0"></path>
+                        </svg>
+                        <span class="font-semibold text-white truncate" title="${ssid}">${ssid}</span>
+                    </div>
+                    <svg class="w-4 h-4 text-gray-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                    </svg>
+                </div>
+                <div class="text-xs text-gray-400 mb-3">
+                    <span>${fileCount} file${fileCount !== 1 ? 's' : ''}</span>
+                    ${lastSeen ? `<span class="mx-1">·</span><span>${lastSeen}</span>` : ''}
+                </div>
+                <div class="flex flex-wrap gap-1.5">
+                    ${badges.length ? badges.join('') : '<span class="text-xs text-gray-600">No data yet</span>'}
+                </div>
+            </button>`;
+    });
+
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+async function openNetworkFilePanel(slug, ssid) {
+    const panel = document.getElementById('networks-file-panel');
+    const listContainer = document.getElementById('networks-list-container');
+    const title = document.getElementById('networks-file-panel-title');
+    const fileContainer = document.getElementById('networks-file-list-container');
+
+    if (!panel || !title || !fileContainer) return;
+
+    title.textContent = ssid;
+    listContainer.classList.add('hidden');
+    panel.classList.remove('hidden');
+
+    fileContainer.innerHTML = `
+        <div class="text-center text-gray-400 py-8">
+            <svg class="w-6 h-6 inline animate-spin mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+            </svg>
+            <p>Loading files…</p>
+        </div>`;
+
+    try {
+        const data = await fetchAPI(`/api/networks/${encodeURIComponent(slug)}/files`);
+        displayNetworkFiles(data);
+    } catch (error) {
+        fileContainer.innerHTML = `
+            <div class="text-center text-red-400 py-8">
+                <p class="text-sm">Failed to load files: ${escapeHtml(error.message)}</p>
+            </div>`;
+    }
+}
+
+function closeNetworkFilePanel() {
+    const panel = document.getElementById('networks-file-panel');
+    const listContainer = document.getElementById('networks-list-container');
+    if (panel) panel.classList.add('hidden');
+    if (listContainer) listContainer.classList.remove('hidden');
+}
+
+const NETWORK_FILE_CATEGORY_LABELS = {
+    data_stolen:    { label: 'Loot',             color: 'text-yellow-300' },
+    credentials:    { label: 'Credentials',      color: 'text-green-300'  },
+    vulnerabilities:{ label: 'Vulnerabilities',  color: 'text-red-300'    },
+    scan_results:   { label: 'Scan Results',     color: 'text-blue-300'   },
+};
+
+function displayNetworkFiles(data) {
+    const container = document.getElementById('networks-file-list-container');
+    if (!container) return;
+
+    const files = data.files || [];
+
+    if (files.length === 0) {
+        container.innerHTML = `
+            <div class="text-center text-gray-400 py-12">
+                <svg class="w-12 h-12 mx-auto mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h4a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"></path>
+                </svg>
+                <p>No files collected for this network yet.</p>
+            </div>`;
+        return;
+    }
+
+    // Group by category
+    const grouped = {};
+    files.forEach(f => {
+        if (!grouped[f.category]) grouped[f.category] = [];
+        grouped[f.category].push(f);
+    });
+
+    let html = '';
+    const categoryOrder = ['data_stolen', 'credentials', 'vulnerabilities', 'scan_results'];
+
+    categoryOrder.forEach(cat => {
+        if (!grouped[cat] || grouped[cat].length === 0) return;
+        const meta = NETWORK_FILE_CATEGORY_LABELS[cat] || { label: cat, color: 'text-gray-300' };
+
+        html += `
+            <div class="mb-6">
+                <h4 class="text-sm font-semibold uppercase tracking-wider ${meta.color} mb-3">${meta.label} (${grouped[cat].length})</h4>
+                <div class="space-y-2">`;
+
+        grouped[cat].forEach(file => {
+            const fname = escapeHtml(file.filename);
+            const size  = escapeHtml(file.size || '');
+            const mod   = escapeHtml(file.modified || '');
+            const vpath = file.virtual_path ? encodeURIComponent(file.virtual_path) : '';
+            const clickable = !!vpath;
+
+            html += `
+                <div class="flex items-center justify-between bg-gray-800 rounded-lg px-4 py-3 ${clickable ? 'hover:bg-gray-700 cursor-pointer' : ''} transition-colors"
+                     ${clickable ? `onclick="openLootFile('${vpath}')"` : ''}>
+                    <div class="flex items-center gap-3 min-w-0">
+                        <svg class="w-4 h-4 text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        <span class="text-sm text-white truncate" title="${fname}">${fname}</span>
+                    </div>
+                    <div class="flex items-center gap-4 text-xs text-gray-400 flex-shrink-0 ml-4">
+                        ${size ? `<span>${size}</span>` : ''}
+                        ${mod  ? `<span class="hidden sm:inline">${mod}</span>` : ''}
+                        ${clickable ? `<svg class="w-4 h-4 text-Ragnar-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>` : ''}
+                    </div>
+                </div>`;
+        });
+
+        html += `</div></div>`;
+    });
+
+    container.innerHTML = html;
+}
+
 
 async function updateNetworkStatusBanner() {
     try {
@@ -4932,8 +5151,8 @@ function updatePwnToggleAvailability(isHeadless) {
 // ============================================================================
 
 /**
- * Detect and handle headless mode (server installations without e-paper display)
- * Headless mode hides E-Paper related UI elements
+ * Detect and handle headless mode (server installations without a display)
+ * Headless mode hides display-related UI elements
  */
 async function handleHeadlessMode() {
     try {
@@ -4944,10 +5163,10 @@ async function handleHeadlessMode() {
         headlessMode = isHeadless;
         
         if (isHeadless) {
-            console.log('[Headless] Headless mode detected - hiding E-Paper UI elements');
+            console.log('[Headless] Headless mode detected - hiding Display UI elements');
             applyHeadlessVisibility(true);
         } else {
-            console.log('[Headless] Display mode detected - E-Paper UI elements visible');
+            console.log('[Headless] Display mode detected - Display UI elements visible');
             applyHeadlessVisibility(false);
         }
         
@@ -4967,25 +5186,25 @@ async function handleHeadlessMode() {
  * @param {boolean} isHeadless - Whether the system is in headless mode
  */
 function applyHeadlessVisibility(isHeadless) {
-    // Find all elements that require a display (E-Paper)
+    // Find all elements that require a display
     const displayElements = document.querySelectorAll('.requires-display');
     
     if (isHeadless) {
-        // Hide all E-Paper related elements
+        // Hide all display-related elements
         displayElements.forEach(el => {
             el.style.display = 'none';
             el.setAttribute('data-hidden-by-headless', 'true');
         });
         
-        console.log(`[Headless] Hidden ${displayElements.length} E-Paper UI elements`);
+        console.log(`[Headless] Hidden ${displayElements.length} Display UI elements`);
         
-        // If user is currently on E-Paper tab, redirect to dashboard
+        // If user is currently on Display tab, redirect to dashboard
         if (currentTab === 'epaper') {
-            console.log('[Headless] Redirecting from E-Paper tab to dashboard');
+            console.log('[Headless] Redirecting from Display tab to dashboard');
             showTab('dashboard');
         }
     } else {
-        // Show all E-Paper related elements
+        // Show all display-related elements
         displayElements.forEach(el => {
             if (el.getAttribute('data-hidden-by-headless') === 'true') {
                 el.style.display = '';
@@ -4993,7 +5212,7 @@ function applyHeadlessVisibility(isHeadless) {
             }
         });
         
-        console.log(`[Headless] Restored ${displayElements.length} E-Paper UI elements`);
+        console.log(`[Headless] Restored ${displayElements.length} Display UI elements`);
     }
 }
 
@@ -10148,8 +10367,8 @@ async function loadEpaperDisplay() {
         }
         
     } catch (error) {
-        console.error('Error loading e-paper display:', error);
-        addConsoleMessage('Failed to load e-paper display', 'error');
+        console.error('Error loading display:', error);
+        addConsoleMessage('Failed to load display', 'error');
         
         // Update connection status
         const connectionElement = document.getElementById('epaper-connection');
@@ -10159,7 +10378,7 @@ async function loadEpaperDisplay() {
 }
 
 function refreshEpaperDisplay() {
-    addConsoleMessage('Refreshing e-paper display...', 'info');
+    addConsoleMessage('Refreshing display...', 'info');
     loadEpaperDisplay();
 }
 
@@ -10173,19 +10392,19 @@ function toggleEpaperSize() {
         imgElement.style.maxHeight = '1200px';
         imgElement.style.minHeight = '600px';
         epaperSizeMode = 'xlarge';
-        addConsoleMessage('E-paper display size: Extra Large', 'info');
+        addConsoleMessage('Display size: Extra Large', 'info');
     } else if (epaperSizeMode === 'xlarge') {
         // Switch to medium
         imgElement.style.maxHeight = '600px';
         imgElement.style.minHeight = '300px';
         epaperSizeMode = 'medium';
-        addConsoleMessage('E-paper display size: Medium', 'info');
+        addConsoleMessage('Display size: Medium', 'info');
     } else {
         // Switch back to large
         imgElement.style.maxHeight = '800px';
         imgElement.style.minHeight = '400px';
         epaperSizeMode = 'large';
-        addConsoleMessage('E-paper display size: Large', 'info');
+        addConsoleMessage('Display size: Large', 'info');
     }
 }
 
@@ -16468,3 +16687,4 @@ window.onMapAiToggleClick = onMapAiToggleClick;
 window.toggleSubnetPanel = toggleSubnetPanel;
 window.addScanSubnet = addScanSubnet;
 window.removeScanSubnet = removeScanSubnet;
+window.refreshVulnerabilityIntel = refreshVulnerabilityIntel;

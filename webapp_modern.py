@@ -4074,23 +4074,33 @@ def export_report():
 
 @app.route('/api/vulnerability-report/<path:filename>')
 def download_vulnerability_report(filename):
-    """Stream a vulnerability report file while preventing directory traversal."""
-    try:
-        vuln_dir = os.path.abspath(os.path.join('data', 'output', 'vulnerabilities'))
-        requested_path = os.path.normpath(os.path.join(vuln_dir, filename))
+    """Stream a vulnerability report file while preventing directory traversal.
 
-        if not requested_path.startswith(vuln_dir):
-            logger.warning(f"Blocked traversal attempt for report: {filename}")
-            return jsonify({'error': 'File not found'}), 404
+    Supports per-network directories via ?network= query param so that the
+    download URL returned by /api/vulnerability-intel can be followed directly.
+    Falls back to the global vulnerabilities directory when no network context
+    is active.
+    """
+    with _network_context_from_request():
+        try:
+            vuln_dir = os.path.abspath(
+                getattr(shared_data, 'vulnerabilities_dir',
+                        os.path.join('data', 'output', 'vulnerabilities'))
+            )
+            requested_path = os.path.normpath(os.path.join(vuln_dir, filename))
 
-        if not os.path.isfile(requested_path):
-            return jsonify({'error': 'File not found'}), 404
+            if not requested_path.startswith(vuln_dir + os.sep) and requested_path != vuln_dir:
+                logger.warning(f"Blocked traversal attempt for report: {filename}")
+                return jsonify({'error': 'File not found'}), 404
 
-        rel_path = os.path.relpath(requested_path, vuln_dir)
-        return send_from_directory(vuln_dir, rel_path, as_attachment=True)
-    except Exception as exc:
-        logger.error(f"Error serving vulnerability report {filename}: {exc}")
-        return jsonify({'error': 'Unable to download report'}), 500
+            if not os.path.isfile(requested_path):
+                return jsonify({'error': 'File not found'}), 404
+
+            rel_path = os.path.relpath(requested_path, vuln_dir)
+            return send_from_directory(vuln_dir, rel_path, as_attachment=True)
+        except Exception as exc:
+            logger.error(f"Error serving vulnerability report {filename}: {exc}")
+            return jsonify({'error': 'Unable to download report'}), 500
 
 
 @app.route('/api/vulnerability-intel')
@@ -4098,7 +4108,11 @@ def get_vulnerability_intel():
     """Get interesting intelligence from scan files (not vulnerabilities - those are in threat intel)"""
     with _network_context_from_request():
         try:
-            vuln_dir = os.path.join('data', 'output', 'vulnerabilities')
+            vuln_dir = getattr(shared_data, 'vulnerabilities_dir',
+                               os.path.join('data', 'output', 'vulnerabilities'))
+            # Build query suffix so download links carry the network context
+            _net_slug = request.args.get('network') or request.args.get('ssid') or request.args.get('slug')
+            _net_qs = f"?network={_net_slug}" if _net_slug else ""
 
             if not os.path.exists(vuln_dir):
                 return jsonify({
@@ -4287,8 +4301,8 @@ def get_vulnerability_intel():
                                 'hostname': hostname,
                                 'scan_date': scan_date,
                                 'filename': filename,
-                                'download_url': f"/api/vulnerability-report/{filename}",
-                                'log_url': f"/api/vulnerability-report/{filename}",
+                                'download_url': f"/api/vulnerability-report/{filename}{_net_qs}",
+                                'log_url': f"/api/vulnerability-report/{filename}{_net_qs}",
                                 'services': services,
                                 'total_services': len(services)
                             })
@@ -4387,8 +4401,8 @@ def get_vulnerability_intel():
                         'hostname': hostname,
                         'scan_date': scan_date,
                         'filename': filename,
-                        'download_url': f"/api/vulnerability-report/{download_target}",
-                        'log_url': f"/api/vulnerability-report/{filename}",
+                        'download_url': f"/api/vulnerability-report/{download_target}{_net_qs}",
+                        'log_url': f"/api/vulnerability-report/{filename}{_net_qs}",
                         'services': [service_entry],
                         'total_services': 1,
                         'scan_type': 'lynis'
@@ -4460,6 +4474,10 @@ def get_vulnerability_intel():
             logger.error(f"Error getting vulnerability intelligence: {e}")
             return jsonify({'error': str(e)}), 500
 
+
+# ---------------------------------------------------------------------------
+# Service Intelligence — full PDF report
+# ---------------------------------------------------------------------------
 
 @app.route('/api/logs')
 def get_logs():
@@ -8995,55 +9013,6 @@ def get_vulnerabilities_grouped():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/credentials')
-def get_credentials_api():
-    """Get credential data with network intelligence if available"""
-    try:
-        # Check if network intelligence is enabled
-        if (hasattr(shared_data, 'network_intelligence') and 
-            shared_data.network_intelligence and 
-            shared_data.config.get('network_intelligence_enabled', True)):
-            
-            # Get network-aware findings for dashboard
-            dashboard_findings = shared_data.network_intelligence.get_active_findings_for_dashboard()
-            
-            # Convert to legacy format for compatibility
-            cred_data = []
-            for cred_id, cred_info in dashboard_findings['credentials'].items():
-                cred_data.append({
-                    'id': cred_id,
-                    'host': cred_info['host'],
-                    'service': cred_info['service'],
-                    'username': cred_info['username'],
-                    'password': cred_info['password'],
-                    'protocol': cred_info['protocol'],
-                    'discovered': cred_info['discovered'],
-                    'network_id': cred_info['network_id'],
-                    'status': cred_info['status']
-                })
-            
-            return jsonify({
-                'credentials': cred_data,
-                'network_context': {
-                    'current_network': dashboard_findings['network_id'],
-                    'count': dashboard_findings['counts']['credentials']
-                }
-            })
-        else:
-            # Fallback to legacy credential data - just return empty structure
-            return jsonify({
-                'credentials': [],
-                'network_context': {
-                    'current_network': 'legacy',
-                    'count': 0
-                }
-            })
-            
-    except Exception as e:
-        logger.error(f"Error getting credentials: {e}")
-        return jsonify({'error': str(e)}), 500
-
-
 @app.route('/api/network-intelligence/add-vulnerability', methods=['POST'])
 def add_vulnerability():
     """Add a new vulnerability finding"""
@@ -11496,6 +11465,169 @@ def _network_loot_dirs(network_rel_path, virtual_root):
             'modified': mtime,
         })
     return dirs
+
+
+# ---------------------------------------------------------------------------
+# PR 3 — Scanned Networks Tab endpoints
+# ---------------------------------------------------------------------------
+
+@app.route('/api/networks/all')
+def get_all_scanned_networks():
+    """Return summary info for every network Ragnar has ever scanned."""
+    try:
+        networks = _list_all_networks()
+        result = []
+        for net in networks:
+            nd = net['network_dir']
+            stats = _network_dir_stats(nd)
+            result.append({
+                'slug': net['slug'],
+                'ssid': net['ssid'],
+                'last_seen': stats['last_seen'],
+                'file_count': stats['file_count'],
+                'has_loot': stats['has_loot'],
+                'has_creds': stats['has_creds'],
+                'has_vulns': stats['has_vulns'],
+                'has_scans': stats['has_scans'],
+            })
+        return jsonify({'success': True, 'networks': result, 'total': len(result)})
+    except Exception as exc:
+        logger.error(f"Error listing all networks: {exc}")
+        return jsonify({'success': False, 'error': str(exc)}), 500
+
+
+def _network_dir_stats(network_dir):
+    """Compute lightweight stats for a single network directory."""
+    import time as _time
+
+    category_paths = {
+        'has_loot':  os.path.join(network_dir, 'loot', 'data_stolen'),
+        'has_creds': os.path.join(network_dir, 'loot', 'credentials'),
+        'has_vulns': os.path.join(network_dir, 'output', 'vulnerabilities'),
+        'has_scans': os.path.join(network_dir, 'output', 'scan_results'),
+    }
+
+    flags = {}
+    file_count = 0
+    latest_mtime = 0.0
+
+    for flag, path in category_paths.items():
+        if not os.path.isdir(path):
+            flags[flag] = False
+            continue
+        entries = []
+        for root, _, files in os.walk(path):
+            for f in files:
+                fp = os.path.join(root, f)
+                try:
+                    mtime = os.path.getmtime(fp)
+                    if mtime > latest_mtime:
+                        latest_mtime = mtime
+                    file_count += 1
+                    entries.append(fp)
+                except OSError:
+                    pass
+        flags[flag] = bool(entries)
+
+    if latest_mtime:
+        import datetime as _dt
+        last_seen = _dt.datetime.fromtimestamp(latest_mtime).strftime('%Y-%m-%d %H:%M')
+    else:
+        last_seen = ''
+
+    return {**flags, 'file_count': file_count, 'last_seen': last_seen}
+
+
+@app.route('/api/networks/<slug>/files')
+def get_network_files(slug):
+    """Return a flat list of files stored under a specific network's directory."""
+    try:
+        # Validate slug
+        if not slug or not all(c.isalnum() or c == '_' for c in slug):
+            return jsonify({'success': False, 'error': 'Invalid network slug'}), 400
+
+        networks_dir = _get_networks_dir()
+        network_dir = os.path.join(networks_dir, slug)
+
+        if not os.path.isdir(network_dir):
+            return jsonify({'success': False, 'error': 'Network not found'}), 404
+
+        # Read human-readable SSID
+        ssid = slug
+        ssid_file = os.path.join(network_dir, 'ssid.txt')
+        if os.path.exists(ssid_file):
+            try:
+                with open(ssid_file, 'r', encoding='utf-8') as _f:
+                    ssid = _f.read().strip() or slug
+            except IOError:
+                pass
+
+        # Categories to expose and their virtual path prefixes
+        categories = {
+            'data_stolen':    os.path.join(network_dir, 'loot', 'data_stolen'),
+            'credentials':    os.path.join(network_dir, 'loot', 'credentials'),
+            'vulnerabilities': os.path.join(network_dir, 'output', 'vulnerabilities'),
+            'scan_results':   os.path.join(network_dir, 'output', 'scan_results'),
+        }
+
+        files = []
+        for category, cat_dir in categories.items():
+            if not os.path.isdir(cat_dir):
+                continue
+            for root, _, filenames in os.walk(cat_dir):
+                for fname in sorted(filenames):
+                    fp = os.path.join(root, fname)
+                    try:
+                        stat = os.stat(fp)
+                        # Build a virtual path reachable via /api/files/download
+                        rel = os.path.relpath(fp, os.path.join(networks_dir))
+                        # Map back to the virtual file-browser namespace
+                        virtual_map = {
+                            'data_stolen':    '/data_stolen',
+                            'credentials':    '/crackedpwd',
+                            'vulnerabilities': '/vulnerabilities',
+                            'scan_results':   '/scan_results',
+                        }
+                        vroot = virtual_map[category]
+                        inner = os.path.relpath(fp, cat_dir).replace('\\', '/')
+                        virtual_path = f"{vroot}/{slug}/{inner}"
+
+                        files.append({
+                            'filename': fname,
+                            'category': category,
+                            'size': _format_bytes_simple(stat.st_size),
+                            'modified': _format_timestamp_simple(stat.st_mtime),
+                            'virtual_path': virtual_path,
+                        })
+                    except OSError:
+                        pass
+
+        return jsonify({
+            'success': True,
+            'slug': slug,
+            'ssid': ssid,
+            'files': files,
+            'total': len(files),
+        })
+    except Exception as exc:
+        logger.error(f"Error listing files for network '{slug}': {exc}")
+        return jsonify({'success': False, 'error': str(exc)}), 500
+
+
+def _format_bytes_simple(size):
+    for unit in ('B', 'KB', 'MB', 'GB'):
+        if size < 1024:
+            return f"{size:.1f} {unit}" if unit != 'B' else f"{size} B"
+        size /= 1024
+    return f"{size:.1f} TB"
+
+
+def _format_timestamp_simple(ts):
+    import datetime as _dt
+    try:
+        return _dt.datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M')
+    except Exception:
+        return ''
 
 
 @app.route('/api/files/list')
