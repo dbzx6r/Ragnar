@@ -34,6 +34,7 @@ This fork ([dbzx6r/Ragnar](https://github.com/dbzx6r/Ragnar)) adds the following
 | **MQTT Subscriber** | Connects to open MQTT brokers (port 1883) and passively collects IoT messages — smart home states, sensor readings, device commands. |
 | **SNMP Scanner** | Tries public/private community strings on port 161; extracts device names, interfaces, and ARP tables revealing other devices on the LAN. |
 | **Aggressive Mode** | Performance preset: 60s scan interval, shorter retry delays, immediate network entry on discovery. Toggle in Settings. |
+| **Open Wi-Fi Connect** | When away from known networks, automatically scans for and connects to the strongest available open (unprotected) Wi-Fi network, then attempts captive portal bypass (click-through and form auto-submit). Toggle `Connect to Open Networks` in Settings → Wi-Fi. |
 
 ---
 
