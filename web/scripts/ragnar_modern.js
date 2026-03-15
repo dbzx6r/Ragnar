@@ -1404,7 +1404,7 @@ function displayAllNetworks(data) {
 
         html += `
             <button type="button"
-                    onclick="openNetworkFilePanel(${JSON.stringify(net.slug)}, ${JSON.stringify(net.ssid || net.slug)})"
+                    onclick="openNetworkFilePanel(${JSON.stringify(net.slug).replace(/"/g, '&quot;')}, ${JSON.stringify(net.ssid || net.slug).replace(/"/g, '&quot;')})"
                     class="text-left bg-gray-800 hover:bg-gray-700 rounded-xl p-5 transition-colors border border-gray-700 hover:border-Ragnar-500 focus:outline-none focus:ring-2 focus:ring-Ragnar-500">
                 <div class="flex items-start justify-between mb-3">
                     <div class="flex items-center gap-2 min-w-0">
