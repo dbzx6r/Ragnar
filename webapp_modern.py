@@ -4558,7 +4558,7 @@ def download_vuln_intel_pdf():
                 def header(self):
                     self.set_font('Helvetica', 'B', 10)
                     self.set_text_color(150, 200, 255)
-                    self.cell(0, 8, 'RAGNAR — Service Intelligence Report', align='L')
+                    self.cell(0, 8, 'RAGNAR - Service Intelligence Report', align='L')
                     self.set_text_color(120, 120, 120)
                     self.cell(0, 8, datetime.now().strftime('%Y-%m-%d %H:%M'), align='R', new_x='LMARGIN', new_y='NEXT')
                     self.set_draw_color(60, 80, 120)
@@ -4629,7 +4629,7 @@ def download_vuln_intel_pdf():
                     pdf.set_text_color(180, 255, 180)
                     svc_label = f"  {svc['port']}  {svc['service']}"
                     if svc['version']:
-                        svc_label += f"  —  {svc['version'][:80]}"
+                        svc_label += f"  -  {svc['version'][:80]}"
                     pdf.cell(0, 6, _safe_txt(svc_label, 200), new_x='LMARGIN', new_y='NEXT')
 
                     for script in svc['scripts']:
