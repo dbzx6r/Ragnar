@@ -4098,7 +4098,7 @@ def get_vulnerability_intel():
     """Get interesting intelligence from scan files (not vulnerabilities - those are in threat intel)"""
     with _network_context_from_request():
         try:
-            vuln_dir = os.path.join('data', 'output', 'vulnerabilities')
+            vuln_dir = getattr(shared_data, 'vulnerabilities_dir', os.path.join('data', 'output', 'vulnerabilities'))
 
             if not os.path.exists(vuln_dir):
                 return jsonify({
@@ -8992,55 +8992,6 @@ def get_vulnerabilities_grouped():
             
     except Exception as e:
         logger.error(f"Error getting grouped vulnerabilities: {e}")
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/credentials')
-def get_credentials_api():
-    """Get credential data with network intelligence if available"""
-    try:
-        # Check if network intelligence is enabled
-        if (hasattr(shared_data, 'network_intelligence') and 
-            shared_data.network_intelligence and 
-            shared_data.config.get('network_intelligence_enabled', True)):
-            
-            # Get network-aware findings for dashboard
-            dashboard_findings = shared_data.network_intelligence.get_active_findings_for_dashboard()
-            
-            # Convert to legacy format for compatibility
-            cred_data = []
-            for cred_id, cred_info in dashboard_findings['credentials'].items():
-                cred_data.append({
-                    'id': cred_id,
-                    'host': cred_info['host'],
-                    'service': cred_info['service'],
-                    'username': cred_info['username'],
-                    'password': cred_info['password'],
-                    'protocol': cred_info['protocol'],
-                    'discovered': cred_info['discovered'],
-                    'network_id': cred_info['network_id'],
-                    'status': cred_info['status']
-                })
-            
-            return jsonify({
-                'credentials': cred_data,
-                'network_context': {
-                    'current_network': dashboard_findings['network_id'],
-                    'count': dashboard_findings['counts']['credentials']
-                }
-            })
-        else:
-            # Fallback to legacy credential data - just return empty structure
-            return jsonify({
-                'credentials': [],
-                'network_context': {
-                    'current_network': 'legacy',
-                    'count': 0
-                }
-            })
-            
-    except Exception as e:
-        logger.error(f"Error getting credentials: {e}")
         return jsonify({'error': str(e)}), 500
 
 
