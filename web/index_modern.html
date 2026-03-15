@@ -295,7 +295,7 @@
                         </span>
                     </button>
                     <button onclick="showTab('epaper')" class="nav-btn px-4 py-2 rounded-lg hover:bg-slate-700 transition-colors requires-display" data-tab="epaper">
-                        E-Paper
+                        Display
                     </button>
                     <button onclick="showTab('files')" class="nav-btn px-4 py-2 rounded-lg hover:bg-slate-700 transition-colors" data-tab="files">
                         Files
@@ -340,7 +340,7 @@
                 <button onclick="showTab('threat-intel')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Threat Intel</button>
                 <button onclick="showTab('traffic')" data-tab="traffic" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700 server-mode-feature hidden">Traffic Analysis</button>
                 <button onclick="showTab('adv-vuln')" data-tab="adv-vuln" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700 server-mode-feature hidden">Adv Scan</button>
-                <button onclick="showTab('epaper')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700 requires-display">E-Paper</button>
+                <button onclick="showTab('epaper')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700 requires-display">Display</button>
                 <button onclick="showTab('files')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Files</button>
                 <button onclick="showTab('system')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">System</button>
                 <button onclick="showTab('connect')" class="block w-full text-left px-3 py-2 rounded-lg hover:bg-slate-700">Connect</button>
@@ -2528,11 +2528,11 @@
             </div>
         </div>
         
-        <!-- E-Paper Display Tab -->
+        <!-- Display Tab -->
         <div id="epaper-tab" class="tab-content hidden requires-display">
             <div class="glass rounded-xl p-6">
                 <div class="flex items-center justify-between mb-6">
-                    <h2 class="text-2xl font-bold">E-Paper Display</h2>
+                    <h2 class="text-2xl font-bold">Display</h2>
                     <button onclick="refreshEpaperDisplay()" class="refresh-btn bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-4 py-2 rounded-lg transition-colors">
                         <svg class="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
@@ -2580,10 +2580,10 @@
                     </div>
                 </div>
                 
-                <!-- E-Paper Display Image -->
+                <!-- Display Image -->
                 <div class="glass rounded-xl p-6">
                     <div class="flex items-center justify-between mb-4">
-                        <h3 class="text-lg font-semibold text-Ragnar-400">Live E-Paper Display</h3>
+                        <h3 class="text-lg font-semibold text-Ragnar-400">Live Display</h3>
                         <div class="flex items-center space-x-2">
                             <span class="text-sm text-gray-400">Size:</span>
                             <button onclick="toggleEpaperSize()" class="bg-Ragnar-600 hover:bg-Ragnar-700 text-white px-3 py-1 rounded text-sm transition-colors">
@@ -2595,7 +2595,7 @@
                         <div id="epaper-display-container" class="relative inline-block bg-white rounded-lg p-4 shadow-2xl">
                             <img id="epaper-display-image" 
                                  src="" 
-                                 alt="E-Paper Display" 
+                                 alt="Display" 
                                  class="max-w-full h-auto rounded border-2 border-gray-300"
                                  style="max-height: 800px; min-height: 400px; image-rendering: crisp-edges; cursor: pointer;"
                                  onclick="toggleEpaperSize()">
@@ -2611,7 +2611,7 @@
                         </div>
                     </div>
                     <p class="text-center text-gray-400 text-sm mt-4">
-                        This shows the exact same content as your Ragnar device's physical e-paper display<br>
+                        This shows the exact same content as your Ragnar device's physical display<br>
                         <span class="text-Ragnar-400">💡 Click the display image or use the Resize button to cycle through different sizes</span>
                     </p>
                 </div>
@@ -3718,7 +3718,7 @@
                                 Toggle to show/hide Pwnagotchi Bridge configuration options below
                             </div>
                             <div id="pwn-headless-warning" class="text-xs text-amber-300 mt-2 hidden">
-                                Disabled for headless installations. Pwnagotchi requires an e-paper display.
+                                Disabled for headless installations. Pwnagotchi requires a display.
                             </div>
                         </div>
                         
@@ -3907,7 +3907,7 @@
                                 <div class="flex items-center justify-between">
                                     <div>
                                         <label class="text-xs text-gray-400">Display Enabled</label>
-                                        <p class="text-xs text-gray-500">Activate the physical e-ink screen</p>
+                                        <p class="text-xs text-gray-500">Activate the physical display screen</p>
                                     </div>
                                     <label class="relative inline-flex items-center cursor-pointer">
                                         <input type="checkbox" id="pwn-cfg-display-enabled" class="sr-only peer">

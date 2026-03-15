@@ -223,7 +223,7 @@ const configMetadata = {
     },
     displaying_csv: {
         label: "Display Scan CSV",
-        description: "Push the most recent scan CSV results to the e-paper display after each network sweep."
+        description: "Push the most recent scan CSV results to the display after each network sweep."
     },
     log_debug: {
         label: "Log Debug Messages",
@@ -255,7 +255,7 @@ const configMetadata = {
     },
     screen_delay: {
         label: "Screen Update Delay (s)",
-        description: "Seconds between e-paper display refreshes."
+        description: "Seconds between display refreshes."
     },
     comment_delaymin: {
         label: "Comment Delay Min (s)",
@@ -271,11 +271,11 @@ const configMetadata = {
     },
     image_display_delaymin: {
         label: "Image Display Min (s)",
-        description: "Minimum time an image remains on the e-paper display."
+        description: "Minimum time an image remains on the display."
     },
     image_display_delaymax: {
         label: "Image Display Max (s)",
-        description: "Maximum time an image remains on the e-paper display."
+        description: "Maximum time an image remains on the display."
     },
     scan_interval: {
         label: "Scan Interval (s)",
@@ -295,19 +295,19 @@ const configMetadata = {
     },
     ref_width: {
         label: "Reference Width",
-        description: "Reference pixel width used to scale drawings for the e-paper display."
+        description: "Reference pixel width used to scale drawings for the display."
     },
     ref_height: {
         label: "Reference Height",
-        description: "Reference pixel height used to scale drawings for the e-paper display."
+        description: "Reference pixel height used to scale drawings for the display."
     },
     screen_reversed: {
-        label: "Flip E-Paper Output",
-        description: "Rotate the Waveshare e-paper output 180° so the content appears upright when the panel is mounted upside down."
+        label: "Flip Display Output",
+        description: "Rotate the display output 180° so the content appears upright when the panel is mounted upside down."
     },
     epd_type: {
         label: "EPD Type",
-        description: "Model identifier for the connected Waveshare e-paper display."
+        description: "Model identifier for the connected display."
     },
     gc9a01_mascot_color: {
         label: "GC9A01 Mascot Tint Color",
@@ -4794,8 +4794,8 @@ function updatePwnToggleAvailability(isHeadless) {
 // ============================================================================
 
 /**
- * Detect and handle headless mode (server installations without e-paper display)
- * Headless mode hides E-Paper related UI elements
+ * Detect and handle headless mode (server installations without a display)
+ * Headless mode hides display-related UI elements
  */
 async function handleHeadlessMode() {
     try {
@@ -4806,10 +4806,10 @@ async function handleHeadlessMode() {
         headlessMode = isHeadless;
         
         if (isHeadless) {
-            console.log('[Headless] Headless mode detected - hiding E-Paper UI elements');
+            console.log('[Headless] Headless mode detected - hiding Display UI elements');
             applyHeadlessVisibility(true);
         } else {
-            console.log('[Headless] Display mode detected - E-Paper UI elements visible');
+            console.log('[Headless] Display mode detected - Display UI elements visible');
             applyHeadlessVisibility(false);
         }
         
@@ -4829,25 +4829,25 @@ async function handleHeadlessMode() {
  * @param {boolean} isHeadless - Whether the system is in headless mode
  */
 function applyHeadlessVisibility(isHeadless) {
-    // Find all elements that require a display (E-Paper)
+    // Find all elements that require a display
     const displayElements = document.querySelectorAll('.requires-display');
     
     if (isHeadless) {
-        // Hide all E-Paper related elements
+        // Hide all display-related elements
         displayElements.forEach(el => {
             el.style.display = 'none';
             el.setAttribute('data-hidden-by-headless', 'true');
         });
         
-        console.log(`[Headless] Hidden ${displayElements.length} E-Paper UI elements`);
+        console.log(`[Headless] Hidden ${displayElements.length} Display UI elements`);
         
-        // If user is currently on E-Paper tab, redirect to dashboard
+        // If user is currently on Display tab, redirect to dashboard
         if (currentTab === 'epaper') {
-            console.log('[Headless] Redirecting from E-Paper tab to dashboard');
+            console.log('[Headless] Redirecting from Display tab to dashboard');
             showTab('dashboard');
         }
     } else {
-        // Show all E-Paper related elements
+        // Show all display-related elements
         displayElements.forEach(el => {
             if (el.getAttribute('data-hidden-by-headless') === 'true') {
                 el.style.display = '';
@@ -4855,7 +4855,7 @@ function applyHeadlessVisibility(isHeadless) {
             }
         });
         
-        console.log(`[Headless] Restored ${displayElements.length} E-Paper UI elements`);
+        console.log(`[Headless] Restored ${displayElements.length} Display UI elements`);
     }
 }
 
@@ -10215,8 +10215,8 @@ async function loadEpaperDisplay() {
         }
         
     } catch (error) {
-        console.error('Error loading e-paper display:', error);
-        addConsoleMessage('Failed to load e-paper display', 'error');
+        console.error('Error loading display:', error);
+        addConsoleMessage('Failed to load display', 'error');
         
         // Update connection status
         const connectionElement = document.getElementById('epaper-connection');
@@ -10226,7 +10226,7 @@ async function loadEpaperDisplay() {
 }
 
 function refreshEpaperDisplay() {
-    addConsoleMessage('Refreshing e-paper display...', 'info');
+    addConsoleMessage('Refreshing display...', 'info');
     loadEpaperDisplay();
 }
 
@@ -10240,19 +10240,19 @@ function toggleEpaperSize() {
         imgElement.style.maxHeight = '1200px';
         imgElement.style.minHeight = '600px';
         epaperSizeMode = 'xlarge';
-        addConsoleMessage('E-paper display size: Extra Large', 'info');
+        addConsoleMessage('Display size: Extra Large', 'info');
     } else if (epaperSizeMode === 'xlarge') {
         // Switch to medium
         imgElement.style.maxHeight = '600px';
         imgElement.style.minHeight = '300px';
         epaperSizeMode = 'medium';
-        addConsoleMessage('E-paper display size: Medium', 'info');
+        addConsoleMessage('Display size: Medium', 'info');
     } else {
         // Switch back to large
         imgElement.style.maxHeight = '800px';
         imgElement.style.minHeight = '400px';
         epaperSizeMode = 'large';
-        addConsoleMessage('E-paper display size: Large', 'info');
+        addConsoleMessage('Display size: Large', 'info');
     }
 }
 
