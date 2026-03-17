@@ -142,7 +142,18 @@ class RagnarMenu:
 
     def cleanup(self):
         if hasattr(self, 'gfx'):
-            self.gfx.cleanup()
+            try:
+                # Clear screen to black before releasing hardware so the
+                # display doesn't freeze on the last drawn frame while
+                # pineapplepager is restarting.
+                self.gfx.clear(Pager.BLACK)
+                self.gfx.flip()
+            except Exception:
+                pass
+            try:
+                self.gfx.cleanup()
+            except Exception:
+                pass
 
     def _adjust_brightness(self, direction):
         """Adjust screen brightness. direction: +1 or -1."""
@@ -442,6 +453,9 @@ def main():
             if result is None:
                 menu.cleanup()
                 menu = None
+                # Brief delay lets the hardware fully settle before
+                # pineapplepager service restarts and re-claims the display.
+                time.sleep(0.5)
                 break
 
             menu._show_message("Starting Ragnar...", TITLE_COLOR, result['interface'] + " " + result['ip'], DIM_COLOR)
@@ -494,3 +508,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # Explicit sys.exit prevents Python's GC from triggering any further
+    # calls into libpagerctl.so after we've already called pager_cleanup().
+    sys.exit(0)
