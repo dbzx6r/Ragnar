@@ -317,6 +317,10 @@ const configMetadata = {
         label: "Display Brightness",
         description: "Brightness level for non-e-ink displays (SSD1306, GC9A01, MAX7219). Range 0–15. Default: 8."
     },
+    spi_clock_mhz: {
+        label: "SPI Clock Speed (MHz)",
+        description: "SPI bus clock speed for the e-paper display in MHz. Lower values improve signal integrity when a PiSugar battery is stacked on the GPIO header. Default: 2 MHz. Try 1 MHz if you still see corrupted pixels."
+    },
     max7219_spi_port: {
         label: "MAX7219 SPI Port",
         description: "SPI bus port for MAX7219 LED matrix (default: 0)"
@@ -9913,15 +9917,16 @@ function displayConfigForm(config) {
         'General': ['manual_mode', 'debug_mode', 'scan_vuln_running', 'scan_vuln_no_ports', 'enable_attacks', 'blacklistcheck'],
         'Network': ['network_max_failed_pings'],
         'Timing': ['startup_delay', 'web_delay', 'screen_delay', 'scan_interval'],
-        'Display': ['epd_type', 'screen_reversed', 'gc9a01_mascot_color', 'ssd1306_i2c_address', 'max7219_spi_port', 'max7219_spi_device', 'max7219_block_orientation', 'display_brightness']
+        'Display': ['epd_type', 'screen_reversed', 'spi_clock_mhz', 'gc9a01_mascot_color', 'ssd1306_i2c_address', 'max7219_spi_port', 'max7219_spi_device', 'max7219_block_orientation', 'display_brightness']
     };
     
     const knownBooleans = ['manual_mode', 'debug_mode', 'scan_vuln_running', 'scan_vuln_no_ports', 'enable_attacks', 'blacklistcheck', 'screen_reversed'];
-    const alwaysShowKeys = new Set(['network_max_failed_pings', 'gc9a01_mascot_color', 'ssd1306_i2c_address', 'max7219_spi_port', 'max7219_spi_device', 'max7219_block_orientation', 'display_brightness']);
+    const alwaysShowKeys = new Set(['network_max_failed_pings', 'gc9a01_mascot_color', 'ssd1306_i2c_address', 'spi_clock_mhz', 'max7219_spi_port', 'max7219_spi_device', 'max7219_block_orientation', 'display_brightness']);
     const fallbackValues = {
         network_max_failed_pings: 15,
         gc9a01_mascot_color: '#96C8FF',
         ssd1306_i2c_address: '0x3C',
+        spi_clock_mhz: 2,
         max7219_spi_port: 0,
         max7219_spi_device: 0,
         max7219_block_orientation: -90,
@@ -10078,6 +10083,20 @@ function displayConfigForm(config) {
                             <p class="text-xs text-gray-500">Brightness 0–15. Applies to MAX7219, SSD1306, GC9A01. Default: 8.</p>
                         </div>
                     `;
+                } else if (key === 'spi_clock_mhz') {
+                    const clockMhz = (value !== undefined && value !== null) ? value : 2;
+                    html += `
+                        <div class="space-y-2" id="cfg-spi-clock-row">
+                            <label class="flex items-center gap-2 text-sm text-gray-400">
+                                ${label}
+                                <span class="info-icon" tabindex="0" role="button" aria-label="${description}" data-tooltip="${description}">ⓘ</span>
+                            </label>
+                            <input type="number" name="${key}" id="cfg-spi-clock-input"
+                                   class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-sm font-mono"
+                                   value="${clockMhz}" min="0.5" max="4" step="0.5">
+                            <p class="text-xs text-gray-500">2 MHz recommended with PiSugar. Drop to 1 MHz if pixels are still corrupted. Takes effect after service restart.</p>
+                        </div>
+                    `;
                 } else {
                     html += `
                         <div class="space-y-2">
@@ -10118,17 +10137,20 @@ function displayConfigForm(config) {
     const max7219SpiDevRow = document.getElementById('cfg-max7219-spi-device-row');
     const max7219BlockRow = document.getElementById('cfg-max7219-block-row');
     const brightnessRow = document.getElementById('cfg-display-brightness-row');
+    const spiClockRow = document.getElementById('cfg-spi-clock-row');
     function syncDisplayRows() {
         const val = epdSelect ? epdSelect.value : '';
         const isMax7219 = val === 'max7219_8panel' || val === 'max7219_4panel';
         const isSsd1306 = val === '0in96_oled';
         const isGc9a01 = val === '1in28_tft';
+        const isEpaper = !isMax7219 && !isSsd1306 && !isGc9a01;
         if (colorRow) colorRow.style.display = isGc9a01 ? '' : 'none';
         if (addrRow) addrRow.style.display = isSsd1306 ? '' : 'none';
         if (max7219SpiPortRow) max7219SpiPortRow.style.display = isMax7219 ? '' : 'none';
         if (max7219SpiDevRow) max7219SpiDevRow.style.display = isMax7219 ? '' : 'none';
         if (max7219BlockRow) max7219BlockRow.style.display = isMax7219 ? '' : 'none';
         if (brightnessRow) brightnessRow.style.display = (isMax7219 || isSsd1306 || isGc9a01) ? '' : 'none';
+        if (spiClockRow) spiClockRow.style.display = isEpaper ? '' : 'none';
     }
     if (epdSelect) {
         epdSelect.addEventListener('change', syncDisplayRows);
