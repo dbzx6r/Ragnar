@@ -795,6 +795,16 @@ print('SUCCESS: Set shared_config.json epd_type to $EPD_VERSION')
         # Ensure spidev is installed for TFT SPI communication
         pip3 install spidev --break-system-packages >/dev/null 2>&1
         log "INFO" "SPI dependencies installed for TFT display"
+    elif [ "$EPD_VERSION" = "st7789" ]; then
+        # TFT driver ships with Ragnar in resources/waveshare_epd/, verify it exists
+        if [ -f "$ragnar_PATH/resources/waveshare_epd/st7789_driver.py" ]; then
+            log "SUCCESS" "ST7789 TFT driver verified (resources/waveshare_epd/st7789_driver.py)"
+        else
+            log "ERROR" "ST7789 driver not found at $ragnar_PATH/resources/waveshare_epd/st7789_driver.py"
+        fi
+        # Ensure spidev is installed for TFT SPI communication
+        pip3 install spidev --break-system-packages >/dev/null 2>&1
+        log "INFO" "SPI dependencies installed for ST7789 display"
     elif [ "$EPD_VERSION" = "ssd1306" ]; then
         if [ -f "$ragnar_PATH/resources/waveshare_epd/ssd1306.py" ]; then
             log "SUCCESS" "SSD1306 OLED driver verified (resources/waveshare_epd/ssd1306.py)"
@@ -1535,18 +1545,19 @@ main() {
             log "SUCCESS" "SPI dependencies installed for TFT display"
 
             echo -e "\n${BLUE}Select your TFT/OLED display:${NC}"
-            echo "1. GC9A01      (1.28\" Round 240x240)"
-            echo "2. SSD1306     (0.96\" OLED 128x64)"
-            echo "3. LCD1602     (16x2 I2C Character LCD)"
-            echo "4. No display  (headless install)"
+            echo "1. ST7789      (1.69\" 240x280 SPI Colour TFT)\n            echo \"2. GC9A01      (1.28\" Round 240x240)"
+            echo "3. SSD1306     (0.96\" OLED 128x64)"
+            echo "4. LCD1602     (16x2 I2C Character LCD)"
+            echo "5. No display  (headless install)"
 
             while true; do
-                read -p "Enter your choice (1-4): " tft_choice
+                read -p "Enter your choice (1-5): " tft_choice
                 case $tft_choice in
-                    1) EPD_VERSION="gc9a01"; break;;
-                    2) EPD_VERSION="ssd1306"; break;;
-                    3) EPD_VERSION="lcd1602"; break;;
-                    4)
+                    1) EPD_VERSION="st7789"; break;;
+                    2) EPD_VERSION="gc9a01"; break;;
+                    3) EPD_VERSION="ssd1306"; break;;
+                    4) EPD_VERSION="lcd1602"; break;;
+                    5)
                         select_headless_variant
                         EPD_VERSION=""
                         break
@@ -1692,8 +1703,9 @@ except:
                     7) EPD_VERSION="epd2in9_V2"; break;;
                     8) EPD_VERSION="epd3in7"; break;;
                     9) EPD_VERSION="gc9a01"; break;;
-                    10) EPD_VERSION="ssd1306"; break;;
-                    11) EPD_VERSION="lcd1602"; break;;
+                    10) EPD_VERSION="st7789"; break;;
+                    11) EPD_VERSION="ssd1306"; break;;
+                    12) EPD_VERSION="lcd1602"; break;;
                     12)
                         select_headless_variant
                         EPD_VERSION=""

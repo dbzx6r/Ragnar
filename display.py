@@ -1168,6 +1168,14 @@ class Display:
     # GC9A01 round-display renderer
     # ------------------------------------------------------------------
 
+    def _run_st7789(self):
+        """Render loop for the ST7789 1.69″ 240x280 SPI colour TFT.
+
+        Delegates to _run_gc9a01 which handles rectangular colour TFT
+        displays; the ST7789 at 240x280 uses the same SPI/RGB pipeline.
+        """
+        self._run_gc9a01()
+
     def _run_gc9a01(self):
         """Dedicated render loop for the GC9A01 1.28″ round colour TFT.
 
@@ -1902,6 +1910,10 @@ class Display:
 
     def run(self):
         """Main loop for updating the EPD display with shared data."""
+        if self.config.get("epd_type") == "st7789":
+            self._run_st7789()
+            return
+
         if self.config.get("epd_type") == "gc9a01":
             self._run_gc9a01()
             return
