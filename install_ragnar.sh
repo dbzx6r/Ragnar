@@ -399,6 +399,7 @@ install_dependencies() {
         "nikto"
         "sqlmap"
         "whatweb"
+        "unzip"
     )
 
     if [ "$IS_ARM" = true ]; then
@@ -600,6 +601,79 @@ configure_interfaces() {
     fi
 }
 
+# Clone a GitHub repository with a wget/curl fallback for systems where git
+# crashes (e.g. Debian Trixie git binary uses ARMv8.1 LSE instructions that
+# are not supported on Cortex-A53 used in Raspberry Pi Zero 2W).
+#
+# Usage: git_clone_with_fallback <repo_url> [dest_dir] [zip_branch]
+#   repo_url   : full HTTPS URL (with or without .git suffix)
+#   dest_dir   : (optional) local directory name; defaults to repo name
+#   zip_branch : (optional) branch to download as ZIP; defaults to "main"
+git_clone_with_fallback() {
+    local repo_url="$1"
+    local dest_dir="${2:-}"
+    local zip_branch="${3:-main}"
+
+    # Derive dest_dir from repo name if not supplied
+    if [ -z "$dest_dir" ]; then
+        dest_dir=$(basename "$repo_url" .git)
+    fi
+
+    # Try git clone first (fast path)
+    if git clone "$repo_url" "$dest_dir" 2>/dev/null; then
+        return 0
+    fi
+
+    log "WARNING" "git clone failed (possible CPU/git incompatibility on this system), trying wget/curl fallback..."
+
+    local base_url
+    base_url=$(echo "$repo_url" | sed 's/\.git$//')
+    local zip_url="${base_url}/archive/refs/heads/${zip_branch}.zip"
+
+    local tmp_zip
+    tmp_zip=$(mktemp /tmp/ragnar_clone_XXXXXX.zip)
+
+    local download_ok=false
+    if command -v wget >/dev/null 2>&1; then
+        wget -q -O "$tmp_zip" "$zip_url" && download_ok=true
+    fi
+    if [ "$download_ok" = false ] && command -v curl >/dev/null 2>&1; then
+        curl -sL -o "$tmp_zip" "$zip_url" && download_ok=true
+    fi
+
+    if [ "$download_ok" = false ]; then
+        log "ERROR" "Failed to download $zip_url via wget or curl"
+        rm -f "$tmp_zip"
+        return 1
+    fi
+
+    local tmp_dir
+    tmp_dir=$(mktemp -d /tmp/ragnar_extract_XXXXXX)
+
+    if ! unzip -q "$tmp_zip" -d "$tmp_dir"; then
+        log "ERROR" "Failed to extract $tmp_zip"
+        rm -f "$tmp_zip"
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+
+    # The archive always extracts to a single top-level directory (repo-branch/)
+    local extracted_dir
+    extracted_dir=$(find "$tmp_dir" -maxdepth 1 -mindepth 1 -type d | head -1)
+    if [ -z "$extracted_dir" ]; then
+        log "ERROR" "No directory found in extracted archive"
+        rm -f "$tmp_zip"
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+
+    mv "$extracted_dir" "$dest_dir"
+    rm -f "$tmp_zip"
+    rm -rf "$tmp_dir"
+    log "SUCCESS" "Repository downloaded via fallback (zip): $dest_dir"
+    return 0
+}
+
 # Setup ragnar
 setup_ragnar() {
     log "INFO" "Setting up ragnar..."
@@ -635,11 +709,15 @@ setup_ragnar() {
         fi
         # Proceed with clone
         log "INFO" "Cloning ragnar repository"
-        git clone https://github.com/PierreGode/Ragnar.git
+        git_clone_with_fallback https://github.com/PierreGode/Ragnar.git Ragnar main
         check_success "Cloned ragnar repository"
     fi
 
-    cd Ragnar
+    cd Ragnar || {
+        log "ERROR" "Ragnar directory does not exist — the repository was not cloned successfully."
+        log "ERROR" "Please check your internet connection and try again."
+        return 1
+    }
 
     # Update the default display type in shared.py with the detected/selected version
     log "INFO" "Updating display default configuration in shared.py..."
@@ -819,8 +897,14 @@ print('SUCCESS: Set shared_config.json epd_type to $EPD_VERSION')
         log "INFO" "I2C interface enabled for LCD1602"
     else
         log "INFO" "Verifying Waveshare e-Paper library installation for $EPD_VERSION..."
-        cd /home/$ragnar_USER/e-Paper/RaspberryPi_JetsonNano/python
-        pip3 install . --break-system-packages
+        local epaper_python_dir="/home/$ragnar_USER/e-Paper/RaspberryPi_JetsonNano/python"
+        if [ -d "$epaper_python_dir" ]; then
+            cd "$epaper_python_dir"
+            pip3 install . --break-system-packages
+        else
+            log "WARNING" "Waveshare e-Paper library directory not found ($epaper_python_dir) — skipping re-install step"
+            log "WARNING" "The waveshare_epd module may not be available"
+        fi
         
         python3 -c "from waveshare_epd import ${EPD_VERSION}; print('EPD module OK')" \
             && log "SUCCESS" "$EPD_VERSION driver verified successfully" \
@@ -1571,16 +1655,51 @@ main() {
         
         cd /home/$ragnar_USER 2>/dev/null || mkdir -p /home/$ragnar_USER
         if [ ! -d "e-Paper" ]; then
-            git clone --depth=1 --filter=blob:none --sparse https://github.com/waveshareteam/e-Paper.git
-            cd e-Paper
-            git sparse-checkout set RaspberryPi_JetsonNano
-            cd RaspberryPi_JetsonNano/python
-            pip3 install . --break-system-packages >/dev/null 2>&1
-            log "SUCCESS" "Installed Waveshare e-Paper library"
+            # Use fallback-aware clone: git sparse clone first, wget ZIP if git fails.
+            # Sparse clone is preferred (small download), but falls back to full ZIP
+            # on systems where git crashes with SIGILL (e.g. Debian Trixie on RPi Zero 2W).
+            if git clone --depth=1 --filter=blob:none --sparse https://github.com/waveshareteam/e-Paper.git 2>/dev/null; then
+                cd e-Paper
+                git sparse-checkout set RaspberryPi_JetsonNano 2>/dev/null || true
+                cd /home/$ragnar_USER
+            else
+                log "WARNING" "git sparse-clone failed, downloading e-Paper library via wget/curl fallback..."
+                local epaper_zip_url="https://github.com/waveshareteam/e-Paper/archive/refs/heads/master.zip"
+                local tmp_zip
+                tmp_zip=$(mktemp /tmp/epaper_XXXXXX.zip)
+                local tmp_dir
+                tmp_dir=$(mktemp -d /tmp/epaper_extract_XXXXXX)
+                local dl_ok=false
+                if command -v wget >/dev/null 2>&1; then
+                    wget -q -O "$tmp_zip" "$epaper_zip_url" && dl_ok=true
+                fi
+                if [ "$dl_ok" = false ] && command -v curl >/dev/null 2>&1; then
+                    curl -sL -o "$tmp_zip" "$epaper_zip_url" && dl_ok=true
+                fi
+                if [ "$dl_ok" = true ] && unzip -q "$tmp_zip" -d "$tmp_dir" 2>/dev/null; then
+                    local extracted
+                    extracted=$(find "$tmp_dir" -maxdepth 1 -mindepth 1 -type d | head -1)
+                    [ -n "$extracted" ] && mv "$extracted" /home/$ragnar_USER/e-Paper
+                fi
+                rm -f "$tmp_zip"
+                rm -rf "$tmp_dir"
+            fi
+
+            if [ -d "/home/$ragnar_USER/e-Paper/RaspberryPi_JetsonNano/python" ]; then
+                cd /home/$ragnar_USER/e-Paper/RaspberryPi_JetsonNano/python
+                pip3 install . --break-system-packages >/dev/null 2>&1
+                log "SUCCESS" "Installed Waveshare e-Paper library"
+                cd /home/$ragnar_USER
+            else
+                log "WARNING" "e-Paper library not available — display driver will not be installed now"
+            fi
         else
             log "INFO" "Waveshare e-Paper repository already exists"
-            cd e-Paper/RaspberryPi_JetsonNano/python
-            pip3 install . --break-system-packages >/dev/null 2>&1
+            if [ -d "/home/$ragnar_USER/e-Paper/RaspberryPi_JetsonNano/python" ]; then
+                cd /home/$ragnar_USER/e-Paper/RaspberryPi_JetsonNano/python
+                pip3 install . --break-system-packages >/dev/null 2>&1
+                cd /home/$ragnar_USER
+            fi
         fi
 
         echo -e "\n${BLUE}E-Paper Display Auto-Detection${NC}"
